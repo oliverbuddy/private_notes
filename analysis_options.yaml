@@ -1,0 +1,20 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    # 中文注释与文案里出现 TODO/FIXME 字样不该当作待办提醒。
+    todo: ignore
+  exclude:
+    - build/**
+    - android/**
+
+linter:
+  rules:
+    # 规范要求「先写 .tmp 再 rename」这类防御性代码，catch 之后必须有兜底逻辑，
+    # 空 catch 一律由人工审查，这里不给规则。
+    avoid_print: true
+    prefer_single_quotes: true
+    unawaited_futures: false

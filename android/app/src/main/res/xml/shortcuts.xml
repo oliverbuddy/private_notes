@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 长按桌面图标弹出的第一个动作。
+         「记一条」是这个产品存在的唯一理由，所以它必须是最短路径：
+         长按 → 点一下 → 直接进编辑页，中间不经过列表。 -->
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="new_note"
+        android:shortcutLongLabel="@string/shortcut_new_note_long"
+        android:shortcutShortLabel="@string/shortcut_new_note_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.xiaoji.xiaoji.MainActivity"
+            android:targetPackage="com.xiaoji.xiaoji">
+            <extra
+                android:name="xiaoji.action"
+                android:value="new_note" />
+        </intent>
+    </shortcut>
+</shortcuts>

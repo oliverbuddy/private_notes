@@ -1,0 +1,33 @@
+name: xiaoji
+description: 本地优先的 Markdown 小记应用
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  archive: ^3.6.1
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  follow_the_leader: 0.5.3
+  super_editor: ^0.3.0-dev.39
+  super_editor_markdown: ^0.2.2
+
+dependency_overrides:
+  follow_the_leader: 0.5.3
+  super_editor: ^0.3.0-dev.52
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

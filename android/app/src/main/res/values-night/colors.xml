@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式下与 App 深色主题的 page 一致（#161514）。 -->
+    <color name="launch_background">#161514</color>
+</resources>

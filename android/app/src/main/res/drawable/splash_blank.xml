@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 纯透明图形：给 Android 12 启动画面当「没有图标」用。
+     系统默认会把桌面图标放大后居中显示，紧接着进入 App，观感就是
+     「闪一下放大的图标」。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+</shape>

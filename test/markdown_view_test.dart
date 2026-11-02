@@ -1,0 +1,117 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:xiaoji/editor/markdown_view.dart';
+import 'package:xiaoji/theme/app_theme.dart';
+
+/// 阅读态的契约只有一条：**屏幕上看不到 markdown 记号**。
+/// 编辑态是另一套（记号保留但淡显），两边规则要分开验。
+String render(String markdown) {
+  final spans = markdownSpans(
+    markdown,
+    const TextStyle(fontSize: 17),
+    AppColors.light,
+  );
+  return spans.map(_spanText).join();
+}
+
+/// 标签现在是 WidgetSpan 胶囊，`toPlainText()` 只会返回占位符，
+/// 这里把胶囊里的 Text 内容也展开，契约仍然是「屏幕上看不到记号」。
+String _spanText(InlineSpan span) {
+  if (span is TextSpan) {
+    final String text = span.text ?? '';
+    final String children = span.children?.map(_spanText).join() ?? '';
+    return '$text$children';
+  }
+  if (span is WidgetSpan) {
+    return _widgetText(span.child);
+  }
+  return '';
+}
+
+String _widgetText(Widget widget) {
+  if (widget is Text) {
+    return widget.data ?? '';
+  }
+  if (widget is Container) {
+    final Widget? child = widget.child;
+    return child == null ? '' : _widgetText(child);
+  }
+  return '';
+}
+
+void main() {
+  group('阅读态剔除 markdown 记号', () {
+    test('标题去掉 # 前缀，保留文字', () {
+      final text = render('## 关于说人话');
+      expect(text, contains('关于说人话'));
+      expect(text, isNot(contains('##')));
+      expect(text, isNot(contains('#')));
+    });
+
+    test('加粗 / 斜体 / 删除线 / 行内代码的记号都消失', () {
+      final text = render('这是**加粗**、*斜体*、~~删除~~、`代码`');
+      expect(text, contains('加粗'));
+      expect(text, contains('斜体'));
+      expect(text, contains('删除'));
+      expect(text, contains('代码'));
+      expect(text.contains('*'), isFalse);
+      expect(text.contains('~'), isFalse);
+      expect(text.contains('`'), isFalse);
+    });
+
+    test('链接只留文字，不显示括号和地址', () {
+      final text = render('看这个[语雀小记](https://yuque.com)很好用');
+      expect(text, contains('语雀小记'));
+      expect(text, isNot(contains('https://')));
+      expect(text, isNot(contains('](')));
+    });
+
+    test('待办渲染成方框，不显示 - [ ]', () {
+      final open = render('- [ ] 写完补一段');
+      expect(open, contains('☐'));
+      expect(open, contains('写完补一段'));
+      expect(open, isNot(contains('[ ]')));
+
+      final done = render('- [x] 删掉副词');
+      expect(done, contains('☑'));
+      expect(done.isNotEmpty, isTrue);
+    });
+
+    test('无序列表换成圆点，有序列表保留序号', () {
+      expect(render('- 第一项'), contains('•'));
+      expect(render('- 第一项'), isNot(contains('- ')));
+
+      final ordered = render('1. 第一步');
+      expect(ordered, contains('1.'));
+      expect(ordered, contains('第一步'));
+    });
+
+    test('引用去掉 > 但保留内容', () {
+      final text = render('> 如果你解释不清');
+      expect(text, contains('如果你解释不清'));
+      expect(text, isNot(contains('>')));
+    });
+
+    test('标签保留 #，因为 # 就是它的样子', () {
+      final text = render('今天在想 #写作 这件事');
+      expect(text, contains('#写作'));
+    });
+
+    test('分隔线不出现三个减号', () {
+      final text = render('上文\n\n---\n\n下文');
+      expect(text.contains('---'), isFalse);
+      expect(text, contains('上文'));
+      expect(text, contains('下文'));
+    });
+
+    test('代码围栏本身不显示，内容保留', () {
+      final text = render('```\nfinal x = 1;\n```');
+      expect(text, contains('final x = 1;'));
+      expect(text.contains('```'), isFalse);
+    });
+
+    test('普通段落原样输出', () {
+      expect(render('就一句话'), '就一句话');
+    });
+  });
+}
