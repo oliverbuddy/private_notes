@@ -12,9 +12,11 @@ on:
 permissions:
   contents: write
 
-# 正式发布需要经过 environment 审批（在仓库 Settings → Environments →
-# release 中配置必需的审核人后，构建会挂起等待你批准）。
-environment: release
+# 关于 environment 审批：GitHub 免费计划的私有仓库不含 protected
+# environments（API 404）。发布准入由「手动触发 / 推 v* 标签」控制——
+# 只有仓库主人能做这两件事。升级 GitHub Pro 后可加回：
+#   environment: release
+# 并在 Settings → Environments → release 配置必需审核人。
 
 jobs:
   build:
