@@ -47,6 +47,12 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
+# 项目工作记忆（私有开发笔记，不属于 App 源码）
+.workbuddy/
+
+# 子目录构建产物（android/build 等）
+android/build/
+
 # 签名密钥与密码——绝不入库（CI 从 GitHub Secrets 注入）
 android/app/upload-keystore.jks
 android/key.properties
