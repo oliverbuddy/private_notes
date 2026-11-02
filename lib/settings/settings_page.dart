@@ -86,6 +86,15 @@ class _SettingsPageState extends State<SettingsPage> {
                             exporting: _exporting,
                             onTap: _exporting ? null : _exportAll,
                           ),
+                          // 从导出 zip 恢复：迁移/换机/卸载重装后找回全部笔记。
+                          _SettingRow(
+                            label: '从备份恢复',
+                            onTap: () {
+                              if (!_restoring) {
+                                _restoreBackup();
+                              }
+                            },
+                          ),
                         ],
                       ),
                       Padding(
@@ -244,6 +253,84 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       },
     );
+  }
+
+  bool _restoring = false;
+
+  /// 从备份 zip 恢复：选文件 → 确认覆盖 → 执行 → 结果弹层。
+  Future<void> _restoreBackup() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: <String>['zip'],
+      withData: true,
+    );
+    final bytes = picked?.files.single.bytes;
+    if (bytes == null || !mounted) {
+      return; // 用户取消
+    }
+    final confirmed = await showXiaojiConfirmSheet(
+      context: context,
+      title: '从备份恢复？',
+      message: '备份里与现有小记同 id 的会被覆盖为备份内容，其余保留。',
+      confirmLabel: '恢复',
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    setState(() => _restoring = true);
+    try {
+      final (restored, skipped) = await repository.restoreFromZip(bytes);
+      if (!mounted) {
+        return;
+      }
+      await showXiaojiSheet<void>(
+        context: context,
+        builder: (BuildContext sheetContext) {
+          final sheetColors = AppColors.of(sheetContext);
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '恢复完成',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: AppWeight.medium,
+                      color: sheetColors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    skipped == 0
+                        ? '恢复了 $restored 篇小记和附件。'
+                        : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: sheetColors.secondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('恢复失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _restoring = false);
+      }
+    }
   }
 
   /// 导出全部：打包 zip → 系统保存对话框。系统对话框不可用（罕见，

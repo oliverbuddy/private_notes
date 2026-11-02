@@ -214,6 +214,49 @@ class NoteStore {
     return directory.path;
   }
 
+  /// 从导出 zip 恢复笔记与附件（导出结构对称：.md 平铺根目录、
+  /// 附件在 assets/ 下）。
+  ///
+  /// 同 id 笔记直接覆盖（恢复语义就是回到导出时的状态）；返回
+  /// (恢复篇数, 跳过篇数)——跳过 = md 无法解析（坏了的文件不中断整体）。
+  /// zip 内路径做了 `..` 防护，防恶意压缩包越目录写文件。
+  Future<(int, int)> restoreFromZip(Uint8List bytes) async {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    var restored = 0;
+    var skipped = 0;
+    for (final entry in archive.files) {
+      if (!entry.isFile) {
+        continue;
+      }
+      final name = entry.name.replaceAll('\\', '/');
+      if (name.contains('..')) {
+        continue; // 路径越界防护
+      }
+      if (name.toLowerCase().endsWith('.md')) {
+        final raw = utf8.decode(entry.content as List<int>);
+        final note = Note.decode(
+          raw,
+          fallbackId: p.basenameWithoutExtension(name),
+        );
+        if (note == null) {
+          skipped += 1;
+          continue;
+        }
+        await saveNote(note);
+        restored += 1;
+      } else if (name.startsWith('assets/')) {
+        final relative = name.substring('assets/'.length);
+        if (relative.isEmpty) {
+          continue;
+        }
+        final target = File(p.join(assetsDir.path, relative));
+        await target.parent.create(recursive: true);
+        await target.writeAsBytes(entry.content as List<int>);
+      }
+    }
+    return (restored, skipped);
+  }
+
   /// 生成包含全部笔记与附件的 zip（在后台 isolate 执行）。
   ///
   /// 结构：.md 平铺在根目录、附件在 `assets/<noteId>/`，
