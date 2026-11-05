@@ -42,13 +42,48 @@ String normalizeMarkdownForKernel(String md) {
 /// 编辑页与测试统一走这里。
 MutableDocument deserializeXiaojiMarkdown(String md) {
   final document = deserializeMarkdownToDocument(
-    normalizeMarkdownForKernel(_protectBlankLines(md)),
+    normalizeMarkdownForKernel(
+      _isolateImageLines(_protectBlankLines(md)),
+    ),
   );
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
   _ensureTrailingParagraph(document);
   return document;
+}
+
+/// 图片行与相邻行紧挨着时，补一个真正的空行隔开。
+///
+/// super_editor 的 markdown 解析器会把图片行并进**上一行**：
+/// `- [ ] read book` 紧跟 `![](assets/n/1.jpg)` 时图片被当成任务续行，
+/// 普通段落紧跟图片时图片也会消失（实测：重开笔记看不到图）。
+/// 图片两侧只要有非空行就补空行；这些空行在 [_protectBlankLines] 之后
+/// 插入，不会被转成哨兵，因此不会给文档多出空段落；序列化也不会写回
+/// 这些临时空行（往返测试已覆盖）。
+String _isolateImageLines(String md) {
+  if (!md.contains('![')) {
+    return md;
+  }
+  final RegExp imageLine = RegExp(r'^!\[[^\]]*\]\([^)\s]+\)[ \t\r]*$');
+  final lines = md.split('\n');
+
+  final out = <String>[];
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    if (!imageLine.hasMatch(line)) {
+      out.add(line);
+      continue;
+    }
+    if (out.isNotEmpty && out.last.trim().isNotEmpty) {
+      out.add('');
+    }
+    out.add(line);
+    if (i + 1 < lines.length && lines[i + 1].trim().isNotEmpty) {
+      out.add('');
+    }
+  }
+  return out.join('\n');
 }
 
 /// 空行哨兵。

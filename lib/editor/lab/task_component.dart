@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
-import '../../theme/app_theme.dart';
+import '../../ui/task_check_box.dart';
 import 'list_style.dart';
 
 /// 小记的任务（待办）组件：基于官方 TaskComponent 复刻，只改记号列。
@@ -106,7 +106,6 @@ class _XiaojiTaskComponentState extends State<XiaojiTaskComponent>
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
     return Directionality(
       textDirection: widget.viewModel.textDirection,
       child: Row(
@@ -125,16 +124,17 @@ class _XiaojiTaskComponentState extends State<XiaojiTaskComponent>
               alignment: Alignment.topRight,
               child: Padding(
                 padding: const EdgeInsets.only(
-                  top: 2,
+                  // 框 20dp 在 26.35 的行盒里垂直居中。
+                  top: 3,
                   right: AppListMarker.checkboxRightInset,
                 ),
-                child: _CheckboxBox(
-                  isComplete: widget.viewModel.isComplete,
-                  accent: colors.accent,
-                  border: colors.tertiary,
-                  checkColor: colors.page,
-                  onChanged: widget.viewModel.setComplete != null
-                      ? (bool value) => widget.viewModel.setComplete!(value)
+                // 与阅读态/首页摘要共用同一个勾选框规格（见 [TaskCheckBox]）。
+                child: TaskCheckBox(
+                  checked: widget.viewModel.isComplete,
+                  onTap: widget.viewModel.setComplete != null
+                      ? () => widget.viewModel.setComplete!(
+                            !widget.viewModel.isComplete,
+                          )
                       : null,
                 ),
               ),
@@ -158,46 +158,6 @@ class _XiaojiTaskComponentState extends State<XiaojiTaskComponent>
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// 自绘勾选框：未选 = 圆角描边空框；选中 = accent 填充 + 白勾。
-class _CheckboxBox extends StatelessWidget {
-  const _CheckboxBox({
-    required this.isComplete,
-    required this.accent,
-    required this.border,
-    required this.checkColor,
-    required this.onChanged,
-  });
-
-  final bool isComplete;
-  final Color accent;
-  final Color border;
-  final Color checkColor;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onChanged == null ? null : () => onChanged!(!isComplete),
-      child: Container(
-        width: AppListMarker.checkboxSize,
-        height: AppListMarker.checkboxSize,
-        decoration: BoxDecoration(
-          color: isComplete ? accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(4.5),
-          border: Border.all(
-            color: isComplete ? accent : border,
-            width: 1.5,
-          ),
-        ),
-        child: isComplete
-            ? Icon(Icons.check, size: 14, color: checkColor)
-            : null,
       ),
     );
   }

@@ -107,6 +107,10 @@ class NoteTileComfortable extends StatelessWidget {
                     ),
                     style: summaryStyle,
                     colors: colors,
+                    // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
+                    // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
+                    // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
+                    // 都是「同字号预览 + 标题收敛 + 行数截断」。
                     headingBoost: 0.86,
                     maxLines: maxSummaryLines,
                   )

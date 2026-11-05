@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
 import '../../theme/app_theme.dart';
+import '../../ui/tag_palette.dart';
 
 /// 正文里的 `#标签` 使用的渲染标记。
 ///
@@ -184,7 +185,12 @@ class _TagChipsState
           ),
         );
         if (rect != null) {
-          chips.add(_TagChipLayout(rect));
+          // 胶囊颜色按标签名取固定色（与列表/详情底部同一套 [TagPalette]）。
+          final String label = node.text.toPlainText().substring(
+                span.start,
+                span.end + 1,
+              );
+          chips.add(_TagChipLayout(rect, label: label));
         }
       }
     }
@@ -205,10 +211,10 @@ class _TagChipsState
               rect: _chipRect(chip.rect),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.accentBg,
+                  color: TagPalette.toneFor(chip.label, colors).background,
                   borderRadius: BorderRadius.circular(5),
                   border: Border.all(
-                    color: colors.accent.withValues(alpha: 0.18),
+                    color: TagPalette.toneFor(chip.label, colors).border,
                     width: 0.5,
                   ),
                 ),
@@ -234,7 +240,10 @@ class _TagChipsState
 }
 
 class _TagChipLayout {
-  const _TagChipLayout(this.rect);
+  const _TagChipLayout(this.rect, {required this.label});
 
   final Rect rect;
+
+  /// 标签文字（含 `#`），用来取固定配色。
+  final String label;
 }

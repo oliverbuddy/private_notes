@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
 import '../ui/show_sheet.dart';
+import '../ui/tag_palette.dart';
 
-/// 详情页「编辑标签」弹层：输入框 + 已有标签候选 chips。
+/// 详情页「编辑标签」弹层：输入框只负责**新增**，已选标签在候选区里
+/// 以选中态呈现。
 ///
-/// 旧版编辑器有候选标签，迁移到新内核时被简化成纯输入框了
-/// （用户反馈「候选标签呢」）。这里做成独立 widget，控制器跟着
-/// 弹层树销毁，避免 old editor 踩过的「pop 后立刻 dispose 控制器，
-/// 退场动画期间 TextField 崩溃」。
+/// 之前已选标签会回填进输入框（`旅行, 想法`），用户要删一个标签得手动
+/// 删逗号和文字，既容易改坏又看不到候选（用户反馈）。改成滴答清单的
+/// 做法：候选区点一下选中/取消，输入框永远为空，只用来加新标签。
 Future<String?> showTagEditorSheet({
   required BuildContext context,
   required String initialText,
@@ -40,36 +41,68 @@ class _TagEditorSheet extends StatefulWidget {
 }
 
 class _TagEditorSheetState extends State<_TagEditorSheet> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialText);
+  /// 已选标签。LinkedHashSet 语义：顺序稳定，保存后不会每次重排。
+  late final Set<String> _selected =
+      Set<String>.from(Note.parseTags(widget.initialText));
+
+  /// 新增标签输入框：始终为空，提交后立刻清空（见 [_commitInput]）。
+  late final TextEditingController _input = TextEditingController();
 
   @override
   void dispose() {
-    _controller.dispose();
+    _input.dispose();
     super.dispose();
   }
 
-  List<String> get _selected => Note.parseTags(_controller.text);
+  /// 候选区 = 仓库已有标签 + 已选但不在候选里的标签（新加的、旧的）。
+  List<String> get _candidates {
+    final List<String> all = widget.candidates.toList();
+    for (final String tag in _selected) {
+      if (!all.contains(tag)) {
+        all.add(tag);
+      }
+    }
+    return all;
+  }
 
   void _toggle(String tag) {
-    final next = Note.parseTags(_controller.text);
-    if (next.contains(tag)) {
-      next.remove(tag);
-    } else {
-      next.add(tag);
+    setState(() {
+      if (!_selected.remove(tag)) {
+        _selected.add(tag);
+      }
+    });
+  }
+
+  /// 把输入框内容并入已选：支持逗号一次输入多个，自动去掉前导 `#`。
+  void _commitInput() {
+    final String raw = _input.text.trim();
+    if (raw.isEmpty) {
+      return;
     }
-    final text = next.join(', ');
-    _controller.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
-    setState(() {});
+    final Iterable<String> parts = raw
+        .split(RegExp(r'[,，]'))
+        .map((String part) => part.trim().replaceFirst(RegExp(r'^#+'), ''))
+        .where((String part) => part.isNotEmpty);
+    for (final String part in parts) {
+      _selected.add(part);
+    }
+    _input.clear();
+  }
+
+  void _addFromInput() {
+    setState(_commitInput);
+  }
+
+  void _submit() {
+    // 输入框里还没回车的标签不能丢：完成时一并收下。
+    _commitInput();
+    Navigator.of(context).pop(_selected.join(', '));
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final selected = _selected;
+    final List<String> candidates = _candidates;
     return Padding(
       // 键盘是系统层，压得住 bottom sheet；让出 viewInsets 后输入框
       // 才会浮在键盘上沿，而不是被挡在键盘后面。
@@ -92,22 +125,51 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                   color: colors.text,
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _controller,
-                autofocus: true,
-                onChanged: (_) => setState(() {}),
-                style: TextStyle(fontSize: 15, color: colors.text),
-                decoration: InputDecoration(
-                  hintText: '逗号分隔，例如：旅行, 想法',
-                  hintStyle: TextStyle(fontSize: 13.5, color: colors.tertiary),
-                  border: InputBorder.none,
-                ),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _input,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _addFromInput(),
+                      style: TextStyle(fontSize: 15, color: colors.text),
+                      decoration: InputDecoration(
+                        hintText: '输入新标签，回车添加',
+                        hintStyle:
+                            TextStyle(fontSize: 13.5, color: colors.tertiary),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 回车与「添加」等价；输入为空时置灰，避免误点。
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _input,
+                    builder: (BuildContext context, TextEditingValue value, _) {
+                      final bool enabled = value.text.trim().isNotEmpty;
+                      return TextButton(
+                        onPressed: enabled ? _addFromInput : null,
+                        child: Text(
+                          '添加',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            color: enabled ? colors.accent : colors.tertiary,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
-              if (widget.candidates.isNotEmpty) ...<Widget>[
+              if (candidates.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 10),
                 Text(
-                  '已有标签',
+                  _selected.isEmpty ? '已有标签' : '标签（点一下选中/取消）',
                   style: TextStyle(fontSize: 12.5, color: colors.tertiary),
                 ),
                 const SizedBox(height: 8),
@@ -115,10 +177,10 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                   spacing: 8,
                   runSpacing: 8,
                   children: <Widget>[
-                    for (final tag in widget.candidates)
+                    for (final String tag in candidates)
                       _TagCandidateChip(
                         label: tag,
-                        selected: selected.contains(tag),
+                        selected: _selected.contains(tag),
                         onTap: () => _toggle(tag),
                       ),
                   ],
@@ -139,10 +201,10 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                   Expanded(
                     child: _TagSheetButton(
                       // 语义是「把标签加到这条小记」，不是保存正文（正文自动保存）。
-                      label: '添加',
+                      label: '完成',
                       background: colors.accent,
                       foreground: colors.page,
-                      onTap: () => Navigator.of(context).pop(_controller.text),
+                      onTap: _submit,
                     ),
                   ),
                 ],
@@ -155,7 +217,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
   }
 }
 
-/// 候选标签 chip：点一下在输入文本里增删该标签。
+/// 候选标签 chip：点一下选中/取消；颜色就是该标签在列表/详情里的颜色。
 class _TagCandidateChip extends StatelessWidget {
   const _TagCandidateChip({
     required this.label,
@@ -170,6 +232,7 @@ class _TagCandidateChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    final TagTone tone = TagPalette.toneFor(label, colors);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -177,10 +240,10 @@ class _TagCandidateChip extends StatelessWidget {
         height: 28,
         padding: const EdgeInsets.symmetric(horizontal: 11),
         decoration: BoxDecoration(
-          color: selected ? colors.accentBg : Colors.transparent,
+          color: selected ? tone.background : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.chip),
           border: Border.all(
-            color: selected ? colors.chipBorderSelected : colors.chipBorder,
+            color: selected ? tone.border : colors.chipBorder,
             width: 0.5,
           ),
         ),
@@ -191,7 +254,8 @@ class _TagCandidateChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               height: 1,
-              color: selected ? colors.accent : colors.secondary,
+              color: tone.foreground,
+              fontWeight: selected ? AppWeight.medium : AppWeight.regular,
             ),
           ),
         ),

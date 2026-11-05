@@ -14,7 +14,11 @@ import 'package:flutter/material.dart';
 /// 正文起点因此完全一致，行与行之间不会出现「有的靠左、有的缩进」。
 abstract final class AppListMarker {
   /// 首层记号列宽（dp）。
-  static const double columnWidth = 26;
+  ///
+  /// 26 → 30：勾选框右缘与正文之间至少留 6dp，否则框贴着第一个字，
+  /// 待办行看起来糊成一团（用户反馈「勾选框和文字太挤」）。三种记号
+  /// （圆点/编号/勾选框）仍统一用这个列宽，正文左缘保持对齐。
+  static const double columnWidth = 30;
 
   /// 每加深一层的增量（dp）。
   static const double indentStep = 20;
@@ -24,9 +28,9 @@ abstract final class AppListMarker {
 
   /// 勾选框距记号列右缘的留白。
   ///
-  /// 圆点在 26dp 列里右缘留 10dp → 圆心落在 14dp；20dp 的框右缘留 2dp
-  /// 时圆心同样落在 14dp，两类行的记号视觉轴心重合。
-  static const double checkboxRightInset = 2;
+  /// 20dp 的框放在 30dp 列里、右缘留 6dp → 正文起点 30dp 处与框之间
+  /// 正好 6dp 呼吸（[TaskCheckBox.gap] 同值）。
+  static const double checkboxRightInset = 6;
 
   /// 记号列宽：首层 [columnWidth]，每层再加 [indentStep]。
   ///

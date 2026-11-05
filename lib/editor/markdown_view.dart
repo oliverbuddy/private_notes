@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../ui/tag_palette.dart';
+import '../ui/task_check_box.dart';
 
 /// 阅读态渲染：把 markdown 源码变成「没有记号」的排版文本。
 ///
@@ -61,7 +63,8 @@ class MarkdownBlockView extends StatelessWidget {
 ///
 /// [headingBoost] 用来在列表摘要里压低标题的放大倍数：详情页 H1 是正文的
 /// 1.5 倍很合理，但列表里一行 25px 的标题夹在 16px 正文中间，行高会跳得像
-/// 排版事故。摘要传 0.78，层级还在，节奏不崩。
+/// 排版事故。摘要传 0.86；同时标题字号有「不小于正文」的下限，避免 H3
+/// 被压到比正文还小（整页看起来像等比缩小）。
 List<InlineSpan> markdownSpans(
   String markdown,
   TextStyle base,
@@ -142,8 +145,16 @@ List<InlineSpan> markdownSpans(
     if (heading != null) {
       final level = heading.group(1)!.length;
       final scales = <double>[1.5, 1.38, 1.26, 1.15, 1.08, 1.0];
+      // 预览态（headingBoost < 1）里标题不能被压到比正文还小：H1 21 × 0.86
+      // 还有 18，但 H3 16.5 × 0.86 = 14.2，比正文 15.5 更小 —— 整页会
+      // 看起来像被「等比缩小」了一档（用户反馈）。主流列表方案是正文与
+      // 详情同字号、标题只收敛层级，所以这里给标题兜一个正文字号下限。
+      final double scaledSize =
+          baseSize * scales[level - 1] * headingBoost;
+      final double titleSize =
+          scaledSize < baseSize ? baseSize : scaledSize;
       final style = base.copyWith(
-        fontSize: baseSize * scales[level - 1] * headingBoost,
+        fontSize: titleSize,
         // 中文标题用 600 才立得住，500 和正文的粗细差几乎看不出来。
         fontWeight: AppWeight.semibold,
         height: 1.45,
@@ -192,37 +203,29 @@ List<InlineSpan> markdownSpans(
       );
       // 阅读态（调用方给了 onToggleTodo）渲染成真 checkbox：直接点选切换，
       // 不必进编辑态手改 [ ] 记号 —— 语雀/Notion 同款交互。
-      // 列表摘要（无回调）保持字符字形，避免摘要里出现可点的控件。
-      if (onToggleTodo != null) {
-        final todoIndex = todoCounter++;
-        spans.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => onToggleTodo(todoIndex),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-              child: Icon(
-                checked ? Icons.check_box : Icons.check_box_outline_blank,
-                size: (base.fontSize ?? 17) * 1.15,
-                color: checked ? colors.accent : colors.secondary,
-              ),
-            ),
-          ),
-        ));
-        spans.add(const TextSpan(text: ' '));
-      } else {
-        spans.add(TextSpan(
-          text: checked ? '☑  ' : '☐  ',
-          style:
-              base.copyWith(color: checked ? colors.accent : colors.secondary),
-        ));
-      }
-      // 行首缩进 = 列表层级（缩进命令每次加两个空格），原样保留，
-      // 嵌套项才能渲染出「子列表」的层次。
+      // 首页摘要（无回调）用**同一个**勾选框组件（不可点），保证两处视觉
+      // 完全一致；之前摘要用 ☐/☑ 字符，和详情里的方框差得很明显（用户反馈）。
+      // 行首缩进先补上，嵌套项的整行（含勾选框）一起右移。
       if (todo.group(1)!.isNotEmpty) {
         spans.add(TextSpan(text: todo.group(1), style: base));
       }
+      final int? todoIndex = onToggleTodo == null ? null : todoCounter++;
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Padding(
+          // 与详情页记号列同一套几何：左 4 + 框 20 + 间距 6（见 AppListMarker）。
+          padding: const EdgeInsets.only(
+            left: 4,
+            right: TaskCheckBox.gap,
+            top: 2,
+            bottom: 2,
+          ),
+          child: TaskCheckBox(
+            checked: checked,
+            onTap: todoIndex == null ? null : () => onToggleTodo!(todoIndex),
+          ),
+        ),
+      ));
       spans.addAll(_inline(todo.group(3)!, style, colors));
       spans.add(TextSpan(text: newline, style: style));
       continue;
@@ -354,18 +357,20 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
       spans.add(TextSpan(text: italic, style: style.copyWith(fontStyle: FontStyle.italic)));
     } else if (tag != null) {
       // 标签做成真胶囊。规格逐项对齐详情页（TagChips 内容层）：
-      // 字号与正文一致、左右各留 4、圆角 5、0.5 描边、accentBg 底。
-      // 之前这里把字号乘了 0.84，胶囊比详情里小一圈，两处看着不一样。
+      // 字号与正文一致、左右各留 4、圆角 5、0.5 描边、按标签名取固定色。
+      // 之前这里把字号乘了 0.84、颜色写死 accentBg，与详情里小一圈、颜色
+      // 也不随标签变化（用户反馈两处不一致）。
       final double tagSize = style.fontSize ?? 17;
+      final TagTone tone = TagPalette.toneFor(tag, colors);
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.middle,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
           decoration: BoxDecoration(
-            color: colors.accentBg,
+            color: tone.background,
             borderRadius: BorderRadius.circular(5),
             border: Border.all(
-              color: colors.accent.withValues(alpha: 0.18),
+              color: tone.border,
               width: 0.5,
             ),
           ),
@@ -376,7 +381,7 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
               // 行盒压到与详情胶囊同高（20dp 上下）。
               height: 1.15,
               letterSpacing: 0.2,
-              color: colors.accent,
+              color: tone.foreground,
             ),
           ),
         ),

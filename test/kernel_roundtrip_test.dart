@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
+import 'package:xiaoji/editor/lab/image_display_size.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
 
 /// M1 安全底线：md 解析 → 文档 → 小记序列化器 必须幂等且不丢内容。
@@ -27,6 +28,52 @@ void main() {
     final doc = deserializeXiaojiMarkdown(md);
     return serializeDocumentToXiaojiMarkdown(doc);
   }
+
+  test('待办后紧跟图片：图片仍是独立 ImageNode', () {
+    const String body = '- [ ] read book\n![](assets/n/1.jpg#xiaoji-small)';
+    final doc = deserializeXiaojiMarkdown(body);
+    final List<String> types =
+        doc.map((DocumentNode n) => n.runtimeType.toString()).toList();
+    expect(
+      doc.any((DocumentNode n) => n is ImageNode),
+      isTrue,
+      reason: '节点类型：$types',
+    );
+    // 解析时补的隔断空行不能写回存储（否则每次打开都多一行）。
+    expect(serializeDocumentToXiaojiMarkdown(doc), body);
+  });
+
+  test('正文段落紧跟图片：图片仍是独立 ImageNode', () {
+    const String body = '超长图\n![](assets/n/1.jpg#xiaoji-small)';
+    final doc = deserializeXiaojiMarkdown(body);
+    final List<String> types =
+        doc.map((DocumentNode n) => n.runtimeType.toString()).toList();
+    expect(
+      doc.any((DocumentNode n) => n is ImageNode),
+      isTrue,
+      reason: '节点类型：$types',
+    );
+    expect(serializeDocumentToXiaojiMarkdown(doc), body);
+  });
+
+  test('图片小图标记往返保持，且能还原真实路径', () {
+    final doc = deserializeXiaojiMarkdown('![](assets/n/1.jpg#xiaoji-small)');
+    final ImageNode image =
+        doc.firstWhere((DocumentNode n) => n is ImageNode) as ImageNode;
+
+    expect(image.imageUrl, 'assets/n/1.jpg#xiaoji-small');
+    expect(imageDisplaySizeOf(image.imageUrl), ImageDisplaySize.small);
+    expect(imageFilePath(image.imageUrl), 'assets/n/1.jpg');
+
+    final out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out, contains('#xiaoji-small'));
+
+    // 大图：去掉标记后是干净路径。
+    expect(
+      imageUrlWithSize(image.imageUrl, ImageDisplaySize.large),
+      'assets/n/1.jpg',
+    );
+  });
 
   test('解析→序列化幂等：第二次往返不再改变内容', () {
     final out1 = roundTrip(sample);

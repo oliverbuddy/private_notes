@@ -66,15 +66,15 @@ void main() {
       expect(text, isNot(contains('](')));
     });
 
-    test('待办渲染成方框，不显示 - [ ]', () {
+    test('待办渲染成勾选框，不显示 - [ ]', () {
       final open = render('- [ ] 写完补一段');
-      expect(open, contains('☐'));
       expect(open, contains('写完补一段'));
       expect(open, isNot(contains('[ ]')));
+      expect(open, isNot(contains('- ')));
 
       final done = render('- [x] 删掉副词');
-      expect(done, contains('☑'));
-      expect(done.isNotEmpty, isTrue);
+      expect(done, contains('删掉副词'));
+      expect(done, isNot(contains('[x]')));
     });
 
     test('无序列表换成圆点，有序列表保留序号', () {

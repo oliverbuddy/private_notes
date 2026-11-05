@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
 import '../editor/block.dart';
+import '../editor/lab/image_display_size.dart';
 import '../editor/lab/new_editor_page.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
@@ -554,8 +555,12 @@ class _HomePageState extends State<HomePage> {
           );
         } else {
           final visible = images.take(3).toList();
+          // URL 末尾可能带「小图」标记（`#xiaoji-small`）：缩略图必须按
+          // 去标记后的真实文件路径取图，否则 Image.file 找不到文件，
+          // 列表里只剩一个「破图」图标（详情页正常、首页全坏）。
           final paths = visible
-              .map((block) => _repo.store.absoluteAssetPath(block.path))
+              .map((block) => _repo.store
+                  .absoluteAssetPath(imageFilePath(block.path)))
               .toList();
           tile = NoteTileComfortable(
             note: note,

@@ -14,9 +14,12 @@ import 'package:super_editor/super_editor.dart';
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../ui/action_sheet.dart';
+import '../../ui/adaptive_image.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
 import '../../ui/tag_chip.dart';
+import '../../util/media_saver.dart';
 import '../markdown_toolbar.dart';
 import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
@@ -28,6 +31,8 @@ import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
 import 'caret_overlay.dart';
 import 'editor_request_handlers.dart';
+import 'image_display_size.dart';
+import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'tag_style.dart';
 import 'task_component.dart';
@@ -119,7 +124,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 的 toolbarBuilder 注入中文胶囊工具条（OverlayManager 优先取它，
   /// 定位/边界避让仍走内核 Follower 体系）。
   late final SuperEditorAndroidControlsController _androidControls =
-      SuperEditorAndroidControlsController(
+      _XiaojiAndroidControlsController(
     toolbarBuilder:
         (BuildContext context, Key mobileToolbarKey, LeaderLink focalPoint) =>
             XiaojiSelectionToolbar(
@@ -354,6 +359,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     _saveDebounce?.cancel();
     _caretFollowTimer?.cancel();
     _anchorReleaseTimer?.cancel();
+    _imeCollapseTimer?.cancel();
+    _detachImeScrollListener();
     _caretFollowing = false;
     _caretScrollTarget = null;
     _caretScrollTicker.dispose();
@@ -373,13 +380,208 @@ class _NewEditorPageState extends State<NewEditorPage>
     super.dispose();
   }
 
-  /// 输入法弹出/收起、屏幕尺寸变化后，可用视口变了，光标可能被挡住。
+  /// 最近一次参与「键盘升降」判定的输入法高度。
   ///
-  /// 键盘是逐帧动画：每一帧都跟着校正一次（[jumpTo] 跟手），
-  /// 内容与键盘同步上升/下降，不会出现「等键盘停稳再滑一下」。
+  /// 判定放在 [build] 里做：`didChangeMetrics` 回调时 MediaQuery 还没重建，
+  /// 读到的可能是旧值（实测「键盘收起」分支经常进不来）。build 每一帧都
+  /// 拿到最新 `viewInsets`，这个判断才可靠。
+  double _lastSyncedIme = 0;
+
+  /// 键盘正在收起 / 刚收起的窗口。
+  ///
+  /// 收起时视口变大，光标本来就可见，但框架/内核在布局结算后仍会调用
+  /// `ensureOffsetIsVisible` 或重算布局，把滚动位置往回带（用户反馈：
+  /// 带图片的笔记收起键盘后整页往下移动）。这段时间内：
+  ///  - 吞掉所有自动落位（[_ensureCaretVisible] / [_onExternalCaretJump]）；
+  ///  - 监听滚动位置，一旦被程序性改动就还原到收起前的 offset。
+  bool _imeCollapsing = false;
+  Timer? _imeCollapseTimer;
+
+  /// 键盘开始收起那一刻的滚动位置。
+  double? _imeCollapseAnchorPixels;
+
+  /// 滚动监听是否已挂上（避免重复 addListener）。
+  bool _imeScrollListenerAttached = false;
+
+  /// 防止「还原滚动」自身触发监听造成递归。
+  bool _restoringImeScroll = false;
+
+  /// 已排队的还原（同一个帧里的多次滚动通知只还原一次）。
+  bool _imeRestorePending = false;
+
+  /// 用户是否正用手指拖动滚动（区别于内核的 ballistic/自动滚动）。
+  ///
+  /// 判定来自 [ScrollStartNotification.dragDetails]：只有手指拖动才有
+  /// dragDetails，`goBallistic` 之类的程序性滚动没有。
+  bool _userDraggingScroll = false;
+
+  /// 键盘收起后为「保住视觉位置」而临时补的底部留白。
+  ///
+  /// 关键场景：笔记内容不足一屏（如三段文字 + 两张图）。键盘弹起时视口
+  /// 变矮、内容可滚动，光标被抬到 offset≈313；键盘收起后视口变高，内容
+  /// 全部塞得下，`maxScrollExtent` 直接变成 0 —— 滚动位置被物理性地
+  /// 夹回 0，正文整块往下移。此时任何 jumpTo 都无效（没有可滚动范围），
+  /// 只能在底部补一段留白把「可滚动范围」补回来，视觉位置才真的不动。
+  double _imeCollapseBottomPad = 0;
+
+  /// 按当前输入法高度结算「键盘弹起 / 收起」。
+  ///
+  /// 只在高度真的变化时干活，键盘升降动画的每一帧都会走到这里：
+  ///  - 变高：取消收起保护，等停稳后把光标抬到舒适位；
+  ///  - 变矮：进入收起保护，记录 offset 并在停稳后核对/还原。
+  void _syncImeState(double ime) {
+    if (_disposed) {
+      return;
+    }
+    final double previous = _lastSyncedIme;
+    if (ime == previous) {
+      return;
+    }
+    _lastSyncedIme = ime;
+    if (ime > previous) {
+      _endImeCollapse();
+      _scheduleCaretFollow();
+      return;
+    }
+    _beginImeCollapse();
+  }
+
+  void _beginImeCollapse() {
+    if (!_imeCollapsing) {
+      _imeCollapsing = true;
+      _cancelCaretFollow();
+    }
+    final ScrollPosition? position =
+        _editorScroll.hasClients ? _editorScroll.position : null;
+    _imeCollapseAnchorPixels ??= position?.pixels;
+    if (!_imeScrollListenerAttached) {
+      // 挂在 controller 上而不是某个 ScrollPosition：视口尺寸变化时
+      // Scrollable 可能重建并换掉 position，挂在旧 position 上会漏掉
+      // 新的滚动通知（实测：日志里 offset 没变，页面却回到了顶部）。
+      _editorScroll.addListener(_onScrollDuringImeCollapse);
+      _imeScrollListenerAttached = true;
+    }
+    // 键盘收起动画 + 布局结算大约 300ms；留到 600ms 覆盖慢速输入法，
+    // 期间用户主动滑动优先（见监听里的 isScrollingNotifier 判断）。
+    // 等布局按新视口结算完，算出「还差多少可滚动范围」再补留白。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_imeCollapsing || !mounted || !_editorScroll.hasClients) {
+        return;
+      }
+      final double? anchor = _imeCollapseAnchorPixels;
+      if (anchor == null) {
+        return;
+      }
+      final ScrollPosition position = _editorScroll.position;
+      final double deficit = anchor - position.maxScrollExtent;
+      if (deficit > 1 && deficit > _imeCollapseBottomPad) {
+        setState(() => _imeCollapseBottomPad = deficit);
+      }
+    });
+    _imeCollapseTimer?.cancel();
+    _imeCollapseTimer = Timer(const Duration(milliseconds: 600), () {
+      _imeCollapseTimer = null;
+      _imeCollapsing = false;
+      _restoreScrollAfterImeCollapse();
+      _detachImeScrollListener();
+      _imeCollapseAnchorPixels = null;
+    });
+  }
+
+  void _endImeCollapse() {
+    _imeCollapsing = false;
+    _imeCollapseTimer?.cancel();
+    _imeCollapseTimer = null;
+    _imeCollapseAnchorPixels = null;
+    _detachImeScrollListener();
+    // 键盘重新弹起：视口变矮、内容重新可滚动，临时留白必须撤掉，
+    // 否则底部会多出一截空白。此时光标落位会接管滚动，撤留白不跳。
+    if (_imeCollapseBottomPad > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_imeCollapsing && _imeCollapseBottomPad > 0) {
+          setState(() => _imeCollapseBottomPad = 0);
+        }
+      });
+    }
+  }
+
+  void _detachImeScrollListener() {
+    if (!_imeScrollListenerAttached) {
+      return;
+    }
+    _imeScrollListenerAttached = false;
+    _editorScroll.removeListener(_onScrollDuringImeCollapse);
+  }
+
+  /// 收起窗口内滚动位置被改动：排一帧后还原。
+  ///
+  /// 不能在滚动通知里直接 `jumpTo`（可能发生在布局阶段），
+  /// 用 post-frame 延迟一帧最稳。
+  void _onScrollDuringImeCollapse() {
+    if (!_imeCollapsing || _restoringImeScroll || _imeRestorePending) {
+      return;
+    }
+    final double? anchor = _imeCollapseAnchorPixels;
+    if (anchor == null || !_editorScroll.hasClients) {
+      return;
+    }
+    final ScrollPosition position = _editorScroll.position;
+    if ((position.pixels - anchor).abs() < 1) {
+      return;
+    }
+    // 内核在键盘收起后会启动一个 ballistic 活动把正文缓动回顶部
+    // （日志实测 velocity 约 -1200px/s）。它全程 `scrolling=true`，
+    // 但不是用户拖动 —— 用 dragDetails 判定，只有手指拖动才让位。
+    if (_userDraggingScroll) {
+      return;
+    }
+    _imeRestorePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _imeRestorePending = false;
+      if (!_imeCollapsing) {
+        return;
+      }
+      _restoreScrollAfterImeCollapse();
+    });
+  }
+
+  /// 把滚动位置还原到键盘收起前。
+  ///
+  /// 目标会按当前可滚动范围夹一下（内容变短时避免还原到越界值）。
+  void _restoreScrollAfterImeCollapse() {
+    final double? anchor = _imeCollapseAnchorPixels;
+    if (_disposed || !mounted || anchor == null) {
+      return;
+    }
+    if (!_editorScroll.hasClients) {
+      return;
+    }
+    final ScrollPosition position = _editorScroll.position;
+    // 注意：这里**不能**因为 `isScrollingNotifier` 为 true 就放弃还原。
+    // 内核的 ballistic 动画全程都是 scrolling=true，正是它把页面带回顶部。
+    // 还原用 jumpTo，它会顺带停掉当前滚动活动。
+    final double target = anchor.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((position.pixels - target).abs() < 1) {
+      return;
+    }
+    _restoringImeScroll = true;
+    _tickerJumping = true;
+    try {
+      position.jumpTo(target);
+    } finally {
+      _tickerJumping = false;
+      _restoringImeScroll = false;
+    }
+  }
+
   @override
   void didChangeMetrics() {
-    _scheduleCaretFollow();
+    // 仅作为兜底：真正的判定在 build 里（didChangeMetrics 触发时
+    // MediaQuery 可能还没更新，读到的是旧高度）。
+    _syncImeState(MediaQuery.viewInsetsOf(context).bottom);
   }
 
   void _scheduleSave() {
@@ -469,13 +671,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     // 键盘/面板正在切换时不做校正：那时视口还是中间态，校正会把光标
     // 拉来拉去；停稳后的落位由 [_scheduleCaretFollow] 统一处理。
-    if (_panelTransitioning || _caretFollowing) {
+    if (_panelTransitioning || _caretFollowing || _imeCollapsing) {
       return;
     }
     _caretVisibilityPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _caretVisibilityPending = false;
-      if (_panelTransitioning || _caretFollowing || _disposed) {
+      if (_panelTransitioning || _caretFollowing || _imeCollapsing || _disposed) {
         return;
       }
       // 滚动正在执行时也照常算一次：只更新目标，不重启动画
@@ -523,7 +725,8 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 这里改成：等「视口 + 输入法高度」连续 4 帧不变（动画真正结束），
   /// 再执行**一次** 280ms 的缓出动画。慢一点、一次到位，不会回滑。
   void _scheduleCaretFollow() {
-    if (_disposed || _panelTransitioning) {
+    // 键盘正在收起：视口在变大，任何落位都会把正文往下拽。
+    if (_disposed || _panelTransitioning || _imeCollapsing) {
       return;
     }
     // 视口（键盘）开始变化：先停掉正在执行的落位。滚动与键盘动画叠加
@@ -623,9 +826,9 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_disposed || !mounted || !_editorScroll.hasClients) {
       return;
     }
-    if (_panelTransitioning) {
-      // 面板/键盘交替期间视口是中间态：任何滚动都会造成「先滑一下、
-      // 后面再补一下」的两段式观感。这段过程一律不动。
+    if (_panelTransitioning || _imeCollapsing) {
+      // 面板/键盘交替、键盘收起期间视口是中间态：任何滚动都会造成
+      // 「先滑一下、后面再补一下」的两段式观感。这段过程一律不动。
       return;
     }
     final selection = _composer.selection;
@@ -769,8 +972,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     // 面板/键盘交替期间用户明确要求不要滚动：直接吞掉。
     // 键盘还在升降时（_caretFollowing 等视口停稳）同样吞掉，否则会和
-    // 键盘动画叠加成「先滑一下、停稳后再补一下」。
-    if (_panelTransitioning || _caretFollowing) {
+    // 键盘动画叠加成「先滑一下、停稳后再补一下」。键盘收起后的短暂窗口
+    // （_imeCollapsing）也吞掉：框架按变大后的视口重算出的目标更小，
+    // 执行它会让正文往下移（用户反馈的「收起输入法后详情页下移」）。
+    if (_panelTransitioning || _caretFollowing || _imeCollapsing) {
       return true;
     }
     // 浏览态保持框架原生行为（例如拖动手势的自动滚动）。
@@ -869,6 +1074,25 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     _commands.handleCommand(command);
     _refreshActiveCommands();
+    // 块级 / 插入类命令是一次性结构动作：执行后立刻收面板、回键盘，
+    // 用户可以马上继续输入（不用再点一次 Aa，符合「点一下就走」的直觉）。
+    // 文字样式保持展开，方便连续加粗 + 斜体。
+    if (_isOneShotPanelCommand(command)) {
+      _closePanel(showKeyboard: true);
+    }
+  }
+
+  /// Aa 面板里「点一下就收起」的命令（结构/插入类）。
+  bool _isOneShotPanelCommand(MarkdownCommand command) {
+    return switch (command) {
+      MarkdownCommand.bold ||
+      MarkdownCommand.italic ||
+      MarkdownCommand.strike ||
+      MarkdownCommand.code ||
+      MarkdownCommand.link =>
+        false,
+      _ => true,
+    };
   }
 
   /// 面板/键盘交替的状态机（在 build 里按当前 ime 结算）。
@@ -1171,6 +1395,131 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  /// 工具栏「标签」入口：弹层关闭后把焦点和键盘交还编辑器，
+  /// 不让用户点完标签还得再点一次正文。
+  Future<void> _editTagsFromToolbar() async {
+    await _editTags();
+    if (!mounted || _disposed) {
+      return;
+    }
+    _restoreEditingSelection();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 图片长按菜单
+  // ---------------------------------------------------------------------------
+
+  /// 长按图片：小图/大图显示、下载、删除。
+  Future<void> _showImageActions(
+    BuildContext componentContext,
+    String nodeId,
+    String absolutePath,
+    ImageDisplaySize current,
+  ) async {
+    final DocumentNode? node = _document.getNodeById(nodeId);
+    if (node is! ImageNode) {
+      return;
+    }
+    // 菜单期间不保留光标/键盘：和点开大图一致，回到干净的浏览态。
+    _editor.execute(<EditRequest>[const ClearSelectionRequest()]);
+    final _ImageAction? action = await showXiaojiActionSheet<_ImageAction>(
+      context: componentContext,
+      title: '图片',
+      actions: <SheetAction<_ImageAction>>[
+        SheetAction(
+          value: _ImageAction.small,
+          label: '小图显示',
+          icon: Icons.photo_size_select_small_outlined,
+          selected: current == ImageDisplaySize.small,
+        ),
+        SheetAction(
+          value: _ImageAction.large,
+          label: '大图显示',
+          icon: Icons.fullscreen,
+          selected: current == ImageDisplaySize.large,
+        ),
+        const SheetAction(
+          value: _ImageAction.download,
+          label: '下载',
+          icon: Icons.download_outlined,
+        ),
+        const SheetAction(
+          value: _ImageAction.delete,
+          label: '删除',
+          icon: Icons.delete_outline,
+          destructive: true,
+        ),
+      ],
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    switch (action) {
+      case _ImageAction.small:
+        _setImageSize(node, ImageDisplaySize.small);
+      case _ImageAction.large:
+        _setImageSize(node, ImageDisplaySize.large);
+      case _ImageAction.download:
+        await _downloadImage(absolutePath);
+      case _ImageAction.delete:
+        await _deleteImage(node);
+    }
+  }
+
+  /// 切换正文显示尺寸（写入笔记，重开仍然生效）。
+  void _setImageSize(ImageNode node, ImageDisplaySize size) {
+    final String nextUrl = imageUrlWithSize(node.imageUrl, size);
+    if (nextUrl == node.imageUrl) {
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(
+        existingNodeId: node.id,
+        newNode: ImageNode(
+          id: node.id,
+          imageUrl: nextUrl,
+          altText: node.altText,
+        ),
+      ),
+    ]);
+  }
+
+  /// 下载到系统相册（Android 10+ 进相册，旧系统进应用目录）。
+  Future<void> _downloadImage(String absolutePath) async {
+    try {
+      final bool savedToGallery = await saveImageToGallery(absolutePath);
+      if (!mounted) {
+        return;
+      }
+      _showHint(savedToGallery ? '已保存到相册' : '已保存到应用目录');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showHint('保存失败：$error');
+    }
+  }
+
+  Future<void> _deleteImage(ImageNode node) async {
+    final bool? confirmed = await showXiaojiConfirmSheet(
+      context: context,
+      title: '删除图片',
+      message: '删除后正文里将不再显示这张图片。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    _editor.execute(<EditRequest>[DeleteNodeRequest(nodeId: node.id)]);
+  }
+
+  void _showHint(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   Future<void> _confirmDelete() async {
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
@@ -1298,6 +1647,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 「键盘是否可见」永远为假，工具栏会彻底不显示（实测）。
     final double imeInset = MediaQuery.viewInsetsOf(context).bottom;
     _imeInset = imeInset;
+    // 每帧按最新 viewInsets 结算键盘升降（didChangeMetrics 的时机不可靠）。
+    _syncImeState(imeInset);
     // 面板/键盘交替时按当前 ime 结算锚点（工具条保持同一屏幕 Y）。
     _reconcilePanelWithKeyboard(imeInset);
     return Scaffold(
@@ -1461,9 +1812,12 @@ class _NewEditorPageState extends State<NewEditorPage>
       bottom: 0,
       height: sheetHeight,
       child: ColoredBox(
+        // 与面板同色：面板只占键盘区域的一段，剩余的上下留白必须同色，
+        // 才能读成「一块完整的键盘替代面板」而不是白带浮在灰底上。
         color: colors.page,
-        child: Align(
-          alignment: Alignment.topCenter,
+        // 面板内容垂直居中：＋ 面板只有一组、Aa 面板四行，顶在上沿会让
+        // 下面留一大片空白（用户反馈「太空」）。居中后上下留白对称。
+        child: Center(
           child: ValueListenableBuilder<Set<MarkdownCommand>>(
             valueListenable: _activeCommands,
             builder: (
@@ -1537,6 +1891,11 @@ class _NewEditorPageState extends State<NewEditorPage>
           return const SizedBox.shrink();
         }
         final List<String> tags = _currentNote.tags;
+        // 无标签时不占位，也不显示「+标签」：新增入口已移到工具栏的
+        // 标签按钮（用户要求），左下角只负责展示已有标签，避免两个入口重复。
+        if (tags.isEmpty) {
+          return const SizedBox.shrink();
+        }
         return Padding(
           padding: EdgeInsets.fromLTRB(
             AppSpace.page,
@@ -1551,28 +1910,23 @@ class _NewEditorPageState extends State<NewEditorPage>
           child: SizedBox(
             width: double.infinity,
             height: 22,
-            child: tags.isEmpty
-                ? Align(
-                    alignment: Alignment.centerLeft,
-                    child: _AddTagChip(onTap: _editTags),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: <Widget>[
-                        for (final tag in tags)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: _editTags,
-                              child: TagChip(label: tag),
-                            ),
-                          ),
-                      ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: <Widget>[
+                  for (final tag in tags)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _editTags,
+                        child: TagChip(label: tag),
+                      ),
                     ),
-                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -1614,56 +1968,18 @@ class _NewEditorPageState extends State<NewEditorPage>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                // 撤销 / 重做 / 更多：统一 40dp 槽位 + 22dp 系统图标，
-                // 三个按钮等距，和左下角返回箭头同视觉重量；无历史时
-                // 撤销/重做置灰但保留占位（不出现左右抖动）。
-                AnimatedBuilder(
-                  animation: Listenable.merge(<Listenable>[_canUndo, _canRedo]),
-                  builder: (BuildContext context, Widget? _) {
-                    final bool canUndo = _canUndo.value;
-                    final bool canRedo = _canRedo.value;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        SizedBox(
-                          width: 40,
-                          child: InkWell(
-                            onTap: canUndo ? _editor.undo : null,
-                            child: Icon(
-                              // 系统内置的撤销/重做字形，尺寸与顶栏其它
-                              // 22dp 图标一致（自绘图标的视觉重量对不齐）。
-                              Icons.undo,
-                              size: 22,
-                              color: canUndo ? colors.text : colors.tertiary,
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 40,
-                          child: InkWell(
-                            onTap: canRedo ? _editor.redo : null,
-                            child: Icon(
-                              Icons.redo,
-                              size: 22,
-                              color: canRedo ? colors.text : colors.tertiary,
-                            ),
-                          ),
-                        ),
-                        // 右上角「⋯」笔记操作菜单（置顶/复制/标签/删除，旧逻辑移植）。
-                        SizedBox(
-                          width: 40,
-                          child: InkWell(
-                            onTap: _showEditorMenu,
-                            child: Icon(
-                              Icons.more_horiz,
-                              size: 22,
-                              color: colors.text,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
+                // 高频动作），顶栏只留笔记级操作「⋯」。
+                SizedBox(
+                  width: 40,
+                  child: InkWell(
+                    onTap: _showEditorMenu,
+                    child: Icon(
+                      Icons.more_horiz,
+                      size: 22,
+                      color: colors.text,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1674,7 +1990,18 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Widget _buildEditor(AppColors colors) {
-    return SuperEditor(
+    return NotificationListener<ScrollNotification>(
+      // 只用来区分「手指拖动」和「内核自动滚动」：dragDetails 只有真实
+      // 拖动才会带上，ballistic / animateTo 都没有。
+      onNotification: (ScrollNotification notification) {
+        if (notification is ScrollStartNotification) {
+          _userDraggingScroll = notification.dragDetails != null;
+        } else if (notification is ScrollEndNotification) {
+          _userDraggingScroll = false;
+        }
+        return false;
+      },
+      child: SuperEditor(
       editor: _editor,
       // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
       focusNode: _editorFocus,
@@ -1687,6 +2014,11 @@ class _NewEditorPageState extends State<NewEditorPage>
       ),
       androidHandleColor: colors.accent,
       stylesheet: _buildStylesheet(colors),
+      // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
+      // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
+      contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
+        (SuperEditorContext context) => XiaojiLinkTapHandler(context.document),
+      ],
       // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
       // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
       // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
@@ -1709,6 +2041,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         _LabImageComponentBuilder(
           repository: widget.repository,
           editor: _editor,
+          onImageLongPress: _showImageActions,
         ),
         // 分隔线颜色接管：HorizontalRuleComponent 的线色写死 Colors.grey
         // （源码实测，HorizontalRuleComponentViewModel 不透出 color 键，
@@ -1735,6 +2068,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         ...defaultComponentBuilders,
         const UnknownComponentBuilder(),
       ],
+      ),
     );
   }
 
@@ -1786,16 +2120,32 @@ class _NewEditorPageState extends State<NewEditorPage>
               // 否则媒体会通栏贴屏幕边（用户反馈「详情没有内边距」）。
               Styles.padding:
                   const CascadingPadding.symmetric(horizontal: AppSpace.page),
+              // IME 组词下划线：super_editor 默认是 2px 纯黑方头，
+              // 在手机上像一条粗黑杠（用户反馈「正在输入的文字下面有粗黑线」）。
+              // 这里换成 1dp 主色细线，保留组词提示又不抢视觉。
+              Styles.composingRegionUnderlineStyle: StraightUnderlineStyle(
+                color: colors.accent.withValues(alpha: 0.55),
+                thickness: 1,
+                offset: 3,
+                capType: StrokeCap.round,
+              ),
             };
           },
         ),
         // 文档末尾留白：**只有最后一个块**。之前写在 BlockSelector.all
         // 上，每个块底下都垫了 96，块间隙大到离谱（实测）。
+        //
+        // 键盘收起且内容不足一屏时，这里额外补 [_imeCollapseBottomPad]：
+        // 直接加在「内容」里，`maxScrollExtent` 随之变大，滚动位置才有
+        // 空间保得住；加在编辑器外层的 Padding 只会缩小视口，补不回
+        // 原有的 offset（实测 max 仍是 0）。
         StyleRule(
           BlockSelector.all.last(),
           (Document doc, DocumentNode node) {
             return <String, dynamic>{
-              Styles.padding: const CascadingPadding.only(bottom: 96),
+              Styles.padding: CascadingPadding.only(
+                bottom: 96 + _imeCollapseBottomPad,
+              ),
             };
           },
         ),
@@ -2003,10 +2353,16 @@ class _NewEditorPageState extends State<NewEditorPage>
                 child: Listener(
                   behavior: HitTestBehavior.opaque,
                   onPointerDown: (_) {},
-                  child: ValueListenableBuilder<Set<MarkdownCommand>>(
-                    valueListenable: _activeCommands,
-                    builder:
-                        (BuildContext context, Set<MarkdownCommand> active, _) {
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge(<Listenable>[
+                      _activeCommands,
+                      _canUndo,
+                      _canRedo,
+                    ]),
+                    builder: (BuildContext context, Widget? _) {
+                      final Set<MarkdownCommand> active = _activeCommands.value;
+                      final bool canUndo = _canUndo.value;
+                      final bool canRedo = _canRedo.value;
                       // 面板展开/收起、键盘回弹这一整段里，系统底部安全区
                       // （手势条）会重新算进 SafeArea —— 工具条内部那一层
                       // SafeArea 会让按钮行整体偏移一截（实测 21dp）。
@@ -2027,6 +2383,12 @@ class _NewEditorPageState extends State<NewEditorPage>
                           panel: _panel,
                           onPanelToggle: _togglePanel,
                           active: active,
+                          // 工具栏新布局：标签入口 + 撤销/还原（顶栏已精简）。
+                          onEditTags: _editTagsFromToolbar,
+                          onUndo: _editor.undo,
+                          onRedo: _editor.redo,
+                          canUndo: canUndo,
+                          canRedo: canRedo,
                         ),
                       );
                     },
@@ -2041,56 +2403,25 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 }
 
-/// 「+ 标签」入口：虚线感的描边小胶囊，与真标签同高。
-class _AddTagChip extends StatelessWidget {
-  const _AddTagChip({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(5),
-      child: Container(
-        height: 22,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: colors.chipBorder, width: 0.5),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.add, size: 12, color: colors.secondary),
-            const SizedBox(width: 2),
-            Text(
-              '标签',
-              style: TextStyle(
-                fontSize: 12,
-                height: 1,
-                fontWeight: AppWeight.medium,
-                color: colors.secondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 图片点击区：用 [Listener] 而不是 GestureDetector。
+/// 图片点击 / 长按区：用 [Listener] 而不是 GestureDetector。
 ///
 /// 图片现在承载了 `componentKey`（官方 ImageComponent / BoxComponent），
 /// 编辑器自己的选择手势会和 GestureDetector 抢竞技场，导致点击图片
 /// 只出现选区手柄、不打开查看器（实测）。Listener 不进竞技场，
-/// 按下/抬起位移小于 12、时长小于 500ms 就当作点击，滑动滚动手势不受影响。
+/// 按下/抬起位移小于 12、时长小于 500ms 就当作点击，滑动滚动手势不受影响；
+/// 按住 500ms 不动则触发长按菜单（图片操作）。
 class _ImageViewerTapArea extends StatefulWidget {
-  const _ImageViewerTapArea({required this.onTap, required this.child});
+  const _ImageViewerTapArea({
+    required this.onTap,
+    this.onLongPress,
+    required this.child,
+  });
 
   final VoidCallback onTap;
+
+  /// 长按（500ms 内位移不超过 12dp）：打开图片操作菜单。
+  final VoidCallback? onLongPress;
+
   final Widget child;
 
   @override
@@ -2100,6 +2431,19 @@ class _ImageViewerTapArea extends StatefulWidget {
 class _ImageViewerTapAreaState extends State<_ImageViewerTapArea> {
   Offset? _downPosition;
   DateTime? _downAt;
+  Timer? _longPressTimer;
+  bool _longPressFired = false;
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
+
+  void _cancelLongPress() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2108,12 +2452,31 @@ class _ImageViewerTapAreaState extends State<_ImageViewerTapArea> {
       onPointerDown: (PointerDownEvent event) {
         _downPosition = event.position;
         _downAt = DateTime.now();
+        _longPressFired = false;
+        _cancelLongPress();
+        if (widget.onLongPress != null) {
+          _longPressTimer = Timer(const Duration(milliseconds: 500), () {
+            _longPressFired = true;
+            widget.onLongPress!();
+          });
+        }
+      },
+      onPointerMove: (PointerMoveEvent event) {
+        final Offset? down = _downPosition;
+        if (down != null && (event.position - down).distance > 12) {
+          _cancelLongPress();
+        }
       },
       onPointerUp: (PointerUpEvent event) {
         final Offset? down = _downPosition;
         final DateTime? at = _downAt;
         _downPosition = null;
         _downAt = null;
+        _cancelLongPress();
+        if (_longPressFired) {
+          _longPressFired = false;
+          return;
+        }
         if (down == null || at == null) {
           return;
         }
@@ -2126,6 +2489,8 @@ class _ImageViewerTapAreaState extends State<_ImageViewerTapArea> {
       onPointerCancel: (_) {
         _downPosition = null;
         _downAt = null;
+        _longPressFired = false;
+        _cancelLongPress();
       },
       child: widget.child,
     );
@@ -2137,10 +2502,19 @@ class _LabImageComponentBuilder implements ComponentBuilder {
   const _LabImageComponentBuilder({
     required this.repository,
     required this.editor,
+    required this.onImageLongPress,
   });
 
   final NoteRepository repository;
   final Editor editor;
+
+  /// 长按图片：打开「小图/大图、下载、删除」菜单。
+  final void Function(
+    BuildContext context,
+    String nodeId,
+    String absolutePath,
+    ImageDisplaySize size,
+  ) onImageLongPress;
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -2166,11 +2540,35 @@ class _LabImageComponentBuilder implements ComponentBuilder {
     if (componentViewModel is! _LabImageViewModel) {
       return null;
     }
-    final path = componentViewModel.imageUrl.startsWith('assets/')
-        ? componentViewModel.repository.store
-            .absoluteAssetPath(componentViewModel.imageUrl)
-        : componentViewModel.imageUrl;
-    return _ImageViewerTapArea(
+    // URL 末尾可能带「小图」标记：解析真实文件前先剥掉。
+    final ImageDisplaySize size =
+        imageDisplaySizeOf(componentViewModel.imageUrl);
+    final String rawPath = imageFilePath(componentViewModel.imageUrl);
+    final String path = rawPath.startsWith('assets/')
+        ? componentViewModel.repository.store.absoluteAssetPath(rawPath)
+        : rawPath;
+
+    final Widget image = ImageComponent(
+      componentKey: componentContext.componentKey,
+      imageUrl: path,
+      imageBuilder: (BuildContext context, String _) => Image.file(
+        File(path),
+        // 由外层的 AdaptiveImageFrame 决定盒子尺寸：
+        //  - 普通图片盒子的宽高比 = 原图比例，cover 等价于等比缩放；
+        //  - 超长图盒子被限高后才裁切，并显示「长图」角标（微信逻辑）。
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+        width: double.infinity,
+        // 图挂了不能白屏：errorBuilder 退回占位框，alt 文字可读。
+        errorBuilder: (_, __, ___) => _placeholder(componentViewModel),
+      ),
+    );
+
+    // 点击/长按区域必须**包在图片盒子里面**：AdaptiveImageFrame 右对齐
+    // 之外还有一整行空白（Align 会撑满可用宽度），如果把 Listener 放在
+    // 外面，点图片右侧的空白也会打开查看器（用户反馈）。
+    // 现在 Listener 拿到的是 SizedBox 的紧约束，命中范围严格等于图片框。
+    final Widget tappable = _ImageViewerTapArea(
       onTap: () {
         // 点图先退出编辑态：否则键盘/选区手柄会在查看器后面挂着。
         editor.execute(<EditRequest>[const ClearSelectionRequest()]);
@@ -2180,27 +2578,28 @@ class _LabImageComponentBuilder implements ComponentBuilder {
           componentViewModel.altText,
         );
       },
-      child: Padding(
-        padding: const EdgeInsets.only(top: 6, bottom: 6),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.block),
-          // 必须用官方 ImageComponent 承载 componentKey：查看器的
-          // sourceRect 是从这个 key 的 RenderBox 取出来的。之前自己
-          // 直接返回 Image.file，componentKey 没挂到任何组件上，
-          // currentContext 恒为 null → sourceRect = Rect.zero，
-          // 于是「放大动画总是从左上角飞出来」（用户反馈）。
-          child: ImageComponent(
-            componentKey: componentContext.componentKey,
-            imageUrl: path,
-            imageBuilder: (BuildContext context, String _) => Image.file(
-              File(path),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              // 图挂了不能白屏：errorBuilder 退回占位框，alt 文字可读。
-              errorBuilder: (_, __, ___) => _placeholder(componentViewModel),
-            ),
-          ),
-        ),
+      onLongPress: () => onImageLongPress(
+        componentContext.context,
+        componentViewModel.nodeId,
+        path,
+        size,
+      ),
+      child: image,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 6),
+      // 微信式尺寸规则（大小图都遵循，详见 AdaptiveImageFrame）：
+      //  - 不放大：小图按原始尺寸显示；
+      //  - 普通竖图：整体缩小到高度上限内（不裁切）；
+      //  - 超长截图：定宽 + 限高裁切，右下角标「长图」，点开看原图。
+      // 只给「目标宽度比例」和「高度上限」，具体盒子由图片比例决定，
+      // 所以超长图不会再一条铺满屏幕。
+      child: AdaptiveImageFrame(
+        path: path,
+        widthFactor: size == ImageDisplaySize.small ? 0.4 : 1,
+        maxHeight: size == ImageDisplaySize.small ? 180 : 420,
+        child: tappable,
       ),
     );
   }
@@ -2274,6 +2673,23 @@ class _LabImageViewModel extends SingleColumnLayoutComponentViewModel {
       altText: altText,
       repository: repository,
     );
+  }
+}
+
+/// 点击「已有光标」不再切换选择工具条。
+///
+/// super_editor 的 Android 手势在「点击落在已有 collapsed 选区」时会
+/// `toggleToolbar()` —— 双击的第二下正好命中这个条件，于是双击就弹出
+/// 「复制/剪切/粘贴/全选」（用户反馈）。主流移动笔记只在**有选区**时
+/// 显示工具条，所以这里把 toggle 关掉；长按选词走的是 `showToolbar()`
+/// （展开选区分支），不受影响。
+class _XiaojiAndroidControlsController
+    extends SuperEditorAndroidControlsController {
+  _XiaojiAndroidControlsController({required super.toolbarBuilder});
+
+  @override
+  void toggleToolbar() {
+    // 刻意不实现：点光标不弹工具条。
   }
 }
 
@@ -2594,6 +3010,9 @@ class _LabHorizontalRuleComponentBuilder implements ComponentBuilder {
   }
 }
 
+/// 图片长按菜单的动作。
+enum _ImageAction { small, large, download, delete }
+
 /// 滚动控制器：把「框架发起的瞬时跳转」交给页面接管。
 ///
 /// super_editor 每次文档变化后会用 `jumpTo` 把光标瞬间抬到视口边界，
@@ -2643,5 +3062,22 @@ class _CaretAwareScrollPosition extends ScrollPositionWithSingleContext {
       return;
     }
     super.jumpTo(value);
+  }
+
+  /// 框架/内核用 `animateTo` 做的自动滚动（如选区保可见）也要接管。
+  ///
+  /// 之前只拦了 `jumpTo`：键盘收起时内核用 600ms 的 animateTo 把正文
+  /// 缓动回顶部，`jumpTo` 拦截完全看不到它，页面就「慢慢下移」。
+  /// 交给页面判断：收起窗口内直接吞掉；正常编辑时改走逐帧平滑滚动。
+  @override
+  Future<void> animateTo(
+    double to, {
+    required Duration duration,
+    required Curve curve,
+  }) {
+    if (onExternalJump(to, this)) {
+      return Future<void>.value();
+    }
+    return super.animateTo(to, duration: duration, curve: curve);
   }
 }
