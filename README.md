@@ -25,9 +25,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.4.9 |
+| 版本 | 1.5.0 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 326 / 326 通过 |
+| 测试 | `flutter test` 329 / 329 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | `build/app/outputs/flutter-apk/app-release.apk`，约 41MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |

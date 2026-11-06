@@ -858,14 +858,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.3.0-dev.52"
-  super_editor_markdown:
-    dependency: "direct main"
-    description:
-      name: super_editor_markdown
-      sha256: "60975d99d82a81589366400577e647a23fcfa31e1722f2942e9889b207b140e9"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.2"
   super_keyboard:
     dependency: transitive
     description:
