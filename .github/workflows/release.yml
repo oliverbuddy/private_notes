@@ -73,25 +73,43 @@ jobs:
             private_notes-*.apk
             private_notes-*.apk.sha256
 
+      # 自己拼 Release 说明：先给安装步骤，再列本次提交。
+      # 不用 generate_release_notes + append_body：后者只在「更新已有
+      # Release」时追加，新建 Release 会被忽略（v1.3.2 踩过）。
+      - name: Compose release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "### 下载与安装"
+            echo
+            echo "- 下载上面的 \`.apk\` 安装，Android 7.0 及以上。"
+            echo "- 覆盖安装即可升级，笔记与设置保留，无需卸载旧版。"
+            echo "- 同名 \`.sha256\` 是安装包校验值，可用 \`sha256sum\` 核对。"
+            echo "- 自动更新：在 Obtainium 中添加仓库 \`${GITHUB_REPOSITORY}\`。"
+            echo
+            echo "更多说明与截图：https://oliverbuddy.github.io/private_notes/"
+            echo
+            echo "### 本版变更"
+            echo
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty=format:"- %s" "$PREV..HEAD"
+              echo
+              echo
+              echo "完整对比：https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}"
+            else
+              git log --no-merges -10 --pretty=format:"- %s"
+              echo
+            fi
+          } > RELEASE_NOTES.md
+
       # 推 v* 标签：自动创建 GitHub Release 并附 APK + 校验和，供他人下载。
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: 小记 ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: |
             private_notes-*.apk
             private_notes-*.apk.sha256
-          generate_release_notes: true
-          append_body: |
-
-            ---
-
-            ### 下载与安装
-
-            - 直接下载上面的 `.apk` 文件安装，Android 7.0 及以上。
-            - 覆盖安装即可升级，笔记与设置保留，无需卸载旧版。
-            - 同名 `.sha256` 文件是安装包的 SHA-256 校验值，可用 `sha256sum` 核对。
-            - 想自动更新：在 Obtainium 中添加仓库 `oliverbuddy/private_notes`。
-
-            更多说明与截图：https://oliverbuddy.github.io/private_notes/
