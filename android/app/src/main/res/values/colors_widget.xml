@@ -7,4 +7,6 @@
     <color name="widget_text">#2C2C2A</color>
     <color name="widget_sub">#8F8C84</color>
     <color name="widget_accent">#0A6CFF</color>
+    <!-- 图标底的淡强调色：accent @ 10%，让笔有落点又不抢标题。 -->
+    <color name="widget_icon_bg">#1A0A6CFF</color>
 </resources>

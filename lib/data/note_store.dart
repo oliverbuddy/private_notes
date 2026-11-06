@@ -1194,7 +1194,7 @@ class TrashedNote {
 /// 应用私有备份的来源类型。
 enum BackupKind {
   auto('自动备份'),
-  manual('立即备份'),
+  manual('手动备份'),
   preRestore('恢复前快照');
 
   const BackupKind(this.label);

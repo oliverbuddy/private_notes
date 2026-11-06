@@ -25,7 +25,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.4.1 |
+| 版本 | 1.4.2 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 326 / 326 通过 |
 | 静态检查 | `flutter analyze` No issues found |
@@ -48,7 +48,8 @@
 单篇锁定（正文 AES-256-GCM 加密，系统凭证/指纹/PIN 解锁，列表显示锁图标，删除也需验证）·
 锁定笔记截屏/多任务预览保护（FLAG_SECURE，可关）· 回收站（正文 + 附件整体保留 30 天，可恢复/彻底删除）·
 删除后即时撤销 · 每日自动备份（距上次 ≥24h）· 立即备份 · 恢复前快照 ·
-应用内备份列表恢复 · 整库导出（SAF 保存，默认排除锁定笔记与回收站，settings 脱敏）·
+应用内备份列表恢复 · 导出 zip（SAF 保存，默认排除锁定笔记与回收站，settings 脱敏）·
+**备份与恢复单入口**（自动备份开关 + 立即备份 + 导出 + 恢复，避免并列多个相似入口）·
 **自动备份到文件夹**（SAF 目录授权，每 24h 写一份，保留最近 3 份）·
 Android 系统备份已关闭（`allowBackup=false` + `data_extraction_rules`）
 
@@ -337,7 +338,9 @@ lib/security/app_lock_gate.dart               应用锁闸门（锁屏覆盖所�
 lib/security/security_service.dart            系统凭证 / Keystore 加解密 / FLAG_SECURE
 lib/security/pin_pad.dart                     PIN 点阵 + 应用内数字键盘（绕开 IME）
 lib/security/unlock.dart                      身份验证 / PIN 弹层
-lib/settings/settings_page.dart               外观 / 安全 / 数据（导出、备份、恢复）
+lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、最近删除）
+lib/settings/backup_sheets.dart               备份与恢复弹层、恢复来源选择（纯展示，动作交回页面）
+lib/ui/content_frame.dart                     页面内容限宽居中（平板 / PC 端复用同一断点）
 lib/settings/trash_page.dart                  最近删除（恢复 / 彻底删除 / 清空）
 lib/ui/snack.dart                             统一底部提示（4 秒自动消失）
 lib/util/native_zip.dart                      原生流式 zip / SAF 保存
@@ -367,7 +370,7 @@ docs/                                         GitHub Pages 落地页（下载 / 
    迁移锁定笔记请用「导出（含锁定笔记，明文）」后重新锁定。
 4. **应用内备份与数据同盘。** 自动/手动备份都在应用私有 `backups/`，设备损坏或清除应用数据会一起丢失。
    设置里可开启「自动备份到文件夹」（SAF 目录授权，每 24 小时一份、保留最近 3 份），把同样的 zip 写到
-   SD 卡或网盘同步目录；长期归档仍建议在「备份」里选「备份到文件夹」。恢复是合并覆盖（不会删除本地其它笔记），
+   SD 卡或网盘同步目录；一次性归档/换机仍建议用「导出 zip」。恢复是合并覆盖（不会删除本地其它笔记），
    且**只还原笔记与附件**：应用锁、主题等设置保持本机现状，避免把别的设备的 PIN 带进来。
 5. **没有单篇版本历史。** 整库备份只能回到某个时间点；撤销栈只在当前编辑会话内有效。
 6. **release 签名依赖本地 `android/key.properties`**（CI 从 Secrets 恢复），密钥需自行备份，丢失后无法覆盖升级。

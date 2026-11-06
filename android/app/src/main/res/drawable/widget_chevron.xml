@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 右侧箭头：告诉用户「点进去」，和 App 内的设置行保持同一套语言。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/widget_sub"
+        android:pathData="M9.29,6.71a.996,.996 0 0 0,0 1.41L13.17,12l-3.88,3.88a.996,.996 0 1 0,1.41,1.41l4.59,-4.59a.996,.996 0 0 0,0 -1.41L10.7,6.7a.996,.996 0 0 0,-1.41 0z" />
+</vector>

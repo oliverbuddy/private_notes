@@ -10,18 +10,20 @@ import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../security/unlock.dart';
 import '../theme/app_theme.dart';
+import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/date_format.dart';
 import '../util/native_zip.dart';
+import 'backup_sheets.dart';
 import 'trash_page.dart';
 
 /// 设置页。
 ///
-/// 两组：外观和数据（导出）。刻意不放「关于」「反馈」「云同步」——
+/// 三组：外观、安全、数据。刻意不放「关于」「反馈」「云同步」——
 /// 一个本地优先的工具，设置项越少越可信。
-/// 主页右上角「···」直达这里，导出收进来作为数据卡片的一行 ——
-/// 首页菜单不再单列导出入口。
+/// 数据卡片只保留「备份与恢复」「最近删除」两行：备份的自动/手动/导出
+/// 全部收进弹层，避免主界面出现多个看起来差不多的入口。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.repository});
 
@@ -60,16 +62,19 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 「立即备份」行的状态文案。
+  /// 「备份与恢复」行的状态文案。
   ///
   /// 自动备份失败时用户无从感知，这里把它摊到设置页上：失败 → 提示重试；
   /// 成功 → 显示最近一次备份时间；从未备份 → 明确说「尚无备份」。
-  String _backupStatusText() {
-    if (_backingUp) {
+  String _backupOverviewText() {
+    if (_backingUp || _exporting) {
       return '备份中…';
     }
+    if (_restoring) {
+      return '恢复中…';
+    }
     if (repository.lastBackupError != null) {
-      return '上次失败，点此重试';
+      return '上次失败';
     }
     if (_lastBackup == null) {
       return '尚无备份';
@@ -77,22 +82,16 @@ class _SettingsPageState extends State<SettingsPage> {
     return '上次 ${formatListTime(_lastBackup!)}';
   }
 
-  /// 「自动导出到文件夹」行的状态文案。
-  ///
-  /// 外置备份是唯一的「换机/丢失手机也能找回」通道，失败必须显性化，
-  /// 否则用户会以为数据已经有第二份了。
-  String _externalBackupStatusText() {
+  /// 弹层里的自动备份状态：开启时显示最近一次成功时间或失败原因。
+  String _autoBackupStatusText() {
     if (repository.externalBackupRunning) {
-      return '导出中…';
+      return '备份中…';
     }
     if (repository.lastExternalBackupError != null) {
-      return '上次失败，点此重试';
-    }
-    if (repository.settings.externalBackupUri == null) {
-      return '未开启';
+      return '上次失败';
     }
     final DateTime? at = repository.lastExternalBackupTime;
-    return at == null ? '每 24 小时' : '上次 ${formatListTime(at)}';
+    return at == null ? '尚未备份' : '上次 ${formatListTime(at)}';
   }
 
   @override
@@ -113,11 +112,9 @@ class _SettingsPageState extends State<SettingsPage> {
               children: <Widget>[
                 _buildHeader(context, colors),
                 Expanded(
-                  // 平板/宽屏上限宽居中，表单拉满全宽没法看
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 480),
-                      child: ListView(
+                  // 平板/宽屏上限宽居中（统一走 ContentFrame）
+                  child: ContentFrame(
+                    child: ListView(
                     physics: const BouncingScrollPhysics(
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
@@ -175,36 +172,12 @@ class _SettingsPageState extends State<SettingsPage> {
                         colors: colors,
                         cardColor: cardColor,
                         rows: <Widget>[
-                          // 「备份」是一个动作入口：立即备份（App 内）与备份到
-                          // 文件夹（原「导出全部」）产物是同一个 zip，没必要
-                          // 在主界面并列成两行 —— 只在需要交出去时多问一步。
+                          // 一个入口收口全部备份能力：自动备份是开关，
+                          // 立即备份 / 导出 / 恢复是动作，都在弹层里区分。
                           _SettingRow(
-                            label: '备份',
-                            value: _backupStatusText(),
-                            onTap: _backingUp || _exporting
-                                ? null
-                                : _openBackupSheet,
-                          ),
-                          _divider(colors),
-                          // 从 zip 恢复：迁移/换机/卸载重装后找回全部笔记。
-                          _SettingRow(
-                            label: '从备份恢复',
-                            value: _restoring ? '恢复中…' : null,
-                            onTap: () {
-                              if (!_restoring) {
-                                _restoreBackup();
-                              }
-                            },
-                          ),
-                          _divider(colors),
-                          // 外置备份：写进用户授权的文件夹（SD 卡/网盘目录），
-                          // 是「手机丢了备份还在」的唯一通道。
-                          _SettingRow(
-                            label: '自动备份到文件夹',
-                            value: _externalBackupStatusText(),
-                            onTap: repository.externalBackupRunning
-                                ? null
-                                : () => _openExternalBackup(),
+                            label: '备份与恢复',
+                            value: _backupOverviewText(),
+                            onTap: _openBackupMenu,
                           ),
                           _divider(colors),
                           _SettingRow(
@@ -219,7 +192,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
-            ),
               ],
             );
           },
@@ -273,11 +245,11 @@ class _SettingsPageState extends State<SettingsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           item('存放位置', '应用私有目录，系统「文件」管理器看不到，也不随系统云备份上传。'),
-          item('卸载风险', '卸载 App 会一并删除，换机前请先「备份到文件夹」。'),
-          item('自动备份', '本机每天 1 份；文件夹每 24 小时 1 份，各保留最近 3 份。'),
+          item('卸载风险', '卸载 App 会一并删除，换机前请先在「备份与恢复」里导出 zip。'),
+          item('自动备份', '本机每天 1 份；开启文件夹后每 24 小时 1 份，各保留最近 3 份。'),
           item(
             '锁定笔记',
-            '密文只在本机可解密；备份到文件夹默认不含锁定笔记与「最近删除」。',
+            '密文只在本机可解密；导出 zip 默认不含锁定笔记与「最近删除」。',
           ),
         ],
       ),
@@ -499,86 +471,56 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _restoring = false;
 
-  /// 「备份」行入口：应用内备份 / 备份到文件夹（原「导出全部」）。
+  /// 「备份与恢复」入口：所有备份能力都收在这个弹层里。
   ///
-  /// 两者产物是同一个 zip，区别只在存放位置与锁定笔记的处理方式。
-  /// 合并后主界面少一行语义重复的「导出全部」，能力一个不少。
-  Future<void> _openBackupSheet() async {
-    final String? action = await showXiaojiSheet<String>(
-      context: context,
-      builder: (BuildContext sheetContext) {
-        final AppColors colors = AppColors.of(sheetContext);
-        Widget tile({
-          required String label,
-          required String subtitle,
-          required String value,
-        }) {
-          return InkWell(
-            onTap: () => Navigator.of(sheetContext).pop(value),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    style: TextStyle(fontSize: 16, color: colors.text),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.5,
-                      color: colors.tertiary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                  child: Text(
-                    '备份',
-                    style: AppText.caption.copyWith(color: colors.tertiary),
-                  ),
-                ),
-                tile(
-                  label: '立即备份到应用内',
-                  subtitle: '含锁定笔记密文，只能在本机恢复',
-                  value: 'local',
-                ),
-                tile(
-                  label: '备份到文件夹…',
-                  subtitle: '生成 zip 交给系统保存，换机或归档用；可选含锁定笔记明文',
-                  value: 'file',
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+  /// 主界面只保留一行，是为了避免「备份」和「自动备份到文件夹」并排出现
+  /// 造成的困惑 —— 自动备份是一个开关，不是与「备份」平行的功能。
+  Future<void> _openBackupMenu() async {
+    if (_backingUp || _exporting || _restoring) {
+      return;
+    }
+    final NoteSettings settings = repository.settings;
+    final bool autoEnabled = settings.externalBackupUri != null;
+    final BackupAction? action = await showBackupMenu(
+      context,
+      autoEnabled: autoEnabled,
+      autoBusy: repository.externalBackupRunning,
+      autoStatusLabel: _autoBackupStatusText(),
+      folderLabel: backupFolderLabel(settings.externalBackupUri),
+      lastBackupLabel: _backupStatusText(),
     );
     if (action == null || !mounted) {
       return;
     }
-    if (action == 'local') {
-      await _backupNow();
-    } else {
-      await _exportAll();
+    switch (action) {
+      case BackupAction.enableAuto:
+      case BackupAction.changeFolder:
+        await _chooseExternalBackupFolder();
+      case BackupAction.disableAuto:
+        await repository.updateSettings(
+          repository.settings.copyWith(clearExternalBackup: true),
+        );
+        if (mounted) {
+          _showSnack('已关闭自动备份');
+        }
+      case BackupAction.backupNow:
+        await _backupNow();
+      case BackupAction.exportZip:
+        await _exportAll();
+      case BackupAction.restore:
+        await _restoreBackup();
     }
+  }
+
+  /// 弹层标题下的一行状态：备份成功时间 / 失败提示 / 尚无备份。
+  String _backupStatusText() {
+    if (repository.lastBackupError != null) {
+      return '上次自动备份失败，可点「立即备份」重试';
+    }
+    if (_lastBackup == null) {
+      return '还没有备份。建议先「立即备份」一次。';
+    }
+    return '最近备份：${formatListTime(_lastBackup!)}';
   }
 
   /// 立即生成一份应用私有备份（不进系统相册/云备份）。
@@ -604,80 +546,6 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() => _backingUp = false);
       }
     }
-  }
-
-  /// 外置备份入口：未开启 → 直接选文件夹；已开启 → 操作菜单。
-  Future<void> _openExternalBackup() async {
-    if (repository.settings.externalBackupUri == null) {
-      await _chooseExternalBackupFolder();
-      return;
-    }
-    final String? action = await _pickExternalAction();
-    if (action == null || !mounted) {
-      return;
-    }
-    switch (action) {
-      case 'export':
-        await _exportToFolder();
-        return;
-      case 'change':
-        await _chooseExternalBackupFolder();
-        return;
-      case 'off':
-        await repository.updateSettings(
-          repository.settings.copyWith(clearExternalBackup: true),
-        );
-        if (mounted) {
-          _showSnack('已关闭自动备份');
-        }
-        return;
-    }
-  }
-
-  Future<String?> _pickExternalAction() {
-    return showXiaojiSheet<String>(
-      context: context,
-      builder: (BuildContext sheetContext) {
-        final AppColors sheetColors = AppColors.of(sheetContext);
-        Widget tile({required String label, required String value}) {
-          return InkWell(
-            onTap: () => Navigator.of(sheetContext).pop(value),
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                label,
-                style: TextStyle(fontSize: 16, color: sheetColors.text),
-              ),
-            ),
-          );
-        }
-
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '自动备份到文件夹',
-                    style: AppText.caption.copyWith(color: sheetColors.tertiary),
-                  ),
-                ),
-              ),
-              tile(label: '立即备份', value: 'export'),
-              tile(label: '更换文件夹', value: 'change'),
-              tile(label: '关闭自动备份', value: 'off'),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   /// 选择文件夹并立刻导出一次：用户选完就能看到结果，不用再点一次。
@@ -727,9 +595,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 「从文件选择」的哨兵值：弹层返回它表示走系统文件选择器。
-  static const String _pickFileSentinel = '__pick_file__';
-
   /// 从备份恢复：先选来源（应用内备份 / 系统文件）→ 确认覆盖 → 执行。
   ///
   /// 应用内备份在私有目录，系统文件管理器看不到，必须在这里列出来 ——
@@ -740,8 +605,8 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    String? path = source == _pickFileSentinel ? null : source;
-    if (source == _pickFileSentinel) {
+    String? path = source == pickBackupFileSentinel ? null : source;
+    if (source == pickBackupFileSentinel) {
       // 只取路径，不把 zip 读进内存（大备份会 OOM）。
       final picked = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -802,135 +667,13 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 选择恢复来源：应用内备份列表 + 「从文件选择…」。
+  /// 选择恢复来源：应用内备份列表 + 「从 zip 文件选择…」。
   Future<String?> _pickRestoreSource() async {
-    final backups = await repository.listBackups();
+    final List<BackupEntry> backups = await repository.listBackups();
     if (!mounted) {
       return null;
     }
-    final colors = AppColors.of(context);
-    return showXiaojiSheet<String>(
-      context: context,
-      builder: (BuildContext sheetContext) {
-        final sheetColors = AppColors.of(sheetContext);
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '从备份恢复',
-                    style: AppText.caption.copyWith(color: sheetColors.tertiary),
-                  ),
-                ),
-              ),
-              if (backups.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '还没有应用内备份，可直接选择导出的 zip 文件。',
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.5,
-                        color: sheetColors.secondary,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                for (final BackupEntry entry in backups)
-                  InkWell(
-                    onTap: () =>
-                        Navigator.of(sheetContext).pop(entry.path),
-                    child: Container(
-                      height: 56,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      alignment: Alignment.centerLeft,
-                      child: Row(
-                        children: <Widget>[
-                          Icon(
-                            _backupIcon(entry.kind),
-                            size: 18,
-                            color: sheetColors.secondary,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  entry.kind.label,
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    color: sheetColors.text,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  formatListTime(entry.time),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: sheetColors.tertiary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              _divider(colors),
-              InkWell(
-                onTap: () =>
-                    Navigator.of(sheetContext).pop(_pickFileSentinel),
-                child: Container(
-                  height: 52,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    children: <Widget>[
-                      Icon(
-                        Icons.folder_open,
-                        size: 18,
-                        color: sheetColors.secondary,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        '从文件选择…',
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: sheetColors.text,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  IconData _backupIcon(BackupKind kind) {
-    switch (kind) {
-      case BackupKind.auto:
-        return Icons.schedule;
-      case BackupKind.manual:
-        return Icons.save_alt;
-      case BackupKind.preRestore:
-        return Icons.history;
-    }
+    return showRestoreSourceMenu(context, backups: backups);
   }
 
   Future<void> _showRestoreResult(int restored, int skipped) {
