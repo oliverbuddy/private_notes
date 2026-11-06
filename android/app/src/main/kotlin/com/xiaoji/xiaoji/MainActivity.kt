@@ -205,6 +205,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onDestroy() {
+        // 系统验证页还开着时 Activity 被回收：给 Dart 侧一个结果，
+        // 否则解锁按钮会一直停在「验证中」。
+        if (::securityBridge.isInitialized) {
+            securityBridge.onDestroy()
+        }
+        super.onDestroy()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return

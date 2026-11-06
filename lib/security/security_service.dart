@@ -17,13 +17,27 @@ class SecurityService {
     return value ?? false;
   }
 
+  /// 是否有系统身份验证正在进行。
+  ///
+  /// 系统凭证页是另一个 Activity，拉起时宿主 App 会收到 paused、验证结束后
+  /// 再收到 resumed。应用锁不能把这段生命周期当成「用户离开了 App」：
+  /// 自动锁定设为「立即」时，验证一回来就会立刻重新上锁 —— 表现就是
+  /// 系统/指纹验证永远解不开。
+  static int _authInFlight = 0;
+  static bool get isAuthenticating => _authInFlight > 0;
+
   /// 唤起系统凭证（PIN/图案/密码/指纹），返回是否验证通过。
   Future<bool> authenticate({String reason = '验证身份后继续'}) async {
-    final bool? value = await _channel.invokeMethod<bool>(
-      'authenticate',
-      <String, Object?>{'reason': reason},
-    );
-    return value ?? false;
+    _authInFlight++;
+    try {
+      final bool? value = await _channel.invokeMethod<bool>(
+        'authenticate',
+        <String, Object?>{'reason': reason},
+      );
+      return value ?? false;
+    } finally {
+      _authInFlight--;
+    }
   }
 
   /// 生成 16 字节随机盐（base64）。

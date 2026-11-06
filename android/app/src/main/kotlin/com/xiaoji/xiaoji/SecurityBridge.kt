@@ -4,10 +4,14 @@ import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
 import android.os.Build
+import android.os.CancellationSignal
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import android.view.WindowManager
 import io.flutter.plugin.common.MethodChannel
 import java.security.KeyStore
@@ -31,8 +35,10 @@ import javax.crypto.spec.PBEKeySpec
 internal class SecurityBridge(private val activity: Activity) {
 
     private var pendingAuth: MethodChannel.Result? = null
+    private var authSignal: CancellationSignal? = null
 
     companion object {
+        private const val TAG = "XiaojiSecurity"
         private const val REQUEST_AUTH = 4102
         private const val KEY_ALIAS = "xiaoji-note-key-v1"
         private const val GCM_TAG_BITS = 128
@@ -47,21 +53,39 @@ internal class SecurityBridge(private val activity: Activity) {
         result.success(keyguard.isDeviceSecure)
     }
 
-    /** 唤起系统凭证验证；用户在系统界面取消或失败返回 false。 */
+    /**
+     * 唤起系统身份验证；用户在系统界面取消或失败返回 false。
+     *
+     * Android 10+ 走 [BiometricPrompt]：一次验证里同时接受指纹/人脸和
+     * 锁屏 PIN/图案/密码（设备没录指纹时直接落到锁屏凭证）。旧系统没有
+     * 「生物识别 + 设备凭证合并」的框架 API，退回 Keyguard 凭证确认页。
+     */
     fun authenticate(reason: String, result: MethodChannel.Result) {
         val keyguard =
             activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         if (!keyguard.isDeviceSecure) {
+            Log.w(TAG, "设备没有安全锁屏，无法使用系统验证")
             result.success(false)
             return
         }
+        Log.i(TAG, "拉起系统验证：sdk=${Build.VERSION.SDK_INT}")
+        // 上一次验证若没正常收尾（例如界面被回收），先结掉它，避免 Dart 侧
+        // 的 Future 永远挂着、解锁按钮一直转圈。
+        cancelPendingAuth()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            showBiometricPrompt(reason, result)
+        } else {
+            showDeviceCredential(reason, result)
+        }
+    }
+
+    /** Android 9 及以下：只有系统凭证确认页（不支持在页内用指纹）。 */
+    private fun showDeviceCredential(reason: String, result: MethodChannel.Result) {
+        val keyguard =
+            activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         val intent = keyguard.createConfirmDeviceCredentialIntent("解锁小记", reason)
         if (intent == null) {
             result.success(false)
-            return
-        }
-        if (pendingAuth != null) {
-            result.error("busy", "正在等待上一次验证", null)
             return
         }
         pendingAuth = result
@@ -73,15 +97,93 @@ internal class SecurityBridge(private val activity: Activity) {
         }
     }
 
+    /** Android 10+：指纹/人脸 + 锁屏凭证统一入口。 */
+    private fun showBiometricPrompt(reason: String, result: MethodChannel.Result) {
+        pendingAuth = result
+        val signal = CancellationSignal()
+        authSignal = signal
+        val promptBuilder = BiometricPrompt.Builder(activity)
+            .setTitle("解锁小记")
+            .setSubtitle(reason)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+：两种验证方式都允许，系统会先给生物识别，
+            // 失败或用户点「使用 PIN」时切到锁屏凭证。
+            promptBuilder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+            )
+        } else {
+            // Android 10：equivalent 的旧 API。
+            @Suppress("DEPRECATION")
+            promptBuilder.setDeviceCredentialAllowed(true)
+        }
+        try {
+            promptBuilder.build().authenticate(
+                signal,
+                activity.mainExecutor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(
+                        authenticationResult: BiometricPrompt.AuthenticationResult,
+                    ) {
+                        finishAuth(true)
+                    }
+
+                    override fun onAuthenticationError(
+                        errorCode: Int,
+                        errString: CharSequence,
+                    ) {
+                        Log.w(TAG, "系统验证未通过：$errorCode $errString")
+                        finishAuth(false)
+                    }
+
+                    override fun onAuthenticationFailed() {
+                        // 指纹没对上，系统会留在原地重试，不结束本次流程。
+                        Log.w(TAG, "生物识别未匹配，等待系统重试")
+                    }
+                },
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "无法唤起系统验证", e)
+            finishAuth(false)
+        }
+    }
+
     /** 供 Activity 的 onActivityResult 调用；返回 true 表示本次结果已处理。 */
     fun onActivityResult(requestCode: Int, resultCode: Int): Boolean {
         if (requestCode != REQUEST_AUTH) {
             return false
         }
-        val result = pendingAuth ?: return true
-        pendingAuth = null
-        result.success(resultCode == Activity.RESULT_OK)
+        finishAuth(resultCode == Activity.RESULT_OK)
         return true
+    }
+
+    /** Activity 销毁时结掉挂起的验证，保证 Dart Future 不会悬空。 */
+    fun onDestroy() {
+        cancelPendingAuth()
+    }
+
+    private fun finishAuth(success: Boolean) {
+        val result = pendingAuth ?: return
+        pendingAuth = null
+        authSignal = null
+        try {
+            result.success(success)
+        } catch (_: Exception) {
+            // 引擎已 detach 等场景：回调送不出去，本地状态仍要清干净。
+        }
+    }
+
+    private fun cancelPendingAuth() {
+        val result = pendingAuth
+        pendingAuth = null
+        val signal = authSignal
+        authSignal = null
+        signal?.cancel()
+        try {
+            result?.success(false)
+        } catch (_: Exception) {
+            // 同上：结果送达失败不影响清理。
+        }
     }
 
     /** 生成 16 字节盐（base64），给 Dart 侧存进 settings.json。 */

@@ -195,7 +195,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           '也不会随系统云备份上传。卸载 App 会一并删除，'
                           '换机或卸载前请用「导出全部」。'
                           '每天首次启动会自动备份一份（保留最近 3 份）；'
-                          '锁定笔记和「最近删除」不会进入导出/备份。',
+                          '备份包含锁定笔记的密文（只能在本机恢复）；'
+                          '导出默认不含锁定笔记与「最近删除」。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.75,

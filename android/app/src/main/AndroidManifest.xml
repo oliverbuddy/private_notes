@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 系统身份验证（指纹/人脸 + 锁屏凭证）。两者都是普通权限，安装时自动授予；
+         Android 9 及以下的老设备读的是 USE_FINGERPRINT。 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <application
         android:label="小记"
         android:name="${applicationName}"

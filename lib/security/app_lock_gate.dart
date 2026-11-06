@@ -78,8 +78,17 @@ class _AppLockGateState extends State<AppLockGate>
     if (!_enabled) {
       return;
     }
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
+    // 系统凭证页是我们自己拉起的另一个 Activity：拉起时 paused、验证结束
+    // 后 resumed，都发生在验证流程内部。若按普通「离开 App」处理，自动锁定
+    // 设为「立即」时验证刚通过就又会被锁上 —— 用户看到的就是永远解不开。
+    if (SecurityService.isAuthenticating) {
+      return;
+    }
+    // 只认 paused：hidden 在「从别的 Activity 返回」时也会触发（顺序是
+    // paused → hidden → inactive → resumed），系统验证页一关就会先来一次
+    // hidden，自动锁定设为「立即」时又会重新上锁。paused 已经足够表达
+    // 「App 离开前台」。
+    if (state == AppLifecycleState.paused) {
       _backgroundedAt = DateTime.now();
       if (widget.repository.settings.autoLockSeconds == 0) {
         // 「立即锁定」：一退到后台就锁，回来必验证。
@@ -158,6 +167,9 @@ class _AppLockGateState extends State<AppLockGate>
       _pinDigits = '';
       _pinError = null;
     });
+    // 验证成功后必须清掉离场时间：系统凭证页关闭会紧接着来一次 resumed，
+    // 残留的 _backgroundedAt 会让「立即锁定 / 1 分钟」判定成立而重新上锁。
+    _backgroundedAt = null;
     _applySecureFlag();
   }
 
