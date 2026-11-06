@@ -25,12 +25,12 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.4.8 |
+| 版本 | 1.4.9 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 326 / 326 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | `build/app/outputs/flutter-apk/app-release.apk`，约 41MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
-| 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口、FTS5 搜索、外置文件夹导出、手势导航适配 |
+| 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
 
 ## 功能
 
@@ -42,7 +42,8 @@
 底栏图片/待办/列表/引用/Aa + 收起键盘（不横滑）· 图片与附件 ·
 全弹窗统一底部弹层（`showXiaojiSheet`：grabber + 320ms 曲线动画）· 列表「到底了」提示 ·
 置顶 · 全文搜索（SQLite FTS5，中文按单字 + 二字切词，前缀匹配，含高亮，跳过锁定笔记）·
-明暗双主题 · 底部手势导航适配 · **桌面小组件「记一条」** · **长按桌面图标「新建小记」**
+明暗双主题 · 底部手势导航适配 · **桌面小组件「记一条」**（标题颜色跟随壁纸深浅）· **长按桌面图标「新建小记」** ·
+**关于页**（版本号 / 开源许可 / 联系作者 / 项目主页，设置页只留一个入口）
 
 **隐私与数据安全**：应用锁（系统 PIN/图案/密码或指纹 + PIN 回退，退后台自动锁定，锁屏覆盖所有路由）·
 单篇锁定（正文 AES-256-GCM 加密，系统凭证/指纹/PIN 解锁，列表显示锁图标，删除也需验证）·
@@ -338,7 +339,9 @@ lib/security/app_lock_gate.dart               应用锁闸门（锁屏覆盖所�
 lib/security/security_service.dart            系统凭证 / Keystore 加解密 / FLAG_SECURE
 lib/security/pin_pad.dart                     PIN 点阵 + 应用内数字键盘（绕开 IME）
 lib/security/unlock.dart                      身份验证 / PIN 弹层
-lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、最近删除）
+lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、最近删除）+ 关于入口
+lib/settings/about_page.dart                  关于页（版本 / 许可 / 联系方式 / 项目主页）
+lib/util/app_info.dart                        从已安装 APK 读取版本号与包名
 lib/settings/backup_sheets.dart               备份与恢复弹层、恢复来源选择（纯展示，动作交回页面）
 lib/ui/content_frame.dart                     页面内容限宽居中（平板 / PC 端复用同一断点）
 lib/settings/trash_page.dart                  最近删除（恢复 / 彻底删除 / 清空）
@@ -380,6 +383,8 @@ docs/                                         GitHub Pages 落地页（下载 / 
    设备被 root 后 Keystore 与 PIN 哈希都不再有保护力，这是本地加密的固有边界。
 10. **设备锁屏被关闭后**，若此前没设过备用 PIN，解锁页会要求先设置一个 PIN（不会静默放行）；
     如果连这一步也不想设，只能去设置里关掉应用锁。
+11. **小组件标题颜色跟随壁纸深浅**（浅色壁纸用深色字，深色壁纸用白字）。换壁纸后组件不会立即重算，
+    系统最快 30 分钟刷新一次；想马上生效可重新添加一次组件。
 
 ## 路线图
 
