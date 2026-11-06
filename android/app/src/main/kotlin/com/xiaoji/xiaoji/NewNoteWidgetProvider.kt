@@ -23,10 +23,8 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_new_note)
         val pending = newNoteIntent(context)
-        // 外层根布局撑满系统分配的格子，内层卡片只占内容高度 —— 两处都挂点击，
-        // 保证点在卡片上或卡片外的透明区都能进编辑页。
+        // 整个 1×1 区域都可点（图标与标题之间、四周留白也算）。
         views.setOnClickPendingIntent(R.id.widget_root, pending)
-        views.setOnClickPendingIntent(R.id.widget_card, pending)
         appWidgetManager.updateAppWidget(appWidgetIds, views)
     }
 

@@ -1,12 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 桌面小组件：与 App 的 AppColors 同一套 token，
-         浅色 pageAlt / 深色 pageAlt，保证放到桌面上和 App 内是一套语言。 -->
-    <color name="widget_bg">#F7F5F0</color>
-    <color name="widget_border">#E0DED6</color>
-    <color name="widget_text">#2C2C2A</color>
+    <!-- 小组件标题色：与系统图标标题同一灰度，浅色/深色壁纸上都可读。 -->
     <color name="widget_sub">#8F8C84</color>
-    <color name="widget_accent">#0A6CFF</color>
-    <!-- 图标底的淡强调色：accent @ 10%，让笔有落点又不抢标题。 -->
-    <color name="widget_icon_bg">#1A0A6CFF</color>
 </resources>

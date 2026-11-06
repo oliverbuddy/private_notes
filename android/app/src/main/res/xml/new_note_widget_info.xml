@@ -5,10 +5,10 @@
     android:description="@string/widget_new_note_desc"
     android:initialLayout="@layout/widget_new_note"
     android:minHeight="26dp"
-    android:minWidth="110dp"
+    android:minWidth="40dp"
     android:previewLayout="@layout/widget_new_note"
-    android:resizeMode="horizontal"
+    android:resizeMode="none"
     android:targetCellHeight="1"
-    android:targetCellWidth="2"
+    android:targetCellWidth="1"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />
