@@ -175,12 +175,18 @@ class _SettingsPageState extends State<SettingsPage> {
                         colors: colors,
                         cardColor: cardColor,
                         rows: <Widget>[
-                          _ExportRow(
-                            exporting: _exporting,
-                            onTap: _exporting ? null : _exportAll,
+                          // 「备份」是一个动作入口：立即备份（App 内）与备份到
+                          // 文件夹（原「导出全部」）产物是同一个 zip，没必要
+                          // 在主界面并列成两行 —— 只在需要交出去时多问一步。
+                          _SettingRow(
+                            label: '备份',
+                            value: _backupStatusText(),
+                            onTap: _backingUp || _exporting
+                                ? null
+                                : _openBackupSheet,
                           ),
                           _divider(colors),
-                          // 从导出 zip 恢复：迁移/换机/卸载重装后找回全部笔记。
+                          // 从 zip 恢复：迁移/换机/卸载重装后找回全部笔记。
                           _SettingRow(
                             label: '从备份恢复',
                             value: _restoring ? '恢复中…' : null,
@@ -191,18 +197,10 @@ class _SettingsPageState extends State<SettingsPage> {
                             },
                           ),
                           _divider(colors),
-                          // 立即备份到应用私有目录：防误删，也方便「恢复」前
-                          // 留一份可回滚的当前数据。
-                          _SettingRow(
-                            label: '立即备份',
-                            value: _backupStatusText(),
-                            onTap: _backingUp ? null : _backupNow,
-                          ),
-                          _divider(colors),
                           // 外置备份：写进用户授权的文件夹（SD 卡/网盘目录），
                           // 是「手机丢了备份还在」的唯一通道。
                           _SettingRow(
-                            label: '自动导出到文件夹',
+                            label: '自动备份到文件夹',
                             value: _externalBackupStatusText(),
                             onTap: repository.externalBackupRunning
                                 ? null
@@ -215,25 +213,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ],
                       ),
-                      Padding(
-                        // 说明文字和卡片左边缘对齐，比再缩进 6px 更整齐
-                        padding: EdgeInsets.zero,
-                        child: Text(
-                          '笔记存在应用私有目录，系统「文件」管理器看不到，'
-                          '也不会随系统云备份上传。卸载 App 会一并删除，'
-                          '换机或卸载前请用「导出全部」。'
-                          '每天首次启动会自动备份一份（保留最近 3 份）；'
-                          '备份包含锁定笔记的密文（只能在本机恢复）；'
-                          '导出默认不含锁定笔记与「最近删除」。'
-                          '开启「自动导出到文件夹」后会每 24 小时把同样的'
-                          '导出包写进所选目录（保留最近 3 份）。',
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.75,
-                            color: colors.tertiary,
-                          ),
-                        ),
-                      ),
+                      const SizedBox(height: 18),
+                      _buildDataNote(colors),
                     ],
                   ),
                 ),
@@ -243,6 +224,62 @@ class _SettingsPageState extends State<SettingsPage> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  /// 底部「数据说明」：四行「小标题 + 一句短句」。
+  ///
+  /// 原先是一整段 6 行的文字，实际没人读。拆成固定宽度的小标题后，
+  /// 用户扫一眼就能找到「存在哪 / 会怎么丢 / 备份怎么运作 / 锁定笔记」，
+  /// 核心信息一条不少。
+  Widget _buildDataNote(AppColors colors) {
+    Widget item(String label, String text) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            SizedBox(
+              width: 56,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  fontWeight: AppWeight.medium,
+                  color: colors.secondary,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: colors.tertiary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          item('存放位置', '应用私有目录，系统「文件」管理器看不到，也不随系统云备份上传。'),
+          item('卸载风险', '卸载 App 会一并删除，换机前请先「备份到文件夹」。'),
+          item('自动备份', '本机每天 1 份；文件夹每 24 小时 1 份，各保留最近 3 份。'),
+          item(
+            '锁定笔记',
+            '密文只在本机可解密；备份到文件夹默认不含锁定笔记与「最近删除」。',
+          ),
+        ],
       ),
     );
   }
@@ -462,6 +499,88 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _restoring = false;
 
+  /// 「备份」行入口：应用内备份 / 备份到文件夹（原「导出全部」）。
+  ///
+  /// 两者产物是同一个 zip，区别只在存放位置与锁定笔记的处理方式。
+  /// 合并后主界面少一行语义重复的「导出全部」，能力一个不少。
+  Future<void> _openBackupSheet() async {
+    final String? action = await showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        Widget tile({
+          required String label,
+          required String subtitle,
+          required String value,
+        }) {
+          return InkWell(
+            onTap: () => Navigator.of(sheetContext).pop(value),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    label,
+                    style: TextStyle(fontSize: 16, color: colors.text),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: colors.tertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                  child: Text(
+                    '备份',
+                    style: AppText.caption.copyWith(color: colors.tertiary),
+                  ),
+                ),
+                tile(
+                  label: '立即备份到应用内',
+                  subtitle: '含锁定笔记密文，只能在本机恢复',
+                  value: 'local',
+                ),
+                tile(
+                  label: '备份到文件夹…',
+                  subtitle: '生成 zip 交给系统保存，换机或归档用；可选含锁定笔记明文',
+                  value: 'file',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (action == null || !mounted) {
+      return;
+    }
+    if (action == 'local') {
+      await _backupNow();
+    } else {
+      await _exportAll();
+    }
+  }
+
   /// 立即生成一份应用私有备份（不进系统相册/云备份）。
   Future<void> _backupNow() async {
     if (_backingUp) {
@@ -509,7 +628,7 @@ class _SettingsPageState extends State<SettingsPage> {
           repository.settings.copyWith(clearExternalBackup: true),
         );
         if (mounted) {
-          _showSnack('已关闭自动导出');
+          _showSnack('已关闭自动备份');
         }
         return;
     }
@@ -545,14 +664,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    '自动导出到文件夹',
+                    '自动备份到文件夹',
                     style: AppText.caption.copyWith(color: sheetColors.tertiary),
                   ),
                 ),
               ),
-              tile(label: '立即导出', value: 'export'),
+              tile(label: '立即备份', value: 'export'),
               tile(label: '更换文件夹', value: 'change'),
-              tile(label: '关闭自动导出', value: 'off'),
+              tile(label: '关闭自动备份', value: 'off'),
               const SizedBox(height: 8),
             ],
           ),
@@ -589,12 +708,12 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     if (at != null) {
-      _showSnack('已导出到所选文件夹');
+      _showSnack('已备份到所选文件夹');
       return;
     }
     final String? error = repository.lastExternalBackupError;
     if (error != null) {
-      _showSnack('导出失败：$error');
+      _showSnack('备份失败：$error');
     }
   }
 
@@ -1067,50 +1186,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// 「导出全部」行：导出中行内转圈并禁点，平时和普通设置行同款。
-class _ExportRow extends StatelessWidget {
-  const _ExportRow({required this.exporting, required this.onTap});
-
-  final bool exporting;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        height: 54,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        alignment: Alignment.centerLeft,
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                '导出全部',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: exporting ? colors.tertiary : colors.text,
-                ),
-              ),
-            ),
-            if (exporting)
-              const SizedBox(
-                width: 15,
-                height: 15,
-                child: CircularProgressIndicator(strokeWidth: 1.8),
-              )
-            else
-              Icon(Icons.ios_share, size: 17, color: colors.secondary),
-            const SizedBox(width: 10),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 导出结果弹层：标题 + 多行说明 + 单个「好」按钮。
+/// 备份结果弹层：标题 + 多行说明 + 单个「好」按钮。
 class _ExportResultSheet extends StatelessWidget {
   const _ExportResultSheet({required this.message});
 
@@ -1128,7 +1204,7 @@ class _ExportResultSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              '导出完成',
+              '备份文件已保存',
               style: AppText.sheetTitle.copyWith(color: colors.text),
             ),
             const SizedBox(height: 8),

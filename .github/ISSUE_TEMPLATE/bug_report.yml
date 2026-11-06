@@ -60,7 +60,7 @@ body:
       options:
         - label: 涉及笔记丢失或内容损坏（这类问题请务必说明是否已导出备份）
         - label: 涉及锁定笔记或应用锁
-        - label: 已尝试「导出全部」或备份恢复
+        - label: 已尝试「备份到文件夹」或从备份恢复
 
   - type: markdown
     attributes:
