@@ -38,9 +38,11 @@
                 android:resource="@xml/shortcuts" />
         </activity>
         <!-- 桌面小组件「记一条」：点击直接进空白编辑页。 -->
+        <!-- android:label 决定桌面组件下方显示的名字（不设会回落到应用名「小记」）。 -->
         <receiver
             android:name=".NewNoteWidgetProvider"
-            android:exported="false">
+            android:exported="false"
+            android:label="@string/shortcut_new_note_long">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

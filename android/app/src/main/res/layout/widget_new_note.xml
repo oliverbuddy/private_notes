@@ -1,42 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 2×1 的「记一条」小组件。
-     结构对齐 App 内的列表行：左侧图标、中间标题 + 副标题、右侧箭头。
-     两行文案把 1 格高度用满但不拥挤，比单行居中更耐看。 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     外层 FrameLayout 撑满系统分配的区域（透明），内层卡片按内容高度居中 ——
+     这样无论启动器给多高的格子，露出来的都是一条与 App 图标同量级的窄卡，
+     而不是一整块贴着格子上下边缘的高卡片。
+     单行内容（图标 + 标题 + 箭头）保证在任何机型上都不会被裁字。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/widget_new_note_bg"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingStart="12dp"
-    android:paddingEnd="10dp"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
-
-    <FrameLayout
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:background="@drawable/widget_icon_circle">
-
-        <ImageView
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:layout_gravity="center"
-            android:contentDescription="@null"
-            android:src="@drawable/widget_new_note_icon" />
-    </FrameLayout>
+    android:layout_height="match_parent">
 
     <LinearLayout
-        android:layout_width="0dp"
+        android:id="@+id/widget_card"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_gravity="center_vertical"
+        android:background="@drawable/widget_new_note_bg"
+        android:gravity="center_vertical"
+        android:minHeight="48dp"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="10dp">
+
+        <FrameLayout
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="@drawable/widget_icon_circle">
+
+            <ImageView
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/widget_new_note_icon" />
+        </FrameLayout>
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
             android:text="@string/widget_new_note_title"
@@ -44,22 +46,13 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="@string/widget_new_note_hint"
-            android:textColor="@color/widget_sub"
-            android:textSize="11sp" />
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="4dp"
+            android:contentDescription="@null"
+            android:src="@drawable/widget_chevron" />
+
     </LinearLayout>
 
-    <ImageView
-        android:layout_width="16dp"
-        android:layout_height="16dp"
-        android:layout_marginStart="4dp"
-        android:contentDescription="@null"
-        android:src="@drawable/widget_chevron" />
-
-</LinearLayout>
+</FrameLayout>

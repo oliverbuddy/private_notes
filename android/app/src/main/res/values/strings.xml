@@ -5,6 +5,5 @@
 
     <!-- 桌面小组件 -->
     <string name="widget_new_note_title">记一条</string>
-    <string name="widget_new_note_hint">点一下开始写</string>
     <string name="widget_new_note_desc">桌面一键新建小记，不经过列表</string>
 </resources>
