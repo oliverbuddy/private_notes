@@ -2,6 +2,7 @@ package com.xiaoji.xiaoji
 
 import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,11 +22,20 @@ class MainActivity : FlutterActivity() {
 
     private var pendingAction: String? = null
     private var channel: MethodChannel? = null
+    private lateinit var backupBridge: BackupBridge
+    private lateinit var securityBridge: SecurityBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // 必须在 super.onCreate 之前读，super 之后 intent 可能已被引擎消费。
         pendingAction = intent?.getStringExtra(EXTRA_ACTION)
         super.onCreate(savedInstanceState)
+        // 手势导航：页面已铺到系统栏后面，但导航栏底色默认是主题黑，
+        // 底部会露出一条黑边。这里把导航栏背景设为透明，让页面底色透上来；
+        // 同时关掉系统给导航栏加的对比度遮罩（否则仍是半透明灰条）。
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -42,14 +52,70 @@ class MainActivity : FlutterActivity() {
             }
         }
         // 系统动作独立通道：相册写入、打开外部链接，与启动快捷方式无关。
+        backupBridge = BackupBridge(this)
+        securityBridge = SecurityBridge(this)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NATIVE_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "isDeviceSecure" -> securityBridge.isDeviceSecure(result)
+                    "authenticate" -> securityBridge.authenticate(
+                        call.argument<String>("reason") ?: "验证身份",
+                        result,
+                    )
+                    "randomSalt" -> securityBridge.randomSalt(result)
+                    "hashPin" -> securityBridge.hashPin(
+                        call.argument<String>("pin") ?: "",
+                        call.argument<String>("salt") ?: "",
+                        result,
+                    )
+                    "sealText" -> securityBridge.sealText(
+                        call.argument<String>("text") ?: "",
+                        result,
+                    )
+                    "openText" -> securityBridge.openText(
+                        call.argument<String>("payload") ?: "",
+                        result,
+                    )
+                    "setSecureScreen" -> securityBridge.setSecureScreen(
+                        call.argument<Boolean>("enabled") ?: false,
+                        result,
+                    )
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
+                    "zipTree" -> backupBridge.zipTree(
+                        call.argument<String>("sourceRoot") ?: "",
+                        call.argument<String>("targetPath") ?: "",
+                        call.argument<List<String>>("excludes"),
+                        call.argument<Map<String, String>>("overrides"),
+                        result,
+                    )
+                    "unzipTo" -> backupBridge.unzipTo(
+                        call.argument<String>("zipPath") ?: "",
+                        call.argument<String>("destDir") ?: "",
+                        result,
+                    )
+                    "saveFileToUser" -> backupBridge.saveFileToUser(
+                        call.argument<String>("sourcePath") ?: "",
+                        call.argument<String>("fileName") ?: "backup.zip",
+                        result,
+                    )
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (::backupBridge.isInitialized &&
+            backupBridge.onActivityResult(requestCode, resultCode, data)
+        ) {
+            return
+        }
+        if (::securityBridge.isInitialized &&
+            securityBridge.onActivityResult(requestCode, resultCode)
+        ) {
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     /**

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  禁止把笔记目录进入系统云备份 / 换机迁移。
+
+  小记是本地优先应用，正文明文存在应用私有目录；Android 默认的 Auto Backup
+  会把整个目录传到用户的云端。这里显式排除全部应用数据，换机迁移交给
+  App 内的「导出 / 恢复」两条命令，避免明文在用户不知情时离开设备。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

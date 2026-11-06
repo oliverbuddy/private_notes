@@ -12,6 +12,7 @@ import '../data/note_store.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
 import '../ui/show_sheet.dart';
+import '../ui/snack.dart';
 import '../util/date_format.dart';
 import 'block.dart';
 import 'markdown_controller.dart';
@@ -2277,16 +2278,11 @@ class _EditorPageState extends State<EditorPage> {
     if (!mounted) {
       return;
     }
-    final colors = AppColors.of(context);
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: colors.text,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    showSnack(
+      context,
+      message: message,
+      duration: const Duration(seconds: 2),
+    );
   }
 
   // ---------------------------------------------------------------------------

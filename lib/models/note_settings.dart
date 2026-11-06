@@ -61,23 +61,59 @@ class NoteSettings {
   const NoteSettings({
     this.theme = AppThemeMode.system,
     this.density = ListDensity.comfortable,
+    this.lockEnabled = false,
+    this.autoLockSeconds = 0,
+    this.pinHash,
+    this.pinSalt,
+    this.secureScreen = true,
   });
 
   final AppThemeMode theme;
   final ListDensity density;
 
+  /// 应用锁开关。
+  final bool lockEnabled;
+
+  /// 退到后台多久后自动锁定（0 = 立即，60 / 300 秒）。
+  final int autoLockSeconds;
+
+  /// 设备没有安全锁屏时的备用 PIN（PBKDF2 哈希 + 盐，均 base64）。
+  final String? pinHash;
+  final String? pinSalt;
+
+  /// 锁定内容打开期间禁止截屏 / 多任务预览（FLAG_SECURE）。
+  final bool secureScreen;
+
   ThemeMode get themeMode => theme.themeMode;
 
-  NoteSettings copyWith({AppThemeMode? theme, ListDensity? density}) {
+  NoteSettings copyWith({
+    AppThemeMode? theme,
+    ListDensity? density,
+    bool? lockEnabled,
+    int? autoLockSeconds,
+    String? pinHash,
+    String? pinSalt,
+    bool? secureScreen,
+  }) {
     return NoteSettings(
       theme: theme ?? this.theme,
       density: density ?? this.density,
+      lockEnabled: lockEnabled ?? this.lockEnabled,
+      autoLockSeconds: autoLockSeconds ?? this.autoLockSeconds,
+      pinHash: pinHash ?? this.pinHash,
+      pinSalt: pinSalt ?? this.pinSalt,
+      secureScreen: secureScreen ?? this.secureScreen,
     );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'theme': theme.wireValue,
         'density': density.wireValue,
+        'lockEnabled': lockEnabled,
+        'autoLockSeconds': autoLockSeconds,
+        if (pinHash != null) 'pinHash': pinHash,
+        if (pinSalt != null) 'pinSalt': pinSalt,
+        'secureScreen': secureScreen,
       };
 
   /// 容错解析：字段缺失或类型不对都回落到默认值，配置文件坏掉不能让 app 起不来。
@@ -88,16 +124,41 @@ class NoteSettings {
   static NoteSettings fromJson(Map<String, dynamic> json) {
     final theme = json['theme'];
     final density = json['density'];
+    final lockEnabled = json['lockEnabled'];
+    final autoLockSeconds = json['autoLockSeconds'];
+    final pinHash = json['pinHash'];
+    final pinSalt = json['pinSalt'];
+    final secureScreen = json['secureScreen'];
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
       density: ListDensity.fromWire(density is String ? density : null),
+      lockEnabled: lockEnabled is bool ? lockEnabled : false,
+      autoLockSeconds: autoLockSeconds is int ? autoLockSeconds : 0,
+      pinHash: pinHash is String && pinHash.isNotEmpty ? pinHash : null,
+      pinSalt: pinSalt is String && pinSalt.isNotEmpty ? pinSalt : null,
+      secureScreen: secureScreen is bool ? secureScreen : true,
     );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is NoteSettings && other.theme == theme && other.density == density;
+      other is NoteSettings &&
+      other.theme == theme &&
+      other.density == density &&
+      other.lockEnabled == lockEnabled &&
+      other.autoLockSeconds == autoLockSeconds &&
+      other.pinHash == pinHash &&
+      other.pinSalt == pinSalt &&
+      other.secureScreen == secureScreen;
 
   @override
-  int get hashCode => Object.hash(theme, density);
+  int get hashCode => Object.hash(
+        theme,
+        density,
+        lockEnabled,
+        autoLockSeconds,
+        pinHash,
+        pinSalt,
+        secureScreen,
+      );
 }

@@ -13,8 +13,16 @@ class Note {
     required this.updated,
     this.tags = const <String>[],
     this.pinned = false,
+    this.locked = false,
     this.body = '',
   });
+
+  /// 锁定正文在磁盘上的信封前缀。
+  ///
+  /// 锁定笔记的 frontmatter 保持明文（id/时间/标签），正文整体替换成
+  /// `XIAOJI-LOCK-1:<base64(nonce|ciphertext)>`；读取时看到这个前缀
+  /// 就知道正文是密文，不能当普通 markdown 渲染。
+  static const String lockEnvelopePrefix = 'XIAOJI-LOCK-1:';
 
   /// `20261031-0912-a1b2`：创建时间 + 4 位随机 hex。
   final String id;
@@ -22,6 +30,9 @@ class Note {
   final DateTime updated;
   final List<String> tags;
   final bool pinned;
+
+  /// 正文是否加密（单篇锁定）。
+  final bool locked;
 
   /// 原始 markdown 正文（不含 frontmatter）。
   final String body;
@@ -32,6 +43,7 @@ class Note {
     DateTime? updated,
     List<String>? tags,
     bool? pinned,
+    bool? locked,
     String? body,
   }) {
     return Note(
@@ -40,6 +52,7 @@ class Note {
       updated: updated ?? this.updated,
       tags: tags ?? this.tags,
       pinned: pinned ?? this.pinned,
+      locked: locked ?? this.locked,
       body: body ?? this.body,
     );
   }
@@ -60,6 +73,9 @@ class Note {
       ..write('updated: ${formatIsoLocal(updated)}\n')
       ..write('tags: ${tags.join(', ')}\n')
       ..write('pinned: $pinned\n')
+      // 只在锁定笔记上写这个字段：普通笔记的文件保持原样，不制造
+      // 无意义的 diff（用户可能在「文件」App 里同步/比对）。
+      ..write(locked ? 'locked: true\n' : '')
       ..write('---\n')
       ..write('\n')
       ..write(body);
@@ -130,6 +146,7 @@ class Note {
       updated: updated.isBefore(created) ? created : updated,
       tags: parseTags(fields['tags'] ?? ''),
       pinned: (fields['pinned'] ?? 'false').toLowerCase() == 'true',
+      locked: (fields['locked'] ?? 'false').toLowerCase() == 'true',
       body: body,
     );
   }

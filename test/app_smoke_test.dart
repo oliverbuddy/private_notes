@@ -683,7 +683,7 @@ void main() {
       expect(File(store.absoluteAssetPath(first)).existsSync(), isTrue);
     });
 
-    test('删除把正文移进 trash 并清掉附件目录', () async {
+    test('删除把正文和附件整体移进回收站，可撤销恢复', () async {
       final tempDir = await Directory.systemTemp.createTemp('xiaoji_del_');
       addTearDown(() async {
         if (await tempDir.exists()) {
@@ -709,8 +709,18 @@ void main() {
 
       await repository.remove(note);
       expect(repository.notes, isEmpty);
+      // 附件目录不再被直接删掉：它跟着正文一起进了 trash/<id>/assets。
       expect(store.assetDirectoryOf(note.id).existsSync(), isFalse);
+      final trash = await repository.loadTrash();
+      expect(trash, hasLength(1));
+      expect(trash.single.hasAssets, isTrue);
       expect(store.trashDir.listSync().isNotEmpty, isTrue);
+
+      // 撤销删除：正文与附件都回到原位。
+      expect(await repository.undoDelete(note.id), isTrue);
+      expect(repository.notes.single.id, note.id);
+      expect(store.assetDirectoryOf(note.id).existsSync(), isTrue);
+      expect(await repository.loadTrash(), isEmpty);
     });
 
     test('导出生成 export-* 目录并带上附件', () async {

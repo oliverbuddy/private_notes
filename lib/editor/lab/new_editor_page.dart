@@ -13,11 +13,13 @@ import 'package:super_editor/super_editor.dart';
 
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
+import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
+import '../../ui/snack.dart';
 import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
 import '../markdown_toolbar.dart';
@@ -199,6 +201,14 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 也会落盘并刷新 updated，列表顺序被无端打乱（老 bug 的另一种形态）。
   bool _dirty = false;
 
+  /// 当前是否已开启 FLAG_SECURE（锁定笔记打开期间）。
+  ///
+  /// 单独记一份：dispose 时只有真的开过才需要恢复，避免影响普通笔记。
+  bool _secureScreenApplied = false;
+
+  /// 本页在截屏保护持有者里的 key（按笔记 id 区分）。
+  late final String _secureKey = 'note:${widget.note.id}';
+
   _NewEditorPageState() : _updated = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
@@ -249,6 +259,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncDocumentEmpty();
     // 输入法弹出/收起会改变可用视口：等布局结算后再校正一次光标可见性。
     WidgetsBinding.instance.addObserver(this);
+    // 锁定笔记：编辑期间禁止截屏 / 多任务预览（设置里可关）。
+    _applySecureScreen();
     // 新建小记：等首帧布局完成后聚焦编辑器并拉起输入法。
     // 打开已有笔记（autoFocus=false）保持浏览态，不主动弹键盘。
     if (widget.autoFocus) {
@@ -366,6 +378,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     _caretScrollTicker.dispose();
     _disposing = true;
     _flushSave();
+    // 锁定笔记关闭 / 取消锁定后注销截屏保护。
+    if (_secureScreenApplied) {
+      _secureScreenApplied = false;
+      kSecurity.setSecureHolder(_secureKey, false).catchError((Object _) {});
+    }
     _activeCommands.dispose();
     _editing.dispose();
     _canUndo.dispose();
@@ -584,6 +601,21 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncImeState(MediaQuery.viewInsetsOf(context).bottom);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退到后台 / 切走 / 被系统回收前，立即落盘。
+    //
+    // 之前只有 800ms 防抖 + dispose：用户打完字马上按 Home，进程被
+    // 系统杀掉时最后一段内容就丢了。这里跳过防抖直接写，原子 rename
+    // 保证不会写出半截文件。
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _saveDebounce?.cancel();
+      _flushSave();
+    }
+  }
+
   void _scheduleSave() {
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 800), _flushSave);
@@ -616,6 +648,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       updated: _updated,
       tags: _currentNote.tags,
       pinned: _currentNote.pinned,
+      locked: _currentNote.locked,
       body: md,
     );
     widget.repository.upsert(_currentNote);
@@ -1325,6 +1358,11 @@ class _NewEditorPageState extends State<NewEditorPage>
               ),
               tile(Icons.content_copy, '复制文本', 'copy'),
               tile(Icons.label_outline, '编辑标签', 'tags'),
+              tile(
+                _currentNote.locked ? Icons.lock_open_outlined : Icons.lock_outline,
+                _currentNote.locked ? '取消锁定' : '锁定笔记',
+                'lock',
+              ),
               tile(Icons.delete_outline, '删除', 'delete',
                   foreground: sheetColors.danger),
               const SizedBox(height: 8),
@@ -1346,6 +1384,9 @@ class _NewEditorPageState extends State<NewEditorPage>
       case 'tags':
         await _editTags();
         break;
+      case 'lock':
+        await _toggleLock();
+        break;
       case 'delete':
         await _confirmDelete();
         break;
@@ -1359,14 +1400,110 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  /// 单篇锁定：开启后正文以密文落盘，每次打开都要先验证身份。
+  ///
+  /// 只加密正文（图片/附件保持原样），与设置页的说明一致。
+  Future<void> _toggleLock() async {
+    if (_currentNote.locked) {
+      final bool ok = await verifyIdentity(
+        context,
+        settings: widget.repository.settings,
+        reason: '取消锁定这条笔记',
+      );
+      if (!ok || !mounted) {
+        return;
+      }
+      await _applyLock(false);
+      if (mounted) {
+        _showHint('已取消锁定');
+      }
+      return;
+    }
+    final bool? confirmed = await showXiaojiConfirmSheet(
+      context: context,
+      title: '锁定这条笔记？',
+      message: '锁定后正文加密保存，每次打开都要验证身份。'
+          '图片和附件不加密。',
+      confirmLabel: '锁定',
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    // 设备没有安全锁屏、也没设过 PIN 时，先设一个 —— 否则锁定笔记
+    // 打开时无从验证，锁定就只剩「磁盘加密」一层，防不住旁人翻看。
+    if (!await _ensureVerificationAvailable()) {
+      return;
+    }
+    await _applyLock(true);
+    if (mounted) {
+      _showHint('已锁定，正文已加密保存');
+    }
+  }
+
+  /// 确保至少有一种可用的身份验证方式（系统凭证或应用 PIN）。
+  Future<bool> _ensureVerificationAvailable() async {
+    try {
+      final settings = widget.repository.settings;
+      if (await kSecurity.isDeviceSecure() || settings.pinHash != null) {
+        return true;
+      }
+      if (!mounted) {
+        return false;
+      }
+      final String? pin = await promptPinSheet(context, title: '设置解锁 PIN');
+      if (pin == null || !mounted) {
+        return false;
+      }
+      final salt = await kSecurity.randomSalt();
+      final hash = await kSecurity.hashPin(pin: pin, salt: salt);
+      await widget.repository.updateSettings(
+        settings.copyWith(pinHash: hash, pinSalt: salt),
+      );
+      return true;
+    } catch (error) {
+      if (mounted) {
+        _showHint('无法启用锁定：$error');
+      }
+      return false;
+    }
+  }
+
+  /// 切换锁定状态并立即落盘（不等 800ms 防抖）。
+  ///
+  /// 先 [_flushSave] 把当前编辑内容写回 [_currentNote]，再改 locked 落盘：
+  /// 否则刚锁定就退出，最后一段输入会被当成「锁定前的正文」重复加密。
+  Future<void> _applyLock(bool locked) async {
+    _saveDebounce?.cancel();
+    _flushSave();
+    _currentNote = _currentNote.copyWith(
+      locked: locked,
+      updated: DateTime.now(),
+    );
+    await widget.repository.upsert(_currentNote);
+    if (mounted) {
+      setState(() {});
+    }
+    _applySecureScreen();
+  }
+
+  /// 锁定笔记打开期间开启 FLAG_SECURE，退出/取消锁定时恢复。
+  void _applySecureScreen() {
+    final bool should =
+        _currentNote.locked && widget.repository.settings.secureScreen;
+    if (should == _secureScreenApplied) {
+      return;
+    }
+    _secureScreenApplied = should;
+    // 失败不影响锁定本身（个别 ROM 可能不支持）。
+    kSecurity.setSecureHolder(_secureKey, should).catchError((Object _) {});
+  }
+
   Future<void> _copyBody() async {
     await Clipboard.setData(
       ClipboardData(text: serializeDocumentToXiaojiMarkdown(_document)),
     );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已复制到剪贴板')),
-      );
+      showSnack(context, message: '已复制到剪贴板');
     }
   }
 
@@ -1386,6 +1523,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       updated: _currentNote.updated,
       tags: Note.parseTags(result),
       pinned: _currentNote.pinned,
+      locked: _currentNote.locked,
       body: _currentNote.body,
     );
     await widget.repository.upsert(_currentNote);
@@ -1515,16 +1653,14 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   void _showHint(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showSnack(context, message: message);
   }
 
   Future<void> _confirmDelete() async {
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '删除这条小记？',
-      message: '删除后正文会移到 Xiaoji/trash 目录，附件会一并清掉。',
+      message: '正文和附件会一起移到「最近删除」，30 天后自动清理。',
       confirmLabel: '删除',
       destructive: true,
     );
@@ -1590,9 +1726,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('插入图片失败：$error')),
-      );
+      showSnack(context, message: '插入图片失败：$error');
     }
   }
 
@@ -1626,9 +1760,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('插入附件失败：$error')),
-      );
+      showSnack(context, message: '插入附件失败：$error');
     }
   }
 

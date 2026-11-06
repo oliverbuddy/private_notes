@@ -1,11 +1,20 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 
 import '../data/note_repository.dart';
+import '../data/note_store.dart';
+import '../models/note.dart';
 import '../models/note_settings.dart';
+import '../security/unlock.dart';
 import '../theme/app_theme.dart';
 import '../ui/show_sheet.dart';
+import '../ui/snack.dart';
 import '../util/date_format.dart';
+import '../util/native_zip.dart';
+import 'trash_page.dart';
 
 /// 设置页。
 ///
@@ -31,6 +40,42 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 拉起系统保存对话框要几秒 —— 没有 loading 时用户会以为没点上
   /// （反复点、退出页面），有转圈才知道「在干活」。
   bool _exporting = false;
+
+  /// 最近一次备份时间（自动/手动/恢复前快照都算）。
+  DateTime? _lastBackup;
+
+  /// 「立即备份」进行中：防止重复点击。
+  bool _backingUp = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshLastBackup();
+  }
+
+  Future<void> _refreshLastBackup() async {
+    final time = await repository.lastBackupTime();
+    if (mounted) {
+      setState(() => _lastBackup = time);
+    }
+  }
+
+  /// 「立即备份」行的状态文案。
+  ///
+  /// 自动备份失败时用户无从感知，这里把它摊到设置页上：失败 → 提示重试；
+  /// 成功 → 显示最近一次备份时间；从未备份 → 明确说「尚无备份」。
+  String _backupStatusText() {
+    if (_backingUp) {
+      return '备份中…';
+    }
+    if (repository.lastBackupError != null) {
+      return '上次失败，点此重试';
+    }
+    if (_lastBackup == null) {
+      return '尚无备份';
+    }
+    return '上次 ${formatListTime(_lastBackup!)}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,18 +127,63 @@ class _SettingsPageState extends State<SettingsPage> {
                         colors: colors,
                         cardColor: cardColor,
                         rows: <Widget>[
+                          _SettingRow(
+                            label: '应用锁',
+                            value: settings.lockEnabled ? '已开启' : '已关闭',
+                            onTap: () => _toggleAppLock(settings),
+                          ),
+                          if (settings.lockEnabled) ...<Widget>[
+                            _divider(colors),
+                            _SettingRow(
+                              label: '自动锁定',
+                              value: _autoLockLabel(settings.autoLockSeconds),
+                              onTap: () => _pickAutoLock(settings),
+                            ),
+                          ],
+                          _divider(colors),
+                          _SettingRow(
+                            label: '锁定内容禁止截屏',
+                            value: settings.secureScreen ? '开' : '关',
+                            onTap: () => repository.updateSettings(
+                              settings.copyWith(
+                                secureScreen: !settings.secureScreen,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _buildCard(
+                        colors: colors,
+                        cardColor: cardColor,
+                        rows: <Widget>[
                           _ExportRow(
                             exporting: _exporting,
                             onTap: _exporting ? null : _exportAll,
                           ),
+                          _divider(colors),
                           // 从导出 zip 恢复：迁移/换机/卸载重装后找回全部笔记。
                           _SettingRow(
                             label: '从备份恢复',
+                            value: _restoring ? '恢复中…' : null,
                             onTap: () {
                               if (!_restoring) {
                                 _restoreBackup();
                               }
                             },
+                          ),
+                          _divider(colors),
+                          // 立即备份到应用私有目录：防误删，也方便「恢复」前
+                          // 留一份可回滚的当前数据。
+                          _SettingRow(
+                            label: '立即备份',
+                            value: _backupStatusText(),
+                            onTap: _backingUp ? null : _backupNow,
+                          ),
+                          _divider(colors),
+                          _SettingRow(
+                            label: '最近删除',
+                            onTap: _openTrash,
                           ),
                         ],
                       ),
@@ -101,8 +191,11 @@ class _SettingsPageState extends State<SettingsPage> {
                         // 说明文字和卡片左边缘对齐，比再缩进 6px 更整齐
                         padding: EdgeInsets.zero,
                         child: Text(
-                          '笔记是纯文本文件，存在「文件」App 的 Xiaoji 目录下。'
-                          '卸载 App 会一并删除，重要内容记得定期导出。',
+                          '笔记存在应用私有目录，系统「文件」管理器看不到，'
+                          '也不会随系统云备份上传。卸载 App 会一并删除，'
+                          '换机或卸载前请用「导出全部」。'
+                          '每天首次启动会自动备份一份（保留最近 3 份）；'
+                          '锁定笔记和「最近删除」不会进入导出/备份。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.75,
@@ -167,6 +260,87 @@ class _SettingsPageState extends State<SettingsPage> {
       padding: const EdgeInsets.only(left: 16),
       child: Container(height: 0.5, color: colors.dividerStrong),
     );
+  }
+
+  String _autoLockLabel(int seconds) {
+    switch (seconds) {
+      case 60:
+        return '1 分钟';
+      case 300:
+        return '5 分钟';
+      default:
+        return '立即';
+    }
+  }
+
+  /// 开关应用锁：开启时优先用系统凭证；设备无安全锁屏则要求设置 PIN。
+  Future<void> _toggleAppLock(NoteSettings settings) async {
+    if (settings.lockEnabled) {
+      final bool ok = await verifyIdentity(
+        context,
+        settings: settings,
+        reason: '验证身份后关闭应用锁',
+      );
+      if (!ok || !mounted) {
+        return;
+      }
+      await repository.updateSettings(settings.copyWith(lockEnabled: false));
+      if (mounted) {
+        _showSnack('已关闭应用锁');
+      }
+      return;
+    }
+
+    final bool deviceSecure = await kSecurity.isDeviceSecure();
+    String? pinHash = settings.pinHash;
+    String? pinSalt = settings.pinSalt;
+    if (!deviceSecure && pinHash == null) {
+      if (!mounted) {
+        return;
+      }
+      final String? pin =
+          await promptPinSheet(context, title: '设置应用锁 PIN');
+      if (pin == null || !mounted) {
+        return;
+      }
+      try {
+        pinSalt = await kSecurity.randomSalt();
+        pinHash = await kSecurity.hashPin(pin: pin, salt: pinSalt);
+      } catch (error) {
+        if (mounted) {
+          _showSnack('开启失败：$error');
+        }
+        return;
+      }
+    }
+    await repository.updateSettings(
+      settings.copyWith(
+        lockEnabled: true,
+        pinHash: pinHash,
+        pinSalt: pinSalt,
+      ),
+    );
+    if (mounted) {
+      _showSnack(
+        deviceSecure
+            ? '已开启应用锁：使用系统锁屏验证'
+            : '已开启应用锁：使用 PIN 解锁',
+      );
+    }
+  }
+
+  Future<void> _pickAutoLock(NoteSettings settings) async {
+    final int? picked = await _pickOption<int>(
+      context: context,
+      title: '自动锁定',
+      options: const <int>[0, 60, 300],
+      current: settings.autoLockSeconds,
+      labelOf: _autoLockLabel,
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    await repository.updateSettings(settings.copyWith(autoLockSeconds: picked));
   }
 
   Future<void> _pickTheme(BuildContext context, NoteSettings settings) async {
@@ -257,75 +431,100 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _restoring = false;
 
-  /// 从备份 zip 恢复：选文件 → 确认覆盖 → 执行 → 结果弹层。
-  Future<void> _restoreBackup() async {
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: <String>['zip'],
-      withData: true,
-    );
-    final bytes = picked?.files.single.bytes;
-    if (bytes == null || !mounted) {
-      return; // 用户取消
+  /// 立即生成一份应用私有备份（不进系统相册/云备份）。
+  Future<void> _backupNow() async {
+    if (_backingUp) {
+      return;
     }
+    setState(() => _backingUp = true);
+    try {
+      await repository.createBackupNow();
+      await _refreshLastBackup();
+      if (!mounted) {
+        return;
+      }
+      _showSnack('已备份到应用私有目录');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSnack('备份失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() => _backingUp = false);
+      }
+    }
+  }
+
+  Future<void> _openTrash() async {
+    hideSnack(context);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) =>
+            TrashPage(repository: repository),
+      ),
+    );
+  }
+
+  /// 「从文件选择」的哨兵值：弹层返回它表示走系统文件选择器。
+  static const String _pickFileSentinel = '__pick_file__';
+
+  /// 从备份恢复：先选来源（应用内备份 / 系统文件）→ 确认覆盖 → 执行。
+  ///
+  /// 应用内备份在私有目录，系统文件管理器看不到，必须在这里列出来 ——
+  /// 否则「立即备份」「每日自动备份」永远没有恢复入口。
+  Future<void> _restoreBackup() async {
+    final String? source = await _pickRestoreSource();
+    if (source == null || !mounted) {
+      return;
+    }
+
+    String? path = source == _pickFileSentinel ? null : source;
+    if (source == _pickFileSentinel) {
+      // 只取路径，不把 zip 读进内存（大备份会 OOM）。
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: <String>['zip'],
+        withData: false,
+      );
+      path = picked?.files.single.path;
+      if (!mounted) {
+        return;
+      }
+      if (path == null) {
+        if (picked != null) {
+          _showSnack('无法读取所选文件');
+        }
+        return; // 用户取消
+      }
+    }
+
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '从备份恢复？',
-      message: '备份里与现有小记同 id 的会被覆盖为备份内容，其余保留。',
+      message: '备份里与现有小记同 id 的会被覆盖为备份内容，其余保留。'
+          '恢复前会自动留一份当前数据的快照。',
       confirmLabel: '恢复',
     );
     if (confirmed != true || !mounted) {
       return;
     }
+
     setState(() => _restoring = true);
     try {
-      final (restored, skipped) = await repository.restoreFromZip(bytes);
+      // 恢复是覆盖语义：先强制留一份当前数据，恢复错了还能回滚。
+      await repository.store.createPreRestoreSnapshot();
+      await _refreshLastBackup();
+      final (int restored, int skipped) = await _restoreFromPath(path!);
       if (!mounted) {
         return;
       }
-      await showXiaojiSheet<void>(
-        context: context,
-        builder: (BuildContext sheetContext) {
-          final sheetColors = AppColors.of(sheetContext);
-          return SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    '恢复完成',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: AppWeight.medium,
-                      color: sheetColors.text,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    skipped == 0
-                        ? '恢复了 $restored 篇小记和附件。'
-                        : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: sheetColors.secondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
+      await _showRestoreResult(restored, skipped);
     } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('恢复失败：$error')),
-      );
+      _showSnack('恢复失败：$error');
     } finally {
       if (mounted) {
         setState(() => _restoring = false);
@@ -333,12 +532,357 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 导出全部：打包 zip → 系统保存对话框。系统对话框不可用（罕见，
-  /// ROM 裁剪）时回退到私有目录导出，至少数据出得去。
-  Future<void> _exportAll() async {
-    setState(() => _exporting = true);
+  /// 原生流式恢复；桌面/测试环境没有原生通道时回退到内存版。
+  Future<(int, int)> _restoreFromPath(String path) async {
     try {
-      final data = await repository.store.buildExportZip();
+      return await repository.restoreFromZipFile(path);
+    } on MissingPluginException {
+      return await repository.restoreFromZip(await File(path).readAsBytes());
+    }
+  }
+
+  /// 选择恢复来源：应用内备份列表 + 「从文件选择…」。
+  Future<String?> _pickRestoreSource() async {
+    final backups = await repository.listBackups();
+    if (!mounted) {
+      return null;
+    }
+    final colors = AppColors.of(context);
+    return showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final sheetColors = AppColors.of(sheetContext);
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '从备份恢复',
+                    style: AppText.caption.copyWith(color: sheetColors.tertiary),
+                  ),
+                ),
+              ),
+              if (backups.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '还没有应用内备份，可直接选择导出的 zip 文件。',
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.5,
+                        color: sheetColors.secondary,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                for (final BackupEntry entry in backups)
+                  InkWell(
+                    onTap: () =>
+                        Navigator.of(sheetContext).pop(entry.path),
+                    child: Container(
+                      height: 56,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            _backupIcon(entry.kind),
+                            size: 18,
+                            color: sheetColors.secondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  entry.kind.label,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: sheetColors.text,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  formatListTime(entry.time),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: sheetColors.tertiary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              _divider(colors),
+              InkWell(
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_pickFileSentinel),
+                child: Container(
+                  height: 52,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    children: <Widget>[
+                      Icon(
+                        Icons.folder_open,
+                        size: 18,
+                        color: sheetColors.secondary,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '从文件选择…',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: sheetColors.text,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  IconData _backupIcon(BackupKind kind) {
+    switch (kind) {
+      case BackupKind.auto:
+        return Icons.schedule;
+      case BackupKind.manual:
+        return Icons.save_alt;
+      case BackupKind.preRestore:
+        return Icons.history;
+    }
+  }
+
+  Future<void> _showRestoreResult(int restored, int skipped) {
+    return showXiaojiSheet<void>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final sheetColors = AppColors.of(sheetContext);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '恢复完成',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: AppWeight.medium,
+                    color: sheetColors.text,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  skipped == 0
+                      ? '恢复了 $restored 篇小记和附件。'
+                      : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: sheetColors.secondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 导出全部：原生流式打包 → 系统「另存为」。
+  ///
+  /// 全程不把 zip 读进 Dart 内存：写入 Xiaoji/tmp 的临时文件，再用
+  /// SAF 流式复制到用户选的位置；完成后删掉临时文件。
+  ///
+  /// 有锁定笔记时先问一次：默认排除（密文换机也解不开），
+  /// 也可选「包含锁定笔记（明文）」—— 后者必须先验证身份。
+  Future<void> _exportAll() async {
+    bool includeLocked = false;
+    final int lockedCount =
+        repository.notes.where((Note note) => note.locked).length;
+    if (lockedCount > 0) {
+      final bool? include = await _askExportLocked(lockedCount);
+      if (include == null || !mounted) {
+        return;
+      }
+      if (include) {
+        final bool ok = await verifyIdentity(
+          context,
+          settings: repository.settings,
+          reason: '导出锁定笔记（明文）',
+        );
+        if (!ok || !mounted) {
+          return;
+        }
+        includeLocked = true;
+      }
+    }
+
+    setState(() => _exporting = true);
+    File? temp;
+    try {
+      final stamp = formatExportStamp(DateTime.now());
+      final name = 'xiaoji-export-$stamp.zip';
+      temp = await repository.store.createTempExportFile(name);
+      await repository.store.buildExportZipToFile(
+        temp.path,
+        includeLocked: includeLocked,
+      );
+      final saved = await saveFileToUser(
+        sourcePath: temp.path,
+        fileName: name,
+      );
+      if (!mounted || saved == null) {
+        return; // 用户取消
+      }
+      await _showExportResult('导出文件已保存到：\n$saved');
+    } on MissingPluginException {
+      // 桌面/测试环境没有原生通道：退回内存版 + FilePicker。
+      await _exportWithFilePicker(includeLocked: includeLocked);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSnack('导出失败：$error');
+    } finally {
+      try {
+        if (temp != null && await temp.exists()) {
+          await temp.delete();
+        }
+      } catch (_) {
+        // 临时文件删不掉不影响导出结果。
+      }
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
+    }
+  }
+
+  /// 有锁定笔记时的导出选项：默认排除，或明文导出（需另外验证身份）。
+  ///
+  /// 返回 null = 用户取消；false = 不含锁定笔记；true = 含锁定笔记（明文）。
+  Future<bool?> _askExportLocked(int count) {
+    return showXiaojiSheet<bool>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        Widget tile({
+          required IconData icon,
+          required String label,
+          required String subtitle,
+          required bool value,
+        }) {
+          return InkWell(
+            onTap: () => Navigator.of(sheetContext).pop(value),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              alignment: Alignment.centerLeft,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(icon, size: 20, color: colors.text),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          label,
+                          style: TextStyle(fontSize: 16, color: colors.text),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.5,
+                            color: colors.tertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                  child: Text(
+                    '有 $count 篇锁定笔记',
+                    style: AppText.caption.copyWith(color: colors.tertiary),
+                  ),
+                ),
+                tile(
+                  icon: Icons.lock_outline,
+                  label: '导出（不含锁定笔记）',
+                  subtitle: '默认。锁定正文是设备加密的，换机后也无法解密。',
+                  value: false,
+                ),
+                tile(
+                  icon: Icons.lock_open_outlined,
+                  label: '导出（含锁定笔记，明文）',
+                  subtitle: '会把锁定正文解密后写进 zip，需要先验证身份。',
+                  value: true,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 内存版导出（仅原生通道不可用的桌面/测试环境）。
+  ///
+  /// 与主通道保持同样的隐私语义：默认排除锁定笔记；这里没有原生解密
+  /// 能力，选「明文导出」只能把密文原样带出，并在结果里明确说明。
+  Future<void> _exportWithFilePicker({required bool includeLocked}) async {
+    try {
+      final excludeIds = includeLocked
+          ? const <String>{}
+          : repository.notes
+              .where((Note note) => note.locked)
+              .map((Note note) => note.id)
+              .toSet();
+      final data = await repository.store.buildExportZip(
+        excludeNoteIds: excludeIds,
+      );
       final stamp = formatExportStamp(DateTime.now());
       final saved = await FilePicker.platform.saveFile(
         fileName: 'xiaoji-export-$stamp.zip',
@@ -346,49 +890,34 @@ class _SettingsPageState extends State<SettingsPage> {
         allowedExtensions: <String>['zip'],
         bytes: data,
       );
-      if (!mounted) {
+      if (!mounted || saved == null) {
         return;
       }
-      if (saved == null) {
-        return; // 用户在系统对话框点了取消，静默返回
-      }
-      await showXiaojiSheet<void>(
-        context: context,
-        builder: (BuildContext sheetContext) {
-          return _ExportResultSheet(message: '导出文件已保存到：\n$saved');
-        },
+      await _showExportResult(
+        '导出文件已保存到：\n$saved'
+        '${includeLocked ? '\n\n当前环境不支持解密，锁定笔记以密文保留。' : ''}',
       );
-    } catch (_) {
-      try {
-        final path = await repository.exportAll();
-        if (!mounted) {
-          return;
-        }
-        await showXiaojiSheet<void>(
-          context: context,
-          builder: (BuildContext sheetContext) {
-            return _ExportResultSheet(
-              message: '系统保存对话框不可用，已导出到应用目录（需从应用信息里取文件）：\n$path',
-            );
-          },
-        );
-      } catch (error) {
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-                content: Text('导出失败：$error'),
-                duration: const Duration(seconds: 3)),
-          );
-      }
-    } finally {
+    } catch (error) {
       if (mounted) {
-        setState(() => _exporting = false);
+        _showSnack('导出失败：$error');
       }
     }
+  }
+
+  Future<void> _showExportResult(String message) {
+    return showXiaojiSheet<void>(
+      context: context,
+      builder: (BuildContext sheetContext) =>
+          _ExportResultSheet(message: message),
+    );
+  }
+
+  void _showSnack(String text) {
+    showSnack(
+      context,
+      message: text,
+      duration: const Duration(seconds: 3),
+    );
   }
 }
 
@@ -500,7 +1029,7 @@ class _SettingRow extends StatelessWidget {
 
   final String label;
   final String? value;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

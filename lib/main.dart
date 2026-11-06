@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'data/note_repository.dart';
 import 'data/note_store.dart';
 import 'home/home_page.dart';
 import 'models/note_settings.dart';
+import 'security/app_lock_gate.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -26,7 +28,13 @@ Future<void> main() async {
   // 内容不会被状态栏盖住。图标明暗由下方 AnnotatedRegion 跟随主题。
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(statusBarColor: Colors.transparent),
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      // 导航栏透明：页面底色直接铺到手势条后面，不再有系统默认的黑色条。
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
   );
 
   try {
@@ -42,6 +50,12 @@ Future<void> main() async {
       repository: repository,
       startWithNewNote: startWithNewNote,
     ));
+
+    // UI 起来之后再跑：清理超期回收站、当天首份自动备份。
+    // 放在首帧之后，避免大备份和首屏抢 IO。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(repository.runMaintenance());
+    });
   } catch (error) {
     // 文档目录不可用（极少见，通常是沙箱异常）时也不能白屏。
     runApp(_StartupFailureApp(message: '$error'));
@@ -62,10 +76,33 @@ class XiaojiApp extends StatefulWidget {
   State<XiaojiApp> createState() => _XiaojiAppState();
 }
 
-class _XiaojiAppState extends State<XiaojiApp> {
+class _XiaojiAppState extends State<XiaojiApp>
+    with WidgetsBindingObserver {
   NoteSettings? _cachedSettings;
   ThemeData? _lightTheme;
   ThemeData? _darkTheme;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 回到前台时补一次维护：自动备份改为「距上次 ≥24h」判断，
+    // 用户长期不冷启动（手机 App 常驻）也能按节奏备份。
+    // runMaintenance 内部有并发锁，且 24 小时内会直接返回。
+    if (state == AppLifecycleState.resumed) {
+      unawaited(widget.repository.runMaintenance());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -96,6 +133,12 @@ class _XiaojiAppState extends State<XiaojiApp> {
             // 深色页面用亮图标，浅色页面用暗图标。
             statusBarIconBrightness:
                 darkNow ? Brightness.light : Brightness.dark,
+            // 导航栏透明 + 图标跟随主题：手势条后面透出的是页面底色，
+            // 不再是系统默认的黑色条；三键导航时图标也要跟着换色。
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarDividerColor: Colors.transparent,
+            systemNavigationBarIconBrightness:
+                darkNow ? Brightness.light : Brightness.dark,
           ),
           child: MaterialApp(
           title: '小记',
@@ -112,6 +155,14 @@ class _XiaojiAppState extends State<XiaojiApp> {
           ],
           supportedLocales: const <Locale>[Locale('zh'), Locale('en')],
           locale: const Locale('zh'),
+          // 锁屏挂在 builder 上（而不是 home）：home 只是 Navigator 的首个
+          // 路由，编辑页/设置页这些 push 出来的页面会盖在锁屏之上 ——
+          // 退后台自动锁定后回来，用户仍能看到当前页面的内容。
+          // builder 包住整个 Navigator，锁屏才能盖住所有路由。
+          builder: (BuildContext context, Widget? child) => AppLockGate(
+            repository: widget.repository,
+            child: child ?? const SizedBox.shrink(),
+          ),
           home: HomePage(
             repository: widget.repository,
             startWithNewNote: widget.startWithNewNote,

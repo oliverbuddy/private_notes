@@ -5,11 +5,13 @@ import '../data/note_repository.dart';
 import '../editor/block.dart';
 import '../editor/lab/image_display_size.dart';
 import '../editor/lab/new_editor_page.dart';
+import '../security/unlock.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../settings/settings_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/show_sheet.dart';
+import '../ui/snack.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
 
@@ -86,7 +88,32 @@ class _HomePageState extends State<HomePage> {
     // 内核迁移收尾：全量切换到新内核编辑页（点卡片/新建/桌面快捷方式
     // 都汇聚在这里）。新建时先造好笔记对象，没有任何编辑就不会落盘，
     // 不会堆出空白笔记。
-    final effective = note ??
+    Note? unlocked = note;
+    if (note != null && note.locked) {
+      // 锁定笔记：每次打开都要验证身份，解密后的正文只留在当前页面内存。
+      final bool ok = await verifyIdentity(
+        context,
+        settings: _repo.settings,
+        reason: '解锁这条笔记',
+      );
+      if (!ok || !mounted) {
+        return;
+      }
+      try {
+        unlocked = note.copyWith(body: await _repo.store.readNoteBody(note));
+      } catch (error) {
+        if (mounted) {
+          showSnack(context, message: '解锁失败：$error');
+        }
+        return;
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    // 离开列表页时收起提示条，避免「已移到最近删除」跟着进入编辑页。
+    hideSnack(context);
+    final effective = unlocked ??
         Note(
           id: Note.generateId(DateTime.now()),
           created: DateTime.now(),
@@ -105,6 +132,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openSettings() async {
+    hideSnack(context);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => SettingsPage(repository: _repo),
@@ -264,14 +292,38 @@ class _HomePageState extends State<HomePage> {
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '删除这条小记？',
-      message: '正文会移到 Xiaoji/trash 目录，附件会一并清掉。',
+      message: '正文和附件会一起移到「最近删除」，30 天后自动清理。',
       confirmLabel: '删除',
       destructive: true,
     );
     if (confirmed != true || !mounted) {
       return;
     }
+    // 锁定笔记删除前必须验证身份：旁人拿到解锁中的手机，不能直接把
+    // 锁定内容丢进回收站（虽然可恢复，但也是一次擦除行为）。
+    if (note.locked) {
+      final bool ok = await verifyIdentity(
+        context,
+        settings: _repo.settings,
+        reason: '删除这条锁定笔记',
+      );
+      if (!ok || !mounted) {
+        return;
+      }
+    }
     await _repo.remove(note);
+    if (!mounted) {
+      return;
+    }
+    // 删除不再「不可逆」：正文和附件整体进了回收站，这里给一次即时撤销。
+    showSnack(
+      context,
+      message: '已移到「最近删除」',
+      action: SnackBarAction(
+        label: '撤销',
+        onPressed: () => _repo.undoDelete(note.id),
+      ),
+    );
   }
 
   @override
@@ -543,7 +595,9 @@ class _HomePageState extends State<HomePage> {
           );
         }
         final note = notes[index];
-        final images = imageBlocksOf(note.body);
+        // 锁定笔记：正文不在内存里，也不展示缩略图（附件未加密，
+        // 但列表里露出图片等于绕过正文锁定）。
+        final images = note.locked ? const <ImageBlock>[] : imageBlocksOf(note.body);
 
         Widget tile;
         if (density == ListDensity.compact) {

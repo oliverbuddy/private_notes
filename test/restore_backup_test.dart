@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
@@ -7,6 +10,9 @@ import 'package:xiaoji/models/note.dart';
 
 /// 「从备份恢复」回归：导出 zip → 清库 → 恢复 → 笔记与附件完整回来。
 void main() {
+  // createBackupFile 会先走原生通道，测试环境需要 binding 才能拿到
+  // MissingPluginException 并回退到内存版压缩。
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory tempDir;
   late NoteStore store;
   late NoteRepository repository;
@@ -81,5 +87,112 @@ void main() {
     expect(restored, 0);
     // 攻击路径分支无法通过公开 API 直接构造 zip 条目名（ArchiveFile 可以），
     // 这里验证正常路径不受影响；越界防护逻辑在 restoreFromZip 内联。
+  });
+
+  test('恢复时跳过 trash/ 里的 .md，已删除笔记不会复活', () async {
+    final deleted = Note(
+      id: '20261102-1000-gone',
+      created: DateTime(2026, 11, 2, 10),
+      updated: DateTime(2026, 11, 2, 10),
+      body: '已删除的内容',
+    ).encode();
+    final kept = Note(
+      id: '20261102-1000-keep',
+      created: DateTime(2026, 11, 2, 10),
+      updated: DateTime(2026, 11, 2, 10),
+      body: '正常内容',
+    ).encode();
+    final archive = Archive()
+      ..addFile(ArchiveFile(
+        'trash/20261102-1000-gone/note.md',
+        deleted.length,
+        utf8.encode(deleted),
+      ))
+      ..addFile(ArchiveFile(
+        'notes/2026/11/20261102-1000-keep.md',
+        kept.length,
+        utf8.encode(kept),
+      ));
+    final bytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
+
+    final (restored, _) = await store.restoreFromZip(bytes);
+    expect(restored, 1, reason: '只恢复 notes/ 下的那篇');
+    final ids = (await store.loadNotes()).map((Note note) => note.id).toList();
+    expect(ids, <String>['20261102-1000-keep']);
+    expect(ids, isNot(contains('20261102-1000-gone')));
+  });
+
+  test('备份 → 删除本地笔记 → 从备份恢复，笔记不丢', () async {
+    const String id = '20261102-1100-backup';
+    final note = Note(
+      id: id,
+      created: DateTime(2026, 11, 2, 11),
+      updated: DateTime(2026, 11, 2, 11),
+      tags: const <String>['备份'],
+      body: '备份恢复正文',
+    );
+    await repository.upsert(note);
+
+    final backup = await store.createBackupFile(name: 'manual-test.zip');
+    expect(backup.existsSync(), isTrue);
+
+    // 模拟误删：笔记进回收站，列表里消失。
+    await repository.remove(note);
+    expect(repository.notes, isEmpty);
+
+    // 从备份 zip 恢复：正文/标签必须完整回来。
+    final bytes = await backup.readAsBytes();
+    final (restored, skipped) = await repository.restoreFromZip(bytes);
+    expect(restored, 1);
+    expect(skipped, 0);
+
+    final back = repository.notes.singleWhere((Note item) => item.id == id);
+    expect(back.body, contains('备份恢复正文'));
+    expect(back.tags, <String>['备份']);
+  });
+
+  test('手动备份只保留最近 5 份，避免无限堆积', () async {
+    for (var i = 0; i < 7; i++) {
+      await store.createBackupFile(name: 'manual-20261102-100$i.zip');
+    }
+    final files = <String>[];
+    await for (final entity in store.backupsDir.list(followLinks: false)) {
+      if (entity is File && entity.path.endsWith('.zip')) {
+        files.add(entity.path);
+      }
+    }
+    expect(files.length, 5, reason: 'manual-* 超过 5 份自动清理最旧的');
+  });
+
+  test('listBackups 列出应用内备份并识别来源', () async {
+    await store.createBackupFile(name: 'auto-20261102.zip');
+    await store.createBackupFile(name: 'manual-20261102-1000.zip');
+    await store.createPreRestoreSnapshot();
+
+    final entries = await store.listBackups();
+    expect(entries, isNotEmpty);
+    expect(
+      entries.map((BackupEntry entry) => entry.kind).toSet(),
+      containsAll(<BackupKind>[
+        BackupKind.auto,
+        BackupKind.manual,
+        BackupKind.preRestore,
+      ]),
+      reason: '三种来源都能在恢复入口里选到',
+    );
+    expect(
+      entries.every((BackupEntry entry) => entry.path.endsWith('.zip')),
+      isTrue,
+    );
+  });
+
+  test('自动备份：首次生成，24 小时内不重复', () async {
+    final first = await store.ensureAutoBackup();
+    expect(first, isNotNull, reason: '空备份目录应生成第一份');
+    expect(first!.path, contains('/auto-'));
+    expect(first.existsSync(), isTrue);
+
+    final second = await store.ensureAutoBackup();
+    expect(second, isNull, reason: '24 小时内已有备份，不重复生成');
   });
 }

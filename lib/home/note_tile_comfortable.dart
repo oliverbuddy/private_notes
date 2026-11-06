@@ -60,7 +60,8 @@ class NoteTileComfortable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final summary = plainSummary(note.body);
+    // 锁定笔记：正文不在内存里，列表里只显示「已锁定」，不渲染摘要。
+    final summary = note.locked ? '' : plainSummary(note.body);
 
     // 与详情页完全同一套正文：15.5 / 1.7 / 字距 0.3。
     final summaryStyle = TextStyle(
@@ -88,7 +89,23 @@ class NoteTileComfortable extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                if (summary.isEmpty)
+                if (note.locked)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(Icons.lock_outline, size: 14, color: colors.tertiary),
+                      const SizedBox(width: 6),
+                      Text(
+                        '已锁定',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.4,
+                          color: colors.tertiary,
+                        ),
+                      ),
+                    ],
+                  )
+                else if (summary.isEmpty)
                   Text(
                     '（无正文）',
                     style: summaryStyle.copyWith(color: colors.tertiary),
@@ -445,6 +462,11 @@ class _MetaRow extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 6),
             child: Icon(Icons.push_pin, size: 12, color: colors.accent),
+          ),
+        if (note.locked)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Icon(Icons.lock_outline, size: 12, color: colors.secondary),
           ),
         Text(
           formatListTime(note.updated),
