@@ -41,6 +41,13 @@ class _AppLockGateState extends State<AppLockGate>
   String _pinDigits = '';
   String? _pinError;
 
+  /// 锁屏页里的 PIN 是「首次设置」而不是「校验」。
+  ///
+  /// 只有一种情况会走到这里：用户开启应用锁时设备还有系统锁屏，之后把
+  /// 系统锁屏关掉了，同时没有备用 PIN。此时系统验证不可用、也没有可校验
+  /// 的 PIN —— 直接放行等于应用锁失效，所以强制先设置一个 PIN 再进入。
+  bool _pinSetup = false;
+
   bool get _enabled => widget.repository.settings.lockEnabled;
 
   @override
@@ -139,15 +146,22 @@ class _AppLockGateState extends State<AppLockGate>
           _onUnlocked();
         }
       } else if (widget.repository.settings.pinHash != null) {
-        // 没有系统锁屏：切到锁屏页内联的 PIN 键盘。
+        // 没有系统锁屏：切到锁屏页内联的 PIN 键盘（校验已有 PIN）。
         setState(() {
           _pinMode = true;
+          _pinSetup = false;
           _pinDigits = '';
           _pinError = null;
         });
       } else {
-        // 没有任何可用验证方式：放行，避免把用户锁死在自己的数据外。
-        _onUnlocked();
+        // 既没有系统锁屏也没有备用 PIN：先要求设置一个 PIN，再解锁。
+        // 直接放行会让应用锁静默失效（用户以为还锁着，实际谁都能看）。
+        setState(() {
+          _pinMode = true;
+          _pinSetup = true;
+          _pinDigits = '';
+          _pinError = null;
+        });
       }
     } catch (error) {
       if (mounted) {
@@ -164,6 +178,7 @@ class _AppLockGateState extends State<AppLockGate>
     setState(() {
       _locked = false;
       _pinMode = false;
+      _pinSetup = false;
       _pinDigits = '';
       _pinError = null;
     });
@@ -173,10 +188,14 @@ class _AppLockGateState extends State<AppLockGate>
     _applySecureFlag();
   }
 
-  /// 校验锁屏页里输入的 PIN。
+  /// 校验锁屏页里输入的 PIN；[_pinSetup] 为真时改为「设置并解锁」。
   Future<void> _submitPin() async {
     if (_pinDigits.length < 4) {
       setState(() => _pinError = '请输入 4–6 位 PIN');
+      return;
+    }
+    if (_pinSetup) {
+      await _saveNewPin();
       return;
     }
     final settings = widget.repository.settings;
@@ -210,6 +229,38 @@ class _AppLockGateState extends State<AppLockGate>
     } catch (error) {
       if (mounted) {
         setState(() => _pinError = '验证失败：$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _authenticating = false);
+      }
+    }
+  }
+
+  /// 首次设置备用 PIN（设备已无系统锁屏时）。
+  Future<void> _saveNewPin() async {
+    if (_authenticating) {
+      return;
+    }
+    setState(() {
+      _authenticating = true;
+      _pinError = null;
+    });
+    try {
+      final String salt = await _security.randomSalt();
+      final String hash = await _security.hashPin(pin: _pinDigits, salt: salt);
+      if (!mounted) {
+        return;
+      }
+      await widget.repository.updateSettings(
+        widget.repository.settings.copyWith(pinHash: hash, pinSalt: salt),
+      );
+      if (mounted) {
+        _onUnlocked();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _pinError = '设置失败：$error');
       }
     } finally {
       if (mounted) {
@@ -260,7 +311,12 @@ class _AppLockGateState extends State<AppLockGate>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _pinMode ? '输入应用锁 PIN' : '验证身份后查看你的笔记',
+                        _pinSetup
+                            ? '设备锁屏已关闭，请先设置应用锁 PIN'
+                            : _pinMode
+                                ? '输入应用锁 PIN'
+                                : '验证身份后查看你的笔记',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13.5,
                           height: 1.6,
@@ -295,7 +351,7 @@ class _AppLockGateState extends State<AppLockGate>
                                   height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Text('解锁'),
+                              : Text(_pinSetup ? '设置并解锁' : '解锁'),
                         ),
                       ),
                     ],

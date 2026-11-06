@@ -1958,12 +1958,16 @@ class _NewEditorPageState extends State<NewEditorPage>
               _,
             ) {
               return switch (_panel) {
+                // 子菜单铺在工具条下方的键盘区域里，本身就是独立白面：
+                // 不再画顶部分隔线（否则工具栏和面板之间多出一道横线）。
                 MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel(
                     active: active,
+                    showTopDivider: false,
                     onPick: _runPanelCommand,
                   ),
                 MarkdownToolbarPanel.insert => MarkdownInsertPanel(
                     active: active,
+                    showTopDivider: false,
                     onPick: (MarkdownCommand command) {
                       // 插入是一次性动作：收面板、回键盘，再执行。
                       _closePanel(showKeyboard: true);
@@ -1971,6 +1975,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                     },
                   ),
                 MarkdownToolbarPanel.attach => MarkdownAttachPanel(
+                    showTopDivider: false,
                     onPick: (MarkdownAttachAction action) {
                       // 选完收起面板，交给系统选择器（它会接管焦点）。
                       _closePanel(showKeyboard: false);

@@ -195,8 +195,17 @@ class MainActivity : FlutterActivity() {
             result.error("bad_args", "缺少链接地址", null)
             return
         }
+        // 只放行这几类协议。正文里的链接来自用户输入/粘贴，如果交给
+        // ACTION_VIEW 处理 file://、content://、intent:// 等，笔记里的一行
+        // 文本就可能触发本机文件或任意组件，属于不该有的攻击面。
+        val uri = Uri.parse(url)
+        val scheme = uri.scheme?.lowercase()
+        if (scheme !in ALLOWED_URL_SCHEMES) {
+            result.error("unsupported_scheme", "不支持打开该协议的链接", null)
+            return
+        }
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            val intent = Intent(Intent.ACTION_VIEW, uri)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
             result.success(true)
@@ -229,5 +238,9 @@ class MainActivity : FlutterActivity() {
         private const val CHANNEL = "xiaoji/shortcuts"
         private const val NATIVE_CHANNEL = "xiaoji/native"
         private const val EXTRA_ACTION = "xiaoji.action"
+
+        /** 允许交给系统浏览器/拨号/SMS 的协议。 */
+        private val ALLOWED_URL_SCHEMES =
+            setOf("http", "https", "mailto", "tel", "sms", "smsto")
     }
 }

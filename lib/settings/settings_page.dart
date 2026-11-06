@@ -687,7 +687,7 @@ class _SettingsPageState extends State<SettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '恢复完成',
+                  restored == 0 ? '没有可恢复的内容' : '恢复完成',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: AppWeight.medium,
@@ -696,9 +696,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  skipped == 0
-                      ? '恢复了 $restored 篇小记和附件。'
-                      : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
+                  restored == 0
+                      // 选错文件（普通 zip / 别的 App 的备份）时不能报「成功」，
+                      // 否则用户会以为数据已经回来了。
+                      ? '这个文件里没有小记，可能选错了备份。现有笔记没有被改动。'
+                      : skipped == 0
+                          ? '恢复了 $restored 篇小记和附件。'
+                          : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
                   style: TextStyle(
                     fontSize: 15,
                     color: sheetColors.secondary,

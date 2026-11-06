@@ -51,7 +51,10 @@ jobs:
       - name: Build release APK
         run: |
           flutter pub get
-          flutter build apk --release
+          # 只打真机用得到的两种 ABI：默认三 ABI 会把 Flutter 引擎和 Dart
+          # 产物各拷三份（55MB）；去掉仅供模拟器的 x86_64 后约 36MB。
+          flutter build apk --release \
+            --target-platform android-arm,android-arm64
 
       - name: Rename artifact and checksum
         run: |

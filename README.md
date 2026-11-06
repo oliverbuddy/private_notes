@@ -16,17 +16,18 @@
 
 每个 Release 附带 `.sha256` 校验文件；安装包由 GitHub Actions 用项目签名密钥构建。
 
-许可：[MIT](LICENSE)。落地页源码见 `docs/`，推送 `main` 时自动部署到 GitHub Pages。
+许可：[PolyForm Noncommercial 1.0.0](LICENSE)。**允许个人使用、学习、修改与分发，禁止商业使用；商业授权需另行联系作者。**
+落地页源码见 `docs/`，推送 `main` 时自动部署到 GitHub Pages。
 
 ## 状态
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.3.1 |
+| 版本 | 1.3.2 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 308 / 308 通过 |
+| 测试 | `flutter test` 311 / 311 通过 |
 | 静态检查 | `flutter analyze` No issues found |
-| APK | `build/app/outputs/flutter-apk/app-release.apk`，约 58MB，包名 `com.xiaoji.xiaoji` |
+| APK | `build/app/outputs/flutter-apk/app-release.apk`，约 36MB（arm64 + armv7 双 ABI），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、手势导航适配 |
 
 ## 功能
@@ -297,7 +298,8 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --release
+# 只打真机 ABI（不带 --target-platform 会额外打包 x86_64，体积 55MB）
+flutter build apk --release --target-platform android-arm,android-arm64
 ```
 
 环境：Flutter 3.47.9 / Dart 3.13.7 / Android SDK 36 + build-tools 36 / JDK 18。
@@ -356,11 +358,16 @@ docs/                                         GitHub Pages 落地页（下载 / 
 3. **锁定笔记密钥绑定设备。** 用 Android Keystore 加密，换机/重装后密文解不开；
    迁移锁定笔记请用「导出（含锁定笔记，明文）」后重新锁定。
 4. **备份与数据同盘。** 自动/手动备份都在应用私有 `backups/`，设备损坏或清除应用数据会一起丢失；
-   跨设备/长期归档仍应使用「导出全部」保存到外部。恢复是合并覆盖（不会删除本地其它笔记）。
+   跨设备/长期归档仍应使用「导出全部」保存到外部。恢复是合并覆盖（不会删除本地其它笔记），
+   且**只还原笔记与附件**：应用锁、主题等设置保持本机现状，避免把别的设备的 PIN 带进来。
 5. **没有单篇版本历史。** 整库备份只能回到某个时间点；撤销栈只在当前编辑会话内有效。
 6. **release 签名依赖本地 `android/key.properties`**（CI 从 Secrets 恢复），密钥需自行备份，丢失后无法覆盖升级。
 7. **iOS 工程未生成**，`Info.plist` 的相机/相册权限与文件共享开关都还没配。
 8. 时间解析不接受毫秒和时区后缀（读者从不产生这两种格式），遇到会回退到从 id 反推的时间。
+9. **应用锁 PIN 没有尝试次数限制。** 6 位 PIN 靠手工逐次试错不现实，但也没做失败锁定/延迟；
+   设备被 root 后 Keystore 与 PIN 哈希都不再有保护力，这是本地加密的固有边界。
+10. **设备锁屏被关闭后**，若此前没设过备用 PIN，解锁页会要求先设置一个 PIN（不会静默放行）；
+    如果连这一步也不想设，只能去设置里关掉应用锁。
 
 ## 路线图
 

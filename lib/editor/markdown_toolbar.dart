@@ -382,12 +382,20 @@ class MarkdownAttachPanel extends StatelessWidget {
   const MarkdownAttachPanel({
     super.key,
     required this.onPick,
+    this.showTopDivider = true,
   });
 
   /// 面板高度：上下留白 8×2 + 单行大卡 104。
   static const double height = 120;
 
   final ValueChanged<MarkdownAttachAction> onPick;
+
+  /// 是否画顶部分隔线。
+  ///
+  /// 非受控模式下面板叠在工具条**上方**，需要一条线把它和正文分开；
+  /// 受控模式（小记详情页）下面板铺在工具条下方的键盘区域里，本身已经
+  /// 是独立的一块白面，再画一条线就变成「工具栏下面多出一道横线」。
+  final bool showTopDivider;
 
   static const List<(MarkdownAttachAction, IconData, String)> _mediaItems =
       <(MarkdownAttachAction, IconData, String)>[
@@ -405,9 +413,9 @@ class MarkdownAttachPanel extends StatelessWidget {
       // pageAlt（浅暖灰）承担「可按压」的表面层级，选中才换主色浅底。
       decoration: BoxDecoration(
         color: colors.page,
-        border: Border(
-          top: BorderSide(color: colors.divider, width: 0.5),
-        ),
+        border: showTopDivider
+            ? Border(top: BorderSide(color: colors.divider, width: 0.5))
+            : null,
       ),
       padding: const EdgeInsets.symmetric(vertical: 8),
       // 与 Aa 面板共用同一套「左侧分组名 + 右侧卡片行」结构：
@@ -500,6 +508,7 @@ class MarkdownTextStylePanel extends StatelessWidget {
     super.key,
     required this.active,
     required this.onPick,
+    this.showTopDivider = true,
   });
 
   /// 面板固定高度：4 行 × 56 + 上下留白 8×2。
@@ -507,6 +516,9 @@ class MarkdownTextStylePanel extends StatelessWidget {
 
   final Set<MarkdownCommand> active;
   final ValueChanged<MarkdownCommand> onPick;
+
+  /// 见 [MarkdownAttachPanel.showTopDivider]。
+  final bool showTopDivider;
 
   /// 段落格式：待办 / 无序 / 有序 / 引用。
   static const List<(MarkdownCommand, IconData, String)> _blockItems =
@@ -543,9 +555,9 @@ class MarkdownTextStylePanel extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: colors.page,
-        border: Border(
-          top: BorderSide(color: colors.divider, width: 0.5),
-        ),
+        border: showTopDivider
+            ? Border(top: BorderSide(color: colors.divider, width: 0.5))
+            : null,
       ),
       padding: const EdgeInsets.symmetric(vertical: 8),
       // 小屏 / 横屏的键盘区域可能比面板矮：允许纵向滚动，避免溢出。
@@ -680,6 +692,7 @@ class MarkdownInsertPanel extends StatelessWidget {
     super.key,
     required this.active,
     required this.onPick,
+    this.showTopDivider = true,
   });
 
   /// 面板固定高度（与 [MarkdownTextStylePanel] 同源，用于正文预留）。
@@ -688,6 +701,9 @@ class MarkdownInsertPanel extends StatelessWidget {
 
   final Set<MarkdownCommand> active;
   final ValueChanged<MarkdownCommand> onPick;
+
+  /// 见 [MarkdownAttachPanel.showTopDivider]。
+  final bool showTopDivider;
 
   static const List<(MarkdownCommand, IconData, String)> _items =
       <(MarkdownCommand, IconData, String)>[
@@ -724,7 +740,9 @@ class MarkdownInsertPanel extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: colors.page,
-        border: Border(top: BorderSide(color: colors.divider, width: 0.5)),
+        border: showTopDivider
+            ? Border(top: BorderSide(color: colors.divider, width: 0.5))
+            : null,
       ),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Column(

@@ -279,8 +279,6 @@ class NoteRepository extends ChangeNotifier {
     await _store.saveSettings(next);
   }
 
-  Future<String> exportAll() => _store.exportAll();
-
   /// 从导出 zip 恢复（设置页「恢复备份」入口），恢复后重载内存列表。
   Future<(int, int)> restoreFromZip(Uint8List bytes) async {
     final result = await _store.restoreFromZip(bytes);

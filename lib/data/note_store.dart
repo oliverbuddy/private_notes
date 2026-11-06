@@ -423,7 +423,14 @@ class NoteStore {
   ];
 
   /// 恢复时同样跳过这些目录（旧导出包里可能带着它们）。
+  ///
+  /// `export-*` 是旧版本「导出到私有目录」留下的明文副本，里面是同一批
+  /// 笔记的旧快照；恢复时不该被当成独立笔记再写一遍。
   static bool _isExcludedArchivePath(String path) {
+    final String first = path.split('/').first;
+    if (first.startsWith('export-')) {
+      return true;
+    }
     for (final dir in _alwaysExcluded) {
       if (path == dir || path.startsWith('$dir/')) {
         return true;
@@ -441,7 +448,7 @@ class NoteStore {
   /// 因为导出面向换机/分享，密钥离开本设备就失效了。
   Future<File> createBackupFile({required String name}) async {
     await ensureDirectories();
-    final file = File(p.join(backupsDir.path, name));
+    final file = await _uniqueBackupFile(name);
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.parent.create(recursive: true);
@@ -449,14 +456,29 @@ class NoteStore {
       await zipNotesToFile(
         sourceRoot: root.path,
         targetPath: tmp.path,
-        excludes: _alwaysExcluded,
+        excludes: <String>[
+          ..._alwaysExcluded,
+          // 旧版本留下的明文导出目录：不该被备份打包带出去。
+          ...await _legacyExportDirs(),
+        ],
       );
+      await tmp.rename(file.path);
     } on MissingPluginException {
       // 内存版只读磁盘文件，锁定笔记写进去的仍是密文。
       final bytes = await buildExportZip();
       await tmp.writeAsBytes(bytes, flush: true);
+      await tmp.rename(file.path);
+    } catch (error) {
+      // 压缩失败不能留下半截 `.tmp`（虽然列表过滤 .zip，但会白白占磁盘）。
+      try {
+        if (await tmp.exists()) {
+          await tmp.delete();
+        }
+      } catch (_) {
+        // 删不掉也不影响把原始错误抛给上层。
+      }
+      rethrow;
     }
-    await tmp.rename(file.path);
     // 手动备份不设上限会一直堆，磁盘写满后连笔记都存不下。
     // 只保留最近 5 份（auto-* 由 pruneAutoBackups 单独管，恢复前快照不动）。
     if (p.basename(file.path).startsWith('manual-')) {
@@ -508,6 +530,38 @@ class NoteStore {
   /// 只保留最近 [keep] 份手动备份，避免无限堆积占满磁盘。
   Future<void> pruneManualBackups({int keep = 5}) =>
       _pruneByPrefix('manual-', keep: keep);
+
+  /// 备份文件名去重：同一分钟内点两次「立即备份」不能互相覆盖。
+  Future<File> _uniqueBackupFile(String name) async {
+    final base = p.basenameWithoutExtension(name);
+    final extension = p.extension(name);
+    var candidate = File(p.join(backupsDir.path, name));
+    var index = 2;
+    while (await candidate.exists()) {
+      candidate = File(p.join(backupsDir.path, '$base-$index$extension'));
+      index += 1;
+    }
+    return candidate;
+  }
+
+  /// 旧版本 `exportAll()` 留在根目录的 `export-*` 明文副本。
+  ///
+  /// 该方法已删除，但历史设备上可能还有残留目录；备份/导出时一并排除，
+  /// 否则旧明文会被重复打包带走。
+  Future<List<String>> _legacyExportDirs() async {
+    final dirs = <String>[];
+    try {
+      await for (final entity in root.list(followLinks: false)) {
+        if (entity is Directory &&
+            p.basename(entity.path).startsWith('export-')) {
+          dirs.add(p.basename(entity.path));
+        }
+      }
+    } catch (_) {
+      // 目录读不到就等于没有残留，不影响主流程。
+    }
+    return dirs;
+  }
 
   /// 按文件名前缀清理备份，只保留最新 [keep] 份。
   Future<void> _pruneByPrefix(String prefix, {required int keep}) async {
@@ -654,40 +708,6 @@ class NoteStore {
     final fileName = '${maxIndex + 1}$extension';
     await File(sourcePath).copy(p.join(directory.path, fileName));
     return 'assets/$noteId/$fileName';
-  }
-
-  /// 导出全部笔记到 `export-YYYYMMDD-HHMM/`。
-  ///
-  /// 笔记文件平铺在导出根目录，附件放 `assets/` 子目录 ——
-  /// 这样正文里的 `assets/<id>/1.jpg` 相对引用在导出目录里依然能打开。
-  Future<String> exportAll() async {
-    final stamp = formatExportStamp(DateTime.now());
-    var directory = Directory(p.join(root.path, 'export-$stamp'));
-    var attempt = 2;
-    while (await directory.exists()) {
-      directory = Directory(p.join(root.path, 'export-$stamp-$attempt'));
-      attempt += 1;
-    }
-    await directory.create(recursive: true);
-
-    if (await notesDir.exists()) {
-      await for (final entity
-          in notesDir.list(recursive: true, followLinks: false)) {
-        if (entity is! File) {
-          continue;
-        }
-        if (!entity.path.toLowerCase().endsWith('.md')) {
-          continue;
-        }
-        await entity.copy(p.join(directory.path, p.basename(entity.path)));
-      }
-    }
-
-    if (await assetsDir.exists()) {
-      await _copyTree(assetsDir, Directory(p.join(directory.path, 'assets')));
-    }
-
-    return directory.path;
   }
 
   /// 从导出 zip 恢复笔记与附件（导出结构对称：.md 平铺根目录、
@@ -848,7 +868,11 @@ class NoteStore {
       await zipNotesToFile(
         sourceRoot: root.path,
         targetPath: file.path,
-        excludes: <String>[..._alwaysExcluded, ...excludes],
+        excludes: <String>[
+          ..._alwaysExcluded,
+          ...await _legacyExportDirs(),
+          ...excludes,
+        ],
         overrides: overrides,
       );
       return file;

@@ -52,6 +52,15 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            // release 不带 x86_64 的 Flutter 引擎，第三方库残留的
+            // lib/x86_64/libdartjni.so 一起剔掉，避免 APK 声明「支持 x86_64」
+            // 实际装上去却缺引擎。
+            excludes += "lib/x86_64/**"
+        }
+    }
+
     buildTypes {
         release {
             // 有签名配置时用正式密钥（本地/CI），否则退回 debug 签名兜底。
@@ -60,6 +69,10 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // 注意：Flutter Gradle 插件会在自己的阶段覆盖这里的 abiFilters，
+            // 所以「去掉 x86_64」不在这里做，而是由构建命令的
+            // `--target-platform android-arm,android-arm64` 控制
+            // （见 .github/workflows/release.yml 与 README）。
         }
     }
 }

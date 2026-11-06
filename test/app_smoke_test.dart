@@ -723,32 +723,6 @@ void main() {
       expect(await repository.loadTrash(), isEmpty);
     });
 
-    test('导出生成 export-* 目录并带上附件', () async {
-      final tempDir = await Directory.systemTemp.createTemp('xiaoji_exp_');
-      addTearDown(() async {
-        if (await tempDir.exists()) {
-          await tempDir.delete(recursive: true);
-        }
-      });
-
-      final store = await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-      final note = Note(
-        id: 'e1',
-        created: DateTime(2026, 10, 31, 9, 12),
-        updated: DateTime(2026, 10, 31, 9, 12),
-        body: '导出我',
-      );
-      await store.saveNote(note);
-      final source = File('${tempDir.path}/a.jpg');
-      await source.writeAsBytes(<int>[9]);
-      await store.importAttachment(noteId: note.id, sourcePath: source.path);
-
-      final exportPath = await store.exportAll();
-      expect(exportPath.contains('export-'), isTrue);
-      expect(File('$exportPath/${note.id}.md').existsSync(), isTrue);
-      expect(File('$exportPath/assets/${note.id}/1.jpg').existsSync(), isTrue);
-    });
-
     test('设置读写与默认值', () async {
       final tempDir = await Directory.systemTemp.createTemp('xiaoji_set_');
       addTearDown(() async {

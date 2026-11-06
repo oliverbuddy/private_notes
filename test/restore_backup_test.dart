@@ -195,4 +195,45 @@ void main() {
     final second = await store.ensureAutoBackup();
     expect(second, isNull, reason: '24 小时内已有备份，不重复生成');
   });
+
+  test('同一分钟连点两次备份，两次都保留（不互相覆盖）', () async {
+    final first = await store.createBackupFile(name: 'manual-20261102-1200.zip');
+    final second = await store.createBackupFile(name: 'manual-20261102-1200.zip');
+
+    expect(first.path, isNot(second.path), reason: '文件名必须去重');
+    expect(first.existsSync(), isTrue);
+    expect(second.existsSync(), isTrue);
+  });
+
+  test('恢复时跳过 export-* 旧明文副本，避免重复写入', () async {
+    final snapshot = Note(
+      id: '20261102-1000-kept',
+      created: DateTime(2026, 11, 2, 10),
+      updated: DateTime(2026, 11, 2, 10),
+      body: '正常内容',
+    ).encode();
+    final legacy = Note(
+      id: '20261102-1000-kept',
+      created: DateTime(2026, 11, 2, 10),
+      updated: DateTime(2026, 11, 2, 9),
+      body: '旧快照内容',
+    ).encode();
+    final archive = Archive()
+      ..addFile(ArchiveFile(
+        'notes/2026/11/20261102-1000-kept.md',
+        snapshot.length,
+        utf8.encode(snapshot),
+      ))
+      ..addFile(ArchiveFile(
+        'export-20261102-0900/20261102-1000-kept.md',
+        legacy.length,
+        utf8.encode(legacy),
+      ));
+    final bytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
+
+    final (restored, _) = await store.restoreFromZip(bytes);
+    expect(restored, 1, reason: '只恢复 notes/ 下的那一份');
+    final back = (await store.loadNotes()).single;
+    expect(back.body, contains('正常内容'), reason: '旧快照不能覆盖当前内容');
+  });
 }

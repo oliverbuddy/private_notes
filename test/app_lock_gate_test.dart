@@ -38,6 +38,10 @@ void main() {
           return authCompleter!.future;
         case 'setSecureScreen':
           return true;
+        case 'randomSalt':
+          return 'c2FsdHNhbHRzYWx0c2FsdA==';
+        case 'hashPin':
+          return 'aGFzaGVkLXBpbg==';
       }
       return null;
     });
@@ -203,6 +207,63 @@ void main() {
       await background(tester);
       await foreground(tester);
       expect(find.text('小记已锁定'), findsNothing);
+    });
+  });
+
+  group('无系统锁屏时的兼容', () {
+    testWidgets('没有系统锁屏也没有 PIN：先要求设置 PIN，不再静默放行', (
+      WidgetTester tester,
+    ) async {
+      final repository = await openRepository(tester, autoLockSeconds: 0);
+      mockSecurityChannel(tester, deviceSecure: false);
+      await pumpGate(tester, repository);
+
+      await tester.tap(find.text('解锁'));
+      await tester.pump();
+
+      // 关键回归：以前这里会直接解锁，等于应用锁失效。
+      expect(find.text('小记已锁定'), findsOneWidget);
+      expect(find.text('设备锁屏已关闭，请先设置应用锁 PIN'), findsOneWidget);
+      expect(find.text('设置并解锁'), findsOneWidget);
+
+      // 输入 6 位 PIN 并提交。
+      for (final String digit in <String>['1', '2', '3', '4', '5', '6']) {
+        await tester.tap(find.text(digit));
+        await tester.pump();
+      }
+      await tester.tap(find.text('设置并解锁'));
+      // 写 settings.json 是真实文件 IO：fakeAsync 里要交替 runAsync 与 pump，
+      // 让真实 IO 完成后再把回调冲进 fake 队列。
+      for (var i = 0; i < 10; i++) {
+        await tester.runAsync(() async {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        });
+        await tester.pump();
+      }
+
+      expect(find.text('小记已锁定'), findsNothing);
+      expect(repository.settings.pinHash, isNotNull, reason: 'PIN 哈希要落盘');
+      expect(repository.settings.pinSalt, isNotNull);
+    });
+
+    testWidgets('已有 PIN 时走应用内键盘校验', (WidgetTester tester) async {
+      final repository = await openRepository(tester, autoLockSeconds: 0);
+      mockSecurityChannel(tester, deviceSecure: false);
+      await tester.runAsync(() async {
+        await repository.updateSettings(
+          repository.settings.copyWith(
+            pinHash: 'aGFzaGVkLXBpbg==',
+            pinSalt: 'c2FsdHNhbHRzYWx0c2FsdA==',
+          ),
+        );
+      });
+      await pumpGate(tester, repository);
+
+      await tester.tap(find.text('解锁'));
+      await tester.pump();
+
+      expect(find.text('输入应用锁 PIN'), findsOneWidget);
+      expect(find.text('设置并解锁'), findsNothing);
     });
   });
 

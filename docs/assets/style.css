@@ -282,7 +282,6 @@ h1 {
 
 .phone-hero {
   width: min(300px, 78%);
-  transform: rotate(-1.2deg);
 }
 
 .float-card {
