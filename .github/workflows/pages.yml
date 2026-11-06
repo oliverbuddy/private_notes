@@ -1,7 +1,11 @@
 name: Deploy Site
 
 # 落地页：docs/ 静态站点，推 main 时自动部署到 GitHub Pages。
-# 首次运行会通过 configure-pages 的 enablement 自动开启 Pages（需要 pages: write）。
+#
+# 前置条件（只需一次）：仓库 Settings → Pages → Build and deployment →
+# Source 选「GitHub Actions」。GITHUB_TOKEN 没有仓库管理员权限，无法用
+# configure-pages 的 enablement 自动建站（会报 Resource not accessible
+# by integration），所以这一步必须手动开启。
 on:
   push:
     branches: [main]
@@ -30,9 +34,6 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          # 仓库还没开启 Pages 时自动开启（只需一次）。
-          enablement: true
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
