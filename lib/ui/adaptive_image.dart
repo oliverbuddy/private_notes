@@ -220,7 +220,7 @@ class _LongImageBadge extends StatelessWidget {
           Text(
             '长图',
             style: TextStyle(
-              fontSize: 10,
+              fontSize: AppFontSize.micro,
               height: 1,
               color: Colors.white,
               fontWeight: AppWeight.medium,

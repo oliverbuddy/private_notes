@@ -90,8 +90,10 @@ class AppColors extends ThemeExtension<AppColors> {
     page: Color(0xFFFFFFFF),
     pageAlt: Color(0xFFF7F5F0),
     text: Color(0xFF2C2C2A),
-    secondary: Color(0xFF8F8C84),
-    tertiary: Color(0xFFA9A69D),
+    secondary: Color(0xFF74716A),
+    // 时间戳、辅助说明这类「弱文字」原为 #A9A69D，在米底上只有 2.2:1，
+    // 小字号几乎糊成背景。提到 12sp 下可读的一档（≈3:1），层级仍低于正文。
+    tertiary: Color(0xFF918E85),
     divider: Color(0x0F000000), // rgba(0,0,0,0.06)
     dividerStrong: Color(0xFFEFEDE6),
     separator: Color(0xFFF2F0E9),
@@ -116,8 +118,10 @@ class AppColors extends ThemeExtension<AppColors> {
     // < surface2 #232220，三档表面各自分明。
     pageAlt: Color(0xFF201F1D),
     text: Color(0xFFE9E7E2),
-    secondary: Color(0xFF8F8C84),
-    tertiary: Color(0xFF7C7972),
+    // 深色下弱文字同步提亮一档：原 secondary 4.9:1、tertiary 3.8:1，
+    // 后者在卡片底（pageAlt）上偏灰，时间戳看起来像禁用态。
+    secondary: Color(0xFF9C9991),
+    tertiary: Color(0xFF8A8780),
     divider: Color(0x12FFFFFF), // rgba(255,255,255,0.07)
     dividerStrong: Color(0xFF302F2C),
     // 深色下分隔线必须比底色亮出可感知的一档：#232220 在 #161514 上
@@ -229,6 +233,12 @@ abstract final class AppRadius {
   static const double block = 8;
   static const double card = 10;
   static const double chip = 11;
+
+  /// 缩略图等 56dp 左右的小图：比 block 再收一档，图片角不会被「圆掉」。
+  static const double thumb = 6;
+
+  /// 胶囊：标签、版本号这类高度约 24dp 的圆角块。
+  static const double pill = 999;
 }
 
 /// 引用块（引文块）视觉规格。
@@ -284,7 +294,7 @@ abstract final class AppWeight {
 abstract final class AppText {
   /// 页面标题（主页「小记」、设置页标题）。
   static const TextStyle pageTitle = TextStyle(
-    fontSize: 22,
+    fontSize: AppFontSize.pageTitle,
     height: 1.25,
     fontWeight: AppWeight.semibold,
     letterSpacing: 0.3,
@@ -292,7 +302,7 @@ abstract final class AppText {
 
   /// 弹层/对话框标题。
   static const TextStyle sheetTitle = TextStyle(
-    fontSize: 17,
+    fontSize: AppFontSize.subtitle,
     height: 1.3,
     fontWeight: AppWeight.semibold,
     letterSpacing: 0.2,
@@ -300,24 +310,49 @@ abstract final class AppText {
 
   /// 正文。列表摘要与阅读态共用。
   static const TextStyle body = TextStyle(
-    fontSize: 16,
+    fontSize: AppFontSize.body,
     height: 1.68,
   );
 
   /// 列表元信息（时间、字数）。
   static const TextStyle meta = TextStyle(
-    fontSize: 12.5,
+    fontSize: AppFontSize.meta,
     height: 1.2,
     letterSpacing: 0.1,
   );
 
   /// 分组小标题。
   static const TextStyle caption = TextStyle(
-    fontSize: 12,
+    fontSize: AppFontSize.caption,
     height: 1.2,
     fontWeight: AppWeight.medium,
     letterSpacing: 0.3,
   );
+}
+
+/// 字号刻度。
+///
+/// 全项目只从这里取值：之前 27 个文件里散着 124 处 `fontSize: 13.5` 这类
+/// 硬编码，同一个层级在不同页面各写各的。集中后改一档只改一处。
+abstract final class AppFontSize {
+  static const double tiny = 9.5;
+  static const double micro = 10;
+  static const double badge = 11;
+  static const double badgeLg = 11.5;
+  static const double caption = 12;
+  static const double meta = 12.5;
+  static const double label = 13;
+  static const double labelLg = 13.5;
+  static const double value = 14;
+  static const double hint = 15;
+  static const double summary = 15.5;
+  static const double body = 16;
+  static const double bodyLg = 16.5;
+  static const double subtitle = 17;
+  static const double heading = 18.5;
+  static const double title = 20;
+  static const double titleLg = 21;
+  static const double pageTitle = 22;
 }
 
 /// 间距只用 4 的倍数，避免出现 5、7、11 这种「看起来差一点」的值。

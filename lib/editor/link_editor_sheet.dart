@@ -77,7 +77,7 @@ class _LinkEditorSheetState extends State<_LinkEditorSheet> {
               Text(
                 '插入链接',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppFontSize.body,
                   fontWeight: AppWeight.medium,
                   color: colors.text,
                 ),
@@ -150,10 +150,10 @@ class _LinkField extends StatelessWidget {
         controller: controller,
         autofocus: autofocus,
         keyboardType: keyboardType,
-        style: TextStyle(fontSize: 15, color: colors.text),
+        style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(fontSize: 13.5, color: colors.tertiary),
+          hintStyle: TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
           border: InputBorder.none,
           isDense: true,
         ),
@@ -189,7 +189,7 @@ class _LinkSheetButton extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: AppFontSize.body,
               height: 1,
               fontWeight: AppWeight.medium,
               color: foreground,

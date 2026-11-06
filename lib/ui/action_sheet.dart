@@ -63,7 +63,7 @@ Future<T?> showXiaojiActionSheet<T>({
               const SizedBox(height: 12),
               Material(
                 color: colors.surface2,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: () => Navigator.of(sheetContext).pop(),
@@ -73,7 +73,7 @@ Future<T?> showXiaojiActionSheet<T>({
                       child: Text(
                         '取消',
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: AppFontSize.body,
                           height: 1,
                           fontWeight: AppWeight.medium,
                           color: colors.secondary,
@@ -118,7 +118,7 @@ class _ActionRow<T> extends StatelessWidget {
                 child: Text(
                   action.label,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppFontSize.hint,
                     height: 1,
                     fontWeight: action.selected
                         ? AppWeight.medium

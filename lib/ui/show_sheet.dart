@@ -99,7 +99,7 @@ Future<bool?> showXiaojiConfirmSheet({
               Text(
                 message,
                 style: TextStyle(
-                  fontSize: 13.5,
+                  fontSize: AppFontSize.labelLg,
                   height: 1.6,
                   color: colors.secondary,
                 ),
@@ -155,7 +155,7 @@ class _SheetButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: background,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -165,7 +165,7 @@ class _SheetButton extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: AppFontSize.body,
               height: 1,
               fontWeight: AppWeight.medium,
               color: foreground,

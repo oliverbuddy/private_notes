@@ -303,7 +303,7 @@ class _AppLockGateState extends State<AppLockGate>
                       Text(
                         '小记已锁定',
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: AppFontSize.title,
                           height: 1.2,
                           fontWeight: AppWeight.medium,
                           color: colors.text,
@@ -318,7 +318,7 @@ class _AppLockGateState extends State<AppLockGate>
                                 : '验证身份后查看你的笔记',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 13.5,
+                          fontSize: AppFontSize.labelLg,
                           height: 1.6,
                           color: colors.tertiary,
                         ),

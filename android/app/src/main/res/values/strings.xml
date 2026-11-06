@@ -4,6 +4,6 @@
     <string name="shortcut_new_note_long">新建小记</string>
 
     <!-- 桌面小组件 -->
-    <string name="widget_new_note_desc_text">快速记录</string>
+    <string name="widget_new_note_desc_text">写点什么…</string>
     <string name="widget_new_note_desc">桌面一键新建小记，不经过列表</string>
 </resources>

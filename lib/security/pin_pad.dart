@@ -59,7 +59,7 @@ class PinEntry extends StatelessWidget {
             child: Text(
               error!,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5, color: colors.danger),
+              style: TextStyle(fontSize: AppFontSize.meta, color: colors.danger),
             ),
           ),
         const SizedBox(height: 20),
@@ -158,7 +158,7 @@ class PinEntry extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 20,
+                  fontSize: AppFontSize.title,
                   height: 1,
                   fontWeight: AppWeight.medium,
                   color: colors.text,

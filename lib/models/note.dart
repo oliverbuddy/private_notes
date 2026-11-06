@@ -151,15 +151,30 @@ class Note {
     );
   }
 
+  /// 标签规范化：所有入口（编辑、重命名、合并、读盘）共用同一套规则，
+  /// 避免「#工作」这类写法在不同页面被解释成不同东西。
+  ///
+  /// - 去掉首尾空白与换行；
+  /// - 去掉前导 `#`（显示时才加回 `#`）；
+  /// - 含分隔符（英文/中文逗号）或为空时返回 null，交给调用方拆分或报错。
+  static String? normalizeTag(String raw) {
+    var tag = raw.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+    tag = tag.replaceFirst(RegExp(r'^#+'), '').trim();
+    if (tag.isEmpty || tag.contains(',') || tag.contains('，')) {
+      return null;
+    }
+    return tag;
+  }
+
   /// 标签解析：英文逗号为主，同时兼容中文逗号（用户手写 frontmatter 时很常见）。
+  ///
+  /// 每一项都过一遍 [normalizeTag]，旧数据里带 `#` 的标签会在读盘时自动修正；
+  /// 清洗后重复的标签只保留第一次出现的写法。
   static List<String> parseTags(String raw) {
     final result = <String>[];
     for (final piece in raw.split(RegExp(r'[,，]'))) {
-      final tag = piece.trim();
-      if (tag.isEmpty) {
-        continue;
-      }
-      if (!result.contains(tag)) {
+      final tag = normalizeTag(piece);
+      if (tag != null && !result.contains(tag)) {
         result.add(tag);
       }
     }

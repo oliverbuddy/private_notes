@@ -462,14 +462,14 @@ class _MediaCard extends StatelessWidget {
       // 浅暖灰卡面：与 Aa 面板的动作卡共用同一层表面色，两套子菜单
       // 看起来是同一套控件语言（而不是「白卡 + 无底图标」两种风格）。
       color: colors.pageAlt,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Container(
           height: 104,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -483,7 +483,7 @@ class _MediaCard extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: AppFontSize.label,
                   height: 1,
                   letterSpacing: 0.2,
                   color: colors.text,
@@ -631,7 +631,7 @@ class _PanelGroupRow extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppFontSize.caption,
                   height: 1,
                   letterSpacing: 0.4,
                   fontWeight: AppWeight.medium,
@@ -824,7 +824,7 @@ class _HeadingCell extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         // 与动作卡同高同宽：标题行也落在同一套网格里，不再「文字大小
         // 各占一块、和下面的图标行对不齐」。
@@ -835,7 +835,7 @@ class _HeadingCell extends StatelessWidget {
         // 可按压的分段控件，而不是几段孤立的文字。
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : colors.pageAlt,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Text(
           label,
@@ -875,7 +875,7 @@ class _ActionCell extends StatelessWidget {
         selected ? colors.accent : colors.text.withValues(alpha: 0.78);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         // 与标题卡同高同宽：图标行与标题行完全对齐。
         height: 48,
@@ -883,7 +883,7 @@ class _ActionCell extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : colors.pageAlt,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -893,7 +893,7 @@ class _ActionCell extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: AppFontSize.badge,
                 height: 1,
                 letterSpacing: 0.2,
                 color: foreground,
@@ -924,21 +924,21 @@ class _TextToolButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         width: 40,
         height: 40,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: showClose
             ? Icon(Icons.close, size: 20, color: colors.accent)
             : Text(
                 'Aa',
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: AppFontSize.hint,
                   height: 1,
                   fontWeight: AppWeight.semibold,
                   color: selected
@@ -967,13 +967,13 @@ class _ToolButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         width: 40,
         height: 40,
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Icon(
           icon,
@@ -1024,7 +1024,7 @@ class _FixedButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         width: 40,
         height: 40,

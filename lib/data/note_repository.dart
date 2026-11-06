@@ -101,7 +101,12 @@ class NoteRepository extends ChangeNotifier {
       if (a.pinned != b.pinned) {
         return a.pinned ? -1 : 1;
       }
-      return b.updated.compareTo(a.updated);
+      switch (_settings.sortOrder) {
+        case SortOrder.updated:
+          return b.updated.compareTo(a.updated);
+        case SortOrder.created:
+          return b.created.compareTo(a.created);
+      }
     });
     return result;
   }
@@ -393,6 +398,54 @@ class NoteRepository extends ChangeNotifier {
     _invalidateSearchCache();
     if (_activeTag == tag) {
       _activeTag = null;
+    }
+    notifyListeners();
+    return affected.length;
+  }
+
+  /// 标签 → 笔记数（标签管理页展示用）。按名称排序，页面自己决定顺序。
+  Map<String, int> get tagCounts {
+    final counter = <String, int>{};
+    for (final note in _notes) {
+      for (final tag in note.tags) {
+        counter[tag] = (counter[tag] ?? 0) + 1;
+      }
+    }
+    return counter;
+  }
+
+  /// 把某个标签改名到所有笔记（已存在同名标签时自动去重）。
+  ///
+  /// 与 [deleteTag] 一样只动 frontmatter，不刷新 `updated`。
+  Future<int> renameTag(String from, String to) async {
+    final String? target = Note.normalizeTag(to);
+    if (target == null || target == from) {
+      return 0;
+    }
+    final affected = _notes
+        .where((Note note) => note.tags.contains(from))
+        .toList(growable: false);
+    if (affected.isEmpty) {
+      return 0;
+    }
+    final next = <Note>[..._notes];
+    for (final note in affected) {
+      final index = next.indexWhere((Note item) => item.id == note.id);
+      if (index < 0) {
+        continue;
+      }
+      final tags = note.tags
+          .map((String item) => item == from ? target : item)
+          .toSet()
+          .toList();
+      next[index] = note.copyWith(tags: tags);
+      await _store.saveNote(next[index]);
+      _index?.upsertNote(next[index]);
+    }
+    _notes = next;
+    _invalidateSearchCache();
+    if (_activeTag == from) {
+      _activeTag = target;
     }
     notifyListeners();
     return affected.length;

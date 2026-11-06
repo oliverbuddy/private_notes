@@ -2,6 +2,7 @@
 <resources>
     <!-- 和 markdown 语法符号的「墨」同一个色值，图标、FAB、正文标题三处同源。 -->
     <color name="ic_launcher_background">#2C2C2A</color>
-    <!-- 启动窗口底色：与 App 浅色主题的 page 一致，避免启动时闪一下别的颜色。 -->
-    <color name="launch_background">#FFFFFF</color>
+    <!-- 启动窗口底色：与舒适密度（默认）的首页底色 #F7F5F0 一致，
+         否则冷启动会先闪一下纯白再切到米色。 -->
+    <color name="launch_background">#F7F5F0</color>
 </resources>

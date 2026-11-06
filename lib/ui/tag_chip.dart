@@ -40,7 +40,7 @@ class TagChip extends StatelessWidget {
         child: Text(
           isOverflow ? label : '#$label',
           style: TextStyle(
-            fontSize: 12,
+            fontSize: AppFontSize.caption,
             height: 1,
             letterSpacing: 0.2,
             fontWeight: AppWeight.medium,

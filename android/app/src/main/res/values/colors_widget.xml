@@ -6,4 +6,7 @@
     <color name="widget_text">#2C2C2A</color>
     <!-- 组件标题色：对齐系统图标标题的白色 + 阴影，深色壁纸上可直接读。 -->
     <color name="widget_sub">#FFFFFF</color>
+    <!-- 组件内「笔」徽标的底/图标色：与首页底部记录条同一套（深底白笔）。 -->
+    <color name="widget_icon_bg">#2C2C2A</color>
+    <color name="widget_icon_fg">#FFFFFF</color>
 </resources>

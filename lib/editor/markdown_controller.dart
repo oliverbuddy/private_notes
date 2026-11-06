@@ -36,24 +36,6 @@ class MarkdownEditingController extends TextEditingController {
   static final RegExp _bulletPattern = RegExp(r'^(\s*)([-*+]\s+)(.*)$');
   static final RegExp _orderedPattern = RegExp(r'^(\s*)(\d+[.)]\s+)(.*)$');
 
-  /// `#` 后面紧跟字母/数字/汉字才算标签，避免和标题、纯符号混淆。
-  static bool _isTagChar(int codeUnit) {
-    const a = 0x61;
-    const z = 0x7A;
-    const upperA = 0x41;
-    const upperZ = 0x5A;
-    const zero = 0x30;
-    const nine = 0x39;
-    const underscore = 0x5F;
-    const cjkStart = 0x4E00;
-    const cjkEnd = 0x9FFF;
-    return (codeUnit >= a && codeUnit <= z) ||
-        (codeUnit >= upperA && codeUnit <= upperZ) ||
-        (codeUnit >= zero && codeUnit <= nine) ||
-        codeUnit == underscore ||
-        (codeUnit >= cjkStart && codeUnit <= cjkEnd);
-  }
-
   // span 结果缓存：text 没变就整树复用。
   //
   // buildTextSpan 不只在打字时被调用 —— 光标移动、键盘弹出动画的每一帧、
@@ -347,7 +329,7 @@ class MarkdownEditingController extends TextEditingController {
     return _inline(line, base, colors);
   }
 
-  /// 行内语法：粗体 / 斜体 / 行内码 / 链接 / 删除线 / #标签。
+  /// 行内语法：粗体 / 斜体 / 行内码 / 链接 / 删除线。
   List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
     if (text.isEmpty) {
       return const <InlineSpan>[];
@@ -483,27 +465,6 @@ class MarkdownEditingController extends TextEditingController {
             i = urlEnd + 1;
             continue;
           }
-        }
-      }
-
-      // #标签：`#` 后面紧跟字母/数字/汉字才算，避免和标题、纯符号混淆。
-      // 手写扫描而不是正则：这里在逐字符循环里，substring + 编译正则的
-      // 开销是 O(n²) 级别的。
-      if (char == '#') {
-        var j = i + 1;
-        while (j < text.length && _isTagChar(text.codeUnitAt(j))) {
-          j++;
-        }
-        if (j > i + 1) {
-          flush();
-          out.add(
-            TextSpan(
-              text: text.substring(i, j),
-              style: style.copyWith(color: colors.accent),
-            ),
-          );
-          i = j;
-          continue;
         }
       }
 

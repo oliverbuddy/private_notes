@@ -36,7 +36,6 @@ import 'editor_request_handlers.dart';
 import 'image_display_size.dart';
 import 'link_tap_handler.dart';
 import 'list_style.dart';
-import 'tag_style.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
 
@@ -220,9 +219,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     _updated = widget.note.updated;
     _lastSavedBody = widget.note.body;
     _document = deserializeXiaojiMarkdown(widget.note.body);
-    // 打开时先给 `#标签` 打上显示标记：胶囊由 TagChips 内容层绘制，
-    // 文字颜色由 stylesheet 的 inlineTextStyler 接管。
-    applyTagAttributions(_document);
     _composer = MutableDocumentComposer();
     _editor = createXiaojiEditor(document: _document, composer: _composer);
     _ops = CommonEditorOperations(
@@ -241,12 +237,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 按钮要立刻点亮）。集合没变时 computeActive 不触发重建，不会死循环。
     _editor.addListener(
       FunctionalEditListener((List<EditEvent> _) {
-        // 这次文本变更的 document 通知已经发出、内容层已排队重建；
-        // 在这里补打标签属性，重建时看到的就是新标签（同一帧内完成）。
-        // 组词期间先不动，避免和 IME 的 composing 区抢字符。
-        if (_composer.composingRegion.value == null) {
-          applyTagAttributions(_document);
-        }
         _dirty = true;
         _scheduleSave();
         _refreshActiveCommands();
@@ -1354,7 +1344,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                   Text(
                     label,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: AppFontSize.body,
                       color: foreground ?? sheetColors.text,
                     ),
                   ),
@@ -1535,7 +1525,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     final result = await showTagEditorSheet(
       context: context,
       initialText: _currentNote.tags.join(', '),
-      candidates: widget.repository.tags.take(12).toList(),
+      candidates: widget.repository.tags,
     );
     if (result == null || !mounted) {
       return;
@@ -1683,7 +1673,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '删除这条小记？',
-      message: '正文和附件会一起移到「最近删除」，30 天后自动清理。',
+      message: '正文和附件会一起移到「回收站」，到期后自动清理。',
       confirmLabel: '删除',
       destructive: true,
     );
@@ -1924,7 +1914,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                                       return Text(
                                         '开始记录…',
                                         style: TextStyle(
-                                          fontSize: 15.5,
+                                          fontSize: AppFontSize.summary,
                                           height: 1.7,
                                           letterSpacing: 0.3,
                                           leadingDistribution:
@@ -2210,11 +2200,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         const DefaultCaretOverlayBuilder(),
         XiaojiCaretLayerBuilder(_composer),
       ],
-      // `#标签` 的圆角胶囊画在正文下面（文字仍是文档里的真字符，
-      // 不替换成 widget，光标偏移/选区/输入都不受影响）。
-      documentUnderlayBuilders: const <SuperEditorLayerBuilder>[
-        TagChipsUnderlayBuilder(),
-      ],
       componentBuilders: <ComponentBuilder>[
         // 相对路径图片解析（assets/… → 真实文件），必须排在默认构建器
         // 之前才能接管 ImageNode；其余组件保持默认链（含 Task）。
@@ -2267,28 +2252,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 之前写在这一层里的手机端字阶其实从未生效，真机上看到的一直是
     // 桌面排版（用户反馈的「整体偏大、Typora 感」就是这个根因）。
     return defaultStylesheet.copyWith(
-      // `#标签` 文字用主色；胶囊底由 TagChips 内容层画。其余行内样式
-      // （粗体/斜体/删除线/行内码/链接）继续走 super_editor 默认实现。
-      inlineTextStyler: (
-        Set<Attribution> attributions,
-        TextStyle existingStyle,
-      ) {
-        final style = defaultInlineTextStyler(attributions, existingStyle);
-        if (attributions.any((Attribution a) => a is TagAttribution)) {
-          return style.copyWith(
-            color: colors.accent,
-            letterSpacing: 0.2,
-          );
-        }
-        return style;
-      },
       addRulesAfter: <StyleRule>[
         StyleRule(
           BlockSelector.all,
           (Document doc, DocumentNode node) {
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
-                fontSize: 15.5,
+                fontSize: AppFontSize.summary,
                 height: 1.7,
                 letterSpacing: 0.3,
                 leadingDistribution: TextLeadingDistribution.even,
@@ -2390,7 +2360,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header1'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: 21,
+              fontSize: AppFontSize.titleLg,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.3,
@@ -2404,7 +2374,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header2'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: 18.5,
+              fontSize: AppFontSize.heading,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.25,
@@ -2418,7 +2388,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header3'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: 16.5,
+              fontSize: AppFontSize.bodyLg,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.2,
@@ -2460,7 +2430,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
-              fontSize: 13.5,
+              fontSize: AppFontSize.labelLg,
               height: 1.6,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
@@ -2820,7 +2790,7 @@ class _LabImageComponentBuilder implements ComponentBuilder {
           alignment: Alignment.center,
           child: Text(
             vm.altText.isEmpty ? '图片' : vm.altText,
-            style: TextStyle(fontSize: 13, color: colors.tertiary),
+            style: TextStyle(fontSize: AppFontSize.label, color: colors.tertiary),
           ),
         );
       },

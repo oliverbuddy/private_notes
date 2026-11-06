@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:follow_the_leader/follow_the_leader.dart';
 import 'package:super_editor/super_editor.dart';
 
+import '../../theme/app_theme.dart';
+
 /// 小记的 Android 选择工具条（中文）。
 ///
 /// 为什么不用 super_editor 内建的 `DefaultAndroidEditorToolbar`：它内部的
@@ -93,7 +95,7 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -115,12 +117,12 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
   Widget _button(String label, Color foreground, VoidCallback onPressed) {
     return InkWell(
       onTap: onPressed,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Text(
           label,
-          style: TextStyle(fontSize: 14, color: foreground),
+          style: TextStyle(fontSize: AppFontSize.value, color: foreground),
         ),
       ),
     );

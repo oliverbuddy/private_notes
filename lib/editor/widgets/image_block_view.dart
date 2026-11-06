@@ -53,7 +53,7 @@ class ImageBlockView extends StatelessWidget {
                 color: colors.surface2,
                 child: Text(
                   '图片已丢失',
-                  style: TextStyle(fontSize: 12, color: colors.tertiary),
+                  style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
                 ),
               ),
               frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
@@ -74,7 +74,7 @@ class ImageBlockView extends StatelessWidget {
             padding: const EdgeInsets.only(top: 6),
             child: Text(
               block.alt.trim(),
-              style: TextStyle(fontSize: 11, color: colors.secondary),
+              style: TextStyle(fontSize: AppFontSize.badge, color: colors.secondary),
             ),
           ),
       ],
@@ -555,7 +555,7 @@ class _ImageViewerPageState extends State<ImageViewerPage>
                                                 '图片已丢失',
                                                 style: TextStyle(
                                                   color: Colors.white70,
-                                                  fontSize: 13,
+                                                  fontSize: AppFontSize.label,
                                                 ),
                                               ),
                                             ),
@@ -598,7 +598,7 @@ class _ImageViewerPageState extends State<ImageViewerPage>
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            fontSize: 13,
+                                            fontSize: AppFontSize.label,
                                             color: Colors.white
                                                 .withValues(alpha: 0.85),
                                           ),

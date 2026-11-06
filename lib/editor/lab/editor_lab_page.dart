@@ -77,7 +77,7 @@ class _EditorLabPageState extends State<EditorLabPage> {
                     child: Text(
                       '内核试验场',
                       style: AppText.pageTitle.copyWith(
-                        fontSize: 17,
+                        fontSize: AppFontSize.subtitle,
                         color: colors.text,
                       ),
                     ),
@@ -154,7 +154,7 @@ class _EditorLabPageState extends State<EditorLabPage> {
                     _lastMarkdown,
                     style: TextStyle(
                       fontFamily: 'monospace',
-                      fontSize: 12,
+                      fontSize: AppFontSize.caption,
                       height: 1.5,
                       color: colors.text,
                     ),

@@ -93,7 +93,7 @@ class _AboutPageState extends State<AboutPage> {
                         '${_appInfo?.packageName ?? 'com.xiaoji.xiaoji'}'
                         ' · 数据仅保存在本机',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: colors.tertiary),
+                        style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
                       ),
                     ),
                   ],
@@ -126,7 +126,7 @@ class _AboutPageState extends State<AboutPage> {
         Text(
           '小记',
           style: TextStyle(
-            fontSize: 20,
+            fontSize: AppFontSize.title,
             height: 1.3,
             fontWeight: AppWeight.semibold,
             letterSpacing: 0.3,
@@ -137,7 +137,7 @@ class _AboutPageState extends State<AboutPage> {
         Text(
           '你的笔记，只属于你。',
           style: TextStyle(
-            fontSize: 13,
+            fontSize: AppFontSize.label,
             height: 1.4,
             color: colors.tertiary,
           ),
@@ -146,12 +146,15 @@ class _AboutPageState extends State<AboutPage> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
+            // surface2 在浅色下几乎与页面同色，补一圈描边（与搜索框、
+            // 筛选 chip 同一套「浅底 + 细边」语言），深色下同样成立。
             color: colors.surface2,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: colors.chipBorder, width: 0.5),
           ),
           child: Text(
             _appInfo == null ? '版本 —' : '版本 ${_appInfo!.displayVersion}',
-            style: TextStyle(fontSize: 12, color: colors.secondary),
+            style: TextStyle(fontSize: AppFontSize.caption, color: colors.secondary),
           ),
         ),
       ],
@@ -237,7 +240,7 @@ class _AboutPageState extends State<AboutPage> {
                   '个人与非商业用途可以自由使用、修改和分发；'
                   '商业用途需要获得作者的书面授权。',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: AppFontSize.label,
                     height: 1.7,
                     color: colors.secondary,
                   ),
@@ -245,7 +248,7 @@ class _AboutPageState extends State<AboutPage> {
                 const SizedBox(height: 12),
                 Text(
                   '授权咨询：$_contactEmail',
-                  style: TextStyle(fontSize: 12.5, color: colors.tertiary),
+                  style: TextStyle(fontSize: AppFontSize.meta, color: colors.tertiary),
                 ),
               ],
             ),
@@ -284,7 +287,7 @@ class _AboutRow extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 16, color: colors.text),
+                style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
               ),
             ),
             const SizedBox(width: 12),
@@ -295,7 +298,7 @@ class _AboutRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
-                style: TextStyle(fontSize: 14, color: colors.secondary),
+                style: TextStyle(fontSize: AppFontSize.value, color: colors.secondary),
               ),
             ),
             const SizedBox(width: 6),

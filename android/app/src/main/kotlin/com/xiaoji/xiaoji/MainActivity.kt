@@ -22,6 +22,10 @@ class MainActivity : FlutterActivity() {
 
     private var pendingAction: String? = null
     private var channel: MethodChannel? = null
+
+    /** 其他 App 分享进来的内容，等 Dart 侧取走。 */
+    private var pendingShare: Map<String, Any?>? = null
+
     private lateinit var backupBridge: BackupBridge
     private lateinit var securityBridge: SecurityBridge
 
@@ -29,6 +33,7 @@ class MainActivity : FlutterActivity() {
         // 必须在 super.onCreate 之前读，super 之后 intent 可能已被引擎消费。
         pendingAction = intent?.getStringExtra(EXTRA_ACTION)
         super.onCreate(savedInstanceState)
+        handleShareIntent(intent)
         // 手势导航：页面已铺到系统栏后面，但导航栏底色默认是主题黑，
         // 底部会露出一条黑边。这里把导航栏背景设为透明，让页面底色透上来；
         // 同时关掉系统给导航栏加的对比度遮罩（否则仍是半透明灰条）。
@@ -83,6 +88,10 @@ class MainActivity : FlutterActivity() {
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
                     "appInfo" -> appInfo(result)
+                    "consumeSharedContent" -> {
+                        result.success(pendingShare)
+                        pendingShare = null
+                    }
                     "zipTree" -> backupBridge.zipTree(
                         call.argument<String>("sourceRoot") ?: "",
                         call.argument<String>("targetPath") ?: "",
@@ -259,12 +268,50 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleShareIntent(intent)
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return
         val target = channel
         if (target != null) {
             target.invokeMethod("shortcut", action)
         } else {
             pendingAction = action
+        }
+    }
+
+    /**
+     * 系统分享导入：只接 ACTION_SEND 的文本与单张图片。
+     *
+     * 图片先 copy 到应用缓存目录，再交给 Dart 落到 `assets/<noteId>/`，
+     * 避免长期持有外部 content:// 授权。多图（SEND_MULTIPLE）暂不支持。
+     */
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) {
+            return
+        }
+        val type = intent.type ?: return
+        if (type.startsWith("text/")) {
+            val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            if (!text.isNullOrBlank()) {
+                pendingShare = mapOf("type" to "text", "text" to text)
+            }
+            return
+        }
+        if (type.startsWith("image/")) {
+            val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: return
+            val file = copySharedImageToCache(uri) ?: return
+            pendingShare = mapOf("type" to "image", "path" to file.absolutePath)
+        }
+    }
+
+    private fun copySharedImageToCache(uri: Uri): File? {
+        return try {
+            val target = File(cacheDir, "share-${System.currentTimeMillis()}.jpg")
+            contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            target.takeIf { it.length() > 0 }
+        } catch (error: Exception) {
+            null
         }
     }
 

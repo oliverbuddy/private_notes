@@ -339,12 +339,12 @@ lib/security/app_lock_gate.dart               应用锁闸门（锁屏覆盖所�
 lib/security/security_service.dart            系统凭证 / Keystore 加解密 / FLAG_SECURE
 lib/security/pin_pad.dart                     PIN 点阵 + 应用内数字键盘（绕开 IME）
 lib/security/unlock.dart                      身份验证 / PIN 弹层
-lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、最近删除）+ 关于入口
+lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、回收站、标签管理）+ 关于入口
 lib/settings/about_page.dart                  关于页（版本 / 许可 / 联系方式 / 项目主页）
 lib/util/app_info.dart                        从已安装 APK 读取版本号与包名
 lib/settings/backup_sheets.dart               备份与恢复弹层、恢复来源选择（纯展示，动作交回页面）
 lib/ui/content_frame.dart                     页面内容限宽居中（平板 / PC 端复用同一断点）
-lib/settings/trash_page.dart                  最近删除（恢复 / 彻底删除 / 清空）
+lib/settings/trash_page.dart                  回收站（恢复 / 彻底删除 / 清空）
 lib/ui/snack.dart                             统一底部提示（4 秒自动消失）
 lib/util/native_zip.dart                      原生流式 zip / SAF 保存
 lib/util/date_format.dart                     严格时间解析、相对时间、文件大小

@@ -101,7 +101,7 @@ Future<BackupAction?> showBackupMenu(
               child: Text(
                 lastBackupLabel,
                 style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: AppFontSize.meta,
                   height: 1.5,
                   color: colors.tertiary,
                 ),
@@ -180,7 +180,7 @@ Future<String?> showRestoreSourceMenu(
                 '恢复是合并覆盖：同一条笔记以备份为准，其它笔记保留。'
                 '恢复前会自动留一份当前数据的快照。',
                 style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: AppFontSize.meta,
                   height: 1.6,
                   color: colors.tertiary,
                 ),
@@ -192,7 +192,7 @@ Future<String?> showRestoreSourceMenu(
                 child: Text(
                   '还没有应用内备份，可以从文件选择一份 zip。',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: AppFontSize.label,
                     height: 1.5,
                     color: colors.secondary,
                   ),
@@ -251,7 +251,7 @@ class _SwitchRow extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: AppFontSize.body,
                       color: enabled ? colors.text : colors.tertiary,
                     ),
                   ),
@@ -259,7 +259,7 @@ class _SwitchRow extends StatelessWidget {
                   Text(
                     subtitle,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppFontSize.caption,
                       height: 1.5,
                       color: colors.tertiary,
                     ),
@@ -312,14 +312,14 @@ class _ActionRow extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     label,
-                    style: TextStyle(fontSize: 16, color: colors.text),
+                    style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
                   ),
                   if (subtitle != null) ...<Widget>[
                     const SizedBox(height: 3),
                     Text(
                       subtitle!,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppFontSize.caption,
                         height: 1.5,
                         color: colors.tertiary,
                       ),
@@ -360,12 +360,12 @@ class _BackupEntryRow extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     formatListTime(entry.time),
-                    style: TextStyle(fontSize: 15.5, color: colors.text),
+                    style: TextStyle(fontSize: AppFontSize.summary, color: colors.text),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     entry.kind.label,
-                    style: TextStyle(fontSize: 12, color: colors.tertiary),
+                    style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
                   ),
                 ],
               ),

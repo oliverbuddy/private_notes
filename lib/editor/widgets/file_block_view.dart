@@ -56,7 +56,7 @@ class FileBlockView extends StatelessWidget {
               child: Text(
                 label.length > 4 ? label.substring(0, 4) : label,
                 style: TextStyle(
-                  fontSize: 9.5,
+                  fontSize: AppFontSize.tiny,
                   color: colors.secondary,
                   fontWeight: AppWeight.medium,
                 ),
@@ -72,7 +72,7 @@ class FileBlockView extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppFontSize.label,
                       height: 1.3,
                       color: colors.text,
                       fontWeight: AppWeight.medium,
@@ -89,7 +89,7 @@ class FileBlockView extends StatelessWidget {
                       return Text(
                         text,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppFontSize.badge,
                           color: colors.tertiary,
                         ),
                       );

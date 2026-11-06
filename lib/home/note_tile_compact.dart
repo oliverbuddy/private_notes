@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../editor/block.dart';
@@ -13,18 +15,30 @@ import '../util/text_highlight.dart';
 /// 近黑正文压在白底上才清晰 —— 之前直接坐在 pageAlt 米底上，
 /// 文字和背景融成一片，整列看着发灰。时间用 secondary 而不是
 /// tertiary（tertiary 在米/深底上都快看不见了）。
-/// 不显示缩略图和标签：这一档的唯一目标是**扫标题**。
+/// 不显示标签（这一档的唯一目标是**扫标题**），但保留一个 36dp 的
+/// 首图缩略 + 图片总数；没有图但有附件时用回形针代替。
 class NoteTileCompact extends StatelessWidget {
   const NoteTileCompact({
     super.key,
     required this.note,
     this.query = '',
+    this.thumbnailPaths = const <String>[],
+    this.imageCount = 0,
+    this.hasAttachment = false,
     required this.onTap,
     required this.onLongPress,
   });
 
   final Note note;
   final String query;
+
+  /// 最多取第一张，紧凑档只放一个 36dp 的方块。
+  final List<String> thumbnailPaths;
+
+  /// 正文里的图片总数，用来在缩略图上盖 `+N`。
+  final int imageCount;
+
+  final bool hasAttachment;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
@@ -38,11 +52,23 @@ class NoteTileCompact extends StatelessWidget {
         ? '已锁定'
         : plainSummary(note.body).split('\n').first.trim();
     final style = TextStyle(
-      fontSize: 15.5,
+      fontSize: AppFontSize.summary,
       height: 1.4,
       color: colors.text,
       fontWeight: AppWeight.regular,
     );
+
+    // 只有图片/附件、没有文字时把媒体挪到行首：
+    // 否则左侧空一大块、内容挤在最右边，看起来像少了一条。
+    final Widget? media = thumbnailPaths.isNotEmpty
+        ? _CompactThumbnail(
+            path: thumbnailPaths.first,
+            hiddenCount: (imageCount - 1).clamp(0, 99),
+          )
+        : hasAttachment
+            ? Icon(Icons.attach_file, size: 15, color: colors.secondary)
+            : null;
+    final bool leadMedia = media != null && summary.isEmpty;
 
     return InkWell(
       onTap: onTap,
@@ -64,11 +90,21 @@ class NoteTileCompact extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 6),
                 child: Icon(Icons.lock_outline, size: 12, color: colors.secondary),
               ),
+            if (leadMedia) ...<Widget>[
+              media,
+              const SizedBox(width: 10),
+            ],
             Expanded(
               child: Text.rich(
                 TextSpan(
                   children: highlightSpans(
-                    text: summary.isEmpty ? '（无正文）' : summary,
+                    // 有图片/附件时不再写「（无正文）」：与舒适档一致，
+                    // 右侧的缩略图本身就是内容。
+                    text: summary.isEmpty
+                        ? ((thumbnailPaths.isEmpty && !hasAttachment)
+                            ? '（无正文）'
+                            : '')
+                        : summary,
                     query: query,
                     style: summary.isEmpty
                         ? style.copyWith(color: colors.secondary)
@@ -80,6 +116,10 @@ class NoteTileCompact extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (!leadMedia && media != null) ...<Widget>[
+              const SizedBox(width: 10),
+              media,
+            ],
             const SizedBox(width: 12),
             Text(
               formatListTime(note.updated),
@@ -87,6 +127,75 @@ class NoteTileCompact extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 紧凑档的单张缩略图：36dp 方格，多图时右下角盖 `+N`。
+class _CompactThumbnail extends StatelessWidget {
+  const _CompactThumbnail({required this.path, required this.hiddenCount});
+
+  final String path;
+  final int hiddenCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    const double size = 36;
+    final Widget image = ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.thumb),
+      child: Image.file(
+        File(path),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => Container(
+          width: size,
+          height: size,
+          color: colors.surface2,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.image_not_supported_outlined,
+            size: 13,
+            color: colors.tertiary,
+          ),
+        ),
+      ),
+    );
+    if (hiddenCount <= 0) {
+      return image;
+    }
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          image,
+          Align(
+            alignment: Alignment.bottomRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFF000000).withValues(alpha: 0.55),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  bottomRight: Radius.circular(AppRadius.thumb),
+                ),
+              ),
+              child: Text(
+                '+$hiddenCount',
+                style: const TextStyle(
+                  fontSize: AppFontSize.tiny,
+                  height: 1.1,
+                  color: Color(0xFFFFFFFF),
+                  fontWeight: AppWeight.medium,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

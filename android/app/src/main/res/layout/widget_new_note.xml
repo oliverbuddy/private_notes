@@ -31,8 +31,11 @@
             <ImageView
                 android:layout_width="30dp"
                 android:layout_height="30dp"
+                android:background="@drawable/widget_icon_circle"
                 android:contentDescription="@null"
-                android:src="@mipmap/ic_launcher" />
+                android:padding="7dp"
+                android:src="@drawable/ic_widget_pen"
+                android:tint="@color/widget_icon_fg" />
 
             <TextView
                 android:layout_width="0dp"
@@ -40,6 +43,8 @@
                 android:layout_marginStart="10dp"
                 android:layout_weight="1"
                 android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.2"
                 android:maxLines="1"
                 android:text="@string/widget_new_note_desc_text"
                 android:textColor="@color/widget_text"

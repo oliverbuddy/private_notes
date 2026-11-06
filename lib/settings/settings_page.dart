@@ -18,12 +18,13 @@ import '../util/date_format.dart';
 import '../util/native_zip.dart';
 import 'about_page.dart';
 import 'backup_sheets.dart';
+import 'tags_page.dart';
 import 'trash_page.dart';
 
 /// 设置页。
 ///
 /// 三组：外观、安全、数据，底部一个「关于」入口。不做云同步入口 —— 本地优先。
-/// 数据卡片只保留「备份与恢复」「最近删除」两行：备份的自动/手动/导出
+/// 数据卡片只保留「备份与恢复」「回收站」「标签管理」三行：备份的自动/手动/导出
 /// 全部收进弹层，避免主界面出现多个看起来差不多的入口。
 /// 版本、许可、联系方式属于低频信息，收进独立的关于页，不打断分组节奏。
 class SettingsPage extends StatefulWidget {
@@ -131,75 +132,99 @@ class _SettingsPageState extends State<SettingsPage> {
                     physics: const BouncingScrollPhysics(
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
                     children: <Widget>[
-                      _buildCard(
+                      _buildSection(
                         colors: colors,
-                        cardColor: cardColor,
-                        rows: <Widget>[
-                          _SettingRow(
-                            label: '主题',
-                            value: settings.theme.label,
-                            onTap: () => _pickTheme(context, settings),
-                          ),
-                          _divider(colors),
-                          _SettingRow(
-                            label: '列表密度',
-                            value: settings.density.label,
-                            onTap: () => _pickDensity(context, settings),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _buildCard(
-                        colors: colors,
-                        cardColor: cardColor,
-                        rows: <Widget>[
-                          _SettingRow(
-                            label: '应用锁',
-                            value: settings.lockEnabled ? '已开启' : '已关闭',
-                            onTap: () => _toggleAppLock(settings),
-                          ),
-                          if (settings.lockEnabled) ...<Widget>[
+                        title: '外观',
+                        card: _buildCard(
+                          colors: colors,
+                          cardColor: cardColor,
+                          rows: <Widget>[
+                            _SettingRow(
+                              label: '主题',
+                              value: settings.theme.label,
+                              onTap: () => _pickTheme(context, settings),
+                            ),
                             _divider(colors),
                             _SettingRow(
-                              label: '自动锁定',
-                              value: _autoLockLabel(settings.autoLockSeconds),
-                              onTap: () => _pickAutoLock(settings),
+                              label: '列表密度',
+                              value: settings.density.label,
+                              onTap: () => _pickDensity(context, settings),
+                            ),
+                            _divider(colors),
+                            _SettingRow(
+                              label: '排序方式',
+                              value: settings.sortOrder.label,
+                              onTap: () => _pickSortOrder(context, settings),
                             ),
                           ],
-                          _divider(colors),
-                          _SettingRow(
-                            label: '锁定内容禁止截屏',
-                            value: settings.secureScreen ? '开' : '关',
-                            onTap: () => repository.updateSettings(
-                              settings.copyWith(
-                                secureScreen: !settings.secureScreen,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      _buildSection(
+                        colors: colors,
+                        title: '安全',
+                        card: _buildCard(
+                          colors: colors,
+                          cardColor: cardColor,
+                          rows: <Widget>[
+                            _SettingRow(
+                              label: '应用锁',
+                              value: settings.lockEnabled ? '已开启' : '已关闭',
+                              onTap: () => _toggleAppLock(settings),
+                            ),
+                            if (settings.lockEnabled) ...<Widget>[
+                              _divider(colors),
+                              _SettingRow(
+                                label: '自动锁定',
+                                value: _autoLockLabel(settings.autoLockSeconds),
+                                onTap: () => _pickAutoLock(settings),
+                              ),
+                            ],
+                            _divider(colors),
+                            _SettingRow(
+                              label: '锁定内容禁止截屏',
+                              value: settings.secureScreen ? '开' : '关',
+                              onTap: () => repository.updateSettings(
+                                settings.copyWith(
+                                  secureScreen: !settings.secureScreen,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildCard(
+                      const SizedBox(height: 20),
+                      _buildSection(
                         colors: colors,
-                        cardColor: cardColor,
-                        rows: <Widget>[
-                          // 一个入口收口全部备份能力：自动备份是开关，
-                          // 立即备份 / 导出 / 恢复是动作，都在弹层里区分。
-                          _SettingRow(
-                            label: '备份与恢复',
-                            value: _backupOverviewText(),
-                            onTap: _openBackupMenu,
-                          ),
-                          _divider(colors),
-                          _SettingRow(
-                            label: '最近删除',
-                            onTap: _openTrash,
-                          ),
-                        ],
+                        title: '数据',
+                        card: _buildCard(
+                          colors: colors,
+                          cardColor: cardColor,
+                          rows: <Widget>[
+                            // 一个入口收口全部备份能力：自动备份是开关，
+                            // 立即备份 / 导出 / 恢复是动作，都在弹层里区分。
+                            _SettingRow(
+                              label: '备份与恢复',
+                              value: _backupOverviewText(),
+                              onTap: _openBackupMenu,
+                            ),
+                            _divider(colors),
+                            _SettingRow(
+                              label: '回收站',
+                              onTap: _openTrash,
+                            ),
+                            _divider(colors),
+                            _SettingRow(
+                              label: '标签管理',
+                              onTap: _openTags,
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 32),
+                      // 兜底卡片：与上面带标题的分组保持同等呼吸（20dp）。
+                      const SizedBox(height: 20),
                       _buildCard(
                         colors: colors,
                         cardColor: cardColor,
@@ -251,7 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppFontSize.caption,
                   height: 1.6,
                   fontWeight: AppWeight.medium,
                   color: colors.secondary,
@@ -262,7 +287,7 @@ class _SettingsPageState extends State<SettingsPage> {
               child: Text(
                 text,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppFontSize.caption,
                   height: 1.6,
                   color: colors.tertiary,
                 ),
@@ -283,7 +308,7 @@ class _SettingsPageState extends State<SettingsPage> {
           item('自动备份', '本机每天 1 份；开启文件夹后每 24 小时 1 份，各保留最近 3 份。'),
           item(
             '锁定笔记',
-            '密文只在本机可解密；导出 zip 默认不含锁定笔记与「最近删除」。',
+            '密文只在本机可解密；导出 zip 默认不含锁定笔记与「回收站」。',
           ),
         ],
       ),
@@ -312,6 +337,36 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 分组标题 + 卡片。
+  ///
+  /// 设置页有 8 行、分属三类，单靠「卡片之间留白」区分层级太弱；
+  /// 加一行 12sp 弱色小标题后，扫读时不用逐个读行文案就知道这组在管什么。
+  Widget _buildSection({
+    required AppColors colors,
+    required String title,
+    required Widget card,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: AppFontSize.caption,
+              height: 1.2,
+              fontWeight: AppWeight.medium,
+              letterSpacing: 0.3,
+              color: colors.secondary,
+            ),
+          ),
+        ),
+        card,
+      ],
     );
   }
 
@@ -486,7 +541,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         Expanded(
                           child: Text(
                             labelOf(option),
-                            style: TextStyle(fontSize: 16, color: colors.text),
+                            style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
                           ),
                         ),
                         if (option == current)
@@ -629,6 +684,32 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _openTags() async {
+    hideSnack(context);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => TagsPage(repository: repository),
+      ),
+    );
+  }
+
+  Future<void> _pickSortOrder(
+    BuildContext context,
+    NoteSettings settings,
+  ) async {
+    final picked = await _pickOption<SortOrder>(
+      context: context,
+      title: '排序方式',
+      options: SortOrder.values,
+      current: settings.sortOrder,
+      labelOf: (SortOrder order) => order.label,
+    );
+    if (picked == null) {
+      return;
+    }
+    await repository.updateSettings(settings.copyWith(sortOrder: picked));
+  }
+
   /// 从备份恢复：先选来源（应用内备份 / 系统文件）→ 确认覆盖 → 执行。
   ///
   /// 应用内备份在私有目录，系统文件管理器看不到，必须在这里列出来 ——
@@ -726,7 +807,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text(
                   restored == 0 ? '没有可恢复的内容' : '恢复完成',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: AppFontSize.body,
                     fontWeight: AppWeight.medium,
                     color: sheetColors.text,
                   ),
@@ -741,7 +822,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ? '恢复了 $restored 篇小记和附件。'
                           : '恢复了 $restored 篇小记和附件，$skipped 篇文件损坏已跳过。',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppFontSize.hint,
                     color: sheetColors.secondary,
                   ),
                 ),
@@ -855,13 +936,13 @@ class _SettingsPageState extends State<SettingsPage> {
                       children: <Widget>[
                         Text(
                           label,
-                          style: TextStyle(fontSize: 16, color: colors.text),
+                          style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           subtitle,
                           style: TextStyle(
-                            fontSize: 12.5,
+                            fontSize: AppFontSize.meta,
                             height: 1.5,
                             color: colors.tertiary,
                           ),
@@ -988,7 +1069,7 @@ class _ExportResultSheet extends StatelessWidget {
             Text(
               message,
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: AppFontSize.labelLg,
                 height: 1.7,
                 color: colors.secondary,
               ),
@@ -1002,13 +1083,13 @@ class _ExportResultSheet extends StatelessWidget {
                 style: TextButton.styleFrom(
                   backgroundColor: colors.surface2,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                   ),
                 ),
                 child: Text(
                   '好',
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: AppFontSize.body,
                     height: 1,
                     fontWeight: AppWeight.medium,
                     color: colors.accent,
@@ -1050,7 +1131,7 @@ class _SettingRow extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 16, color: colors.text),
+                style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
               ),
             ),
             if (value != null) ...<Widget>[
@@ -1063,7 +1144,7 @@ class _SettingRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 14, color: colors.secondary),
+                  style: TextStyle(fontSize: AppFontSize.value, color: colors.secondary),
                 ),
               ),
             ],

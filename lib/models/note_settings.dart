@@ -52,6 +52,29 @@ enum ListDensity {
   }
 }
 
+/// 列表排序方式。置顶始终排在最前，排序只影响同一组内部。
+///
+/// 只保留主流笔记应用都有的两种：更新时间、创建时间。
+/// 「按标题」在这个以首行为标题的应用里收益很低，竞品也不提供。
+enum SortOrder {
+  updated('updated', '按更新时间'),
+  created('created', '按创建时间');
+
+  const SortOrder(this.wireValue, this.label);
+
+  final String wireValue;
+  final String label;
+
+  static SortOrder fromWire(String? raw) {
+    for (final order in SortOrder.values) {
+      if (order.wireValue == raw) {
+        return order;
+      }
+    }
+    return SortOrder.updated;
+  }
+}
+
 /// `settings.json` 的内存模型。
 ///
 /// 用不可变对象 + `copyWith`：根 widget 靠对象身份判断「设置真的变了吗」，
@@ -61,6 +84,7 @@ class NoteSettings {
   const NoteSettings({
     this.theme = AppThemeMode.system,
     this.density = ListDensity.comfortable,
+    this.sortOrder = SortOrder.updated,
     this.lockEnabled = false,
     this.autoLockSeconds = 0,
     this.pinHash,
@@ -72,6 +96,9 @@ class NoteSettings {
 
   final AppThemeMode theme;
   final ListDensity density;
+
+  /// 列表排序：置顶优先，其余按这里指定的字段。
+  final SortOrder sortOrder;
 
   /// 应用锁开关。
   final bool lockEnabled;
@@ -100,6 +127,7 @@ class NoteSettings {
   NoteSettings copyWith({
     AppThemeMode? theme,
     ListDensity? density,
+    SortOrder? sortOrder,
     bool? lockEnabled,
     int? autoLockSeconds,
     String? pinHash,
@@ -112,6 +140,7 @@ class NoteSettings {
     return NoteSettings(
       theme: theme ?? this.theme,
       density: density ?? this.density,
+      sortOrder: sortOrder ?? this.sortOrder,
       lockEnabled: lockEnabled ?? this.lockEnabled,
       autoLockSeconds: autoLockSeconds ?? this.autoLockSeconds,
       pinHash: pinHash ?? this.pinHash,
@@ -129,6 +158,7 @@ class NoteSettings {
   Map<String, dynamic> toJson() => <String, dynamic>{
         'theme': theme.wireValue,
         'density': density.wireValue,
+        'sortOrder': sortOrder.wireValue,
         'lockEnabled': lockEnabled,
         'autoLockSeconds': autoLockSeconds,
         if (pinHash != null) 'pinHash': pinHash,
@@ -147,6 +177,7 @@ class NoteSettings {
   static NoteSettings fromJson(Map<String, dynamic> json) {
     final theme = json['theme'];
     final density = json['density'];
+    final sortOrder = json['sortOrder'];
     final lockEnabled = json['lockEnabled'];
     final autoLockSeconds = json['autoLockSeconds'];
     final pinHash = json['pinHash'];
@@ -157,6 +188,7 @@ class NoteSettings {
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
       density: ListDensity.fromWire(density is String ? density : null),
+      sortOrder: SortOrder.fromWire(sortOrder is String ? sortOrder : null),
       lockEnabled: lockEnabled is bool ? lockEnabled : false,
       autoLockSeconds: autoLockSeconds is int ? autoLockSeconds : 0,
       pinHash: pinHash is String && pinHash.isNotEmpty ? pinHash : null,
@@ -177,6 +209,7 @@ class NoteSettings {
       other is NoteSettings &&
       other.theme == theme &&
       other.density == density &&
+      other.sortOrder == sortOrder &&
       other.lockEnabled == lockEnabled &&
       other.autoLockSeconds == autoLockSeconds &&
       other.pinHash == pinHash &&
@@ -189,6 +222,7 @@ class NoteSettings {
   int get hashCode => Object.hash(
         theme,
         density,
+        sortOrder,
         lockEnabled,
         autoLockSeconds,
         pinHash,

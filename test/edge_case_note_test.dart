@@ -29,6 +29,21 @@ void main() {
     test('大小写不同的标签视为不同标签', () {
       expect(Note.parseTags('Flutter,flutter'), <String>['Flutter', 'flutter']);
     });
+
+    test('前导 # 被剥离，重复项合并', () {
+      expect(
+        Note.parseTags('#工作, #工作，#生活'),
+        <String>['工作', '生活'],
+      );
+    });
+
+    test('normalizeTag 拒绝逗号与空值', () {
+      expect(Note.normalizeTag('  #工作 '), '工作');
+      expect(Note.normalizeTag('工作, 生活'), isNull);
+      expect(Note.normalizeTag('工作，生活'), isNull);
+      expect(Note.normalizeTag('   '), isNull);
+      expect(Note.normalizeTag('##'), isNull);
+    });
   });
 
   group('边界：时间戳缺失与非法', () {

@@ -195,7 +195,7 @@ class _StartupFailureApp extends StatelessWidget {
                   Text(
                     '小记无法启动',
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: AppFontSize.hint,
                       fontWeight: AppWeight.medium,
                       color: AppColors.light.text,
                     ),
@@ -205,7 +205,7 @@ class _StartupFailureApp extends StatelessWidget {
                     message,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: AppFontSize.meta,
                       height: 1.6,
                       color: AppColors.light.secondary,
                     ),

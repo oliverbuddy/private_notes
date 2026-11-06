@@ -84,10 +84,10 @@ class _TagInputFieldState extends State<_TagInputField> {
       controller: _controller,
       autofocus: true,
       onChanged: widget.onChanged,
-      style: TextStyle(fontSize: 15, color: colors.text),
+      style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
       decoration: InputDecoration(
         hintText: '逗号分隔，例如：旅行, 想法',
-        hintStyle: TextStyle(fontSize: 13.5, color: colors.tertiary),
+        hintStyle: TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
         border: InputBorder.none,
       ),
     );
@@ -128,7 +128,7 @@ class _TagCandidateChip extends StatelessWidget {
           child: Text(
             '#$label',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppFontSize.label,
               height: 1,
               color: selected ? colors.accent : colors.secondary,
             ),
@@ -163,7 +163,7 @@ class _BottomTagChip extends StatelessWidget {
         child: Text(
           '#$label',
           style: TextStyle(
-            fontSize: 13,
+            fontSize: AppFontSize.label,
             height: 1,
             color: colors.accent,
           ),
@@ -2028,7 +2028,7 @@ class _EditorPageState extends State<EditorPage> {
                       Text(
                         '标签',
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: AppFontSize.body,
                           fontWeight: AppWeight.medium,
                           color: colors.text,
                         ),
@@ -2047,7 +2047,7 @@ class _EditorPageState extends State<EditorPage> {
                         Text(
                           '已有标签',
                           style: TextStyle(
-                            fontSize: 12.5,
+                            fontSize: AppFontSize.meta,
                             color: colors.tertiary,
                           ),
                         ),
@@ -2082,7 +2082,7 @@ class _EditorPageState extends State<EditorPage> {
                           Expanded(
                             child: Material(
                               color: colors.surface2,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(AppRadius.card),
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
                                 onTap: () => Navigator.of(sheetContext).pop(),
@@ -2092,7 +2092,7 @@ class _EditorPageState extends State<EditorPage> {
                                   child: Text(
                                     '取消',
                                     style: TextStyle(
-                                      fontSize: 16,
+                                      fontSize: AppFontSize.body,
                                       height: 1,
                                       fontWeight: AppWeight.medium,
                                       color: colors.secondary,
@@ -2106,7 +2106,7 @@ class _EditorPageState extends State<EditorPage> {
                           Expanded(
                             child: Material(
                               color: colors.accent,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(AppRadius.card),
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
                                 onTap: () => Navigator.of(sheetContext)
@@ -2117,7 +2117,7 @@ class _EditorPageState extends State<EditorPage> {
                                   child: Text(
                                     '保存',
                                     style: TextStyle(
-                                      fontSize: 16,
+                                      fontSize: AppFontSize.body,
                                       height: 1,
                                       fontWeight: AppWeight.medium,
                                       color: colors.page,
@@ -2234,7 +2234,7 @@ class _EditorPageState extends State<EditorPage> {
             Text(
               label,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: AppFontSize.body,
                 color: foreground ?? colors.text,
               ),
             ),
@@ -2458,7 +2458,7 @@ class _EditorPageState extends State<EditorPage> {
                               Text(
                                 '标签',
                                 style: TextStyle(
-                                  fontSize: 12.5,
+                                  fontSize: AppFontSize.meta,
                                   height: 1,
                                   color: colors.secondary,
                                 ),
@@ -2983,7 +2983,7 @@ class _EditorPageState extends State<EditorPage> {
                       const SizedBox(width: 14),
                       Text(
                         '替换图片',
-                        style: TextStyle(fontSize: 16, color: colors.text),
+                        style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
                       ),
                     ],
                   ),
@@ -3002,7 +3002,7 @@ class _EditorPageState extends State<EditorPage> {
                       const SizedBox(width: 14),
                       Text(
                         '删除图片',
-                        style: TextStyle(fontSize: 16, color: colors.danger),
+                        style: TextStyle(fontSize: AppFontSize.body, color: colors.danger),
                       ),
                     ],
                   ),

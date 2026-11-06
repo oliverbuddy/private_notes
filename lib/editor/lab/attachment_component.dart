@@ -153,7 +153,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textStyleBuilder: (Set<Attribution> _) => TextStyle(
-                            fontSize: 14,
+                            fontSize: AppFontSize.value,
                             height: 1.3,
                             fontWeight: AppWeight.medium,
                             color: colors.text,
@@ -169,7 +169,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                       Text(
                         exists ? '附件 · 点击查看' : '文件已丢失',
                         style: TextStyle(
-                          fontSize: 11.5,
+                          fontSize: AppFontSize.badgeLg,
                           color: exists ? colors.tertiary : colors.danger,
                         ),
                       ),
@@ -221,7 +221,7 @@ Future<void> showAttachmentActionsSheet({
               Text(
                 name,
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppFontSize.body,
                   fontWeight: AppWeight.medium,
                   color: colors.text,
                 ),
@@ -229,13 +229,13 @@ Future<void> showAttachmentActionsSheet({
               const SizedBox(height: 6),
               Text(
                 '附件 · $size',
-                style: TextStyle(fontSize: 12.5, color: colors.tertiary),
+                style: TextStyle(fontSize: AppFontSize.meta, color: colors.tertiary),
               ),
               const SizedBox(height: 14),
               Text(
                 path,
                 style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: AppFontSize.meta,
                   height: 1.6,
                   color: colors.secondary,
                 ),
@@ -329,7 +329,7 @@ class _AttachmentButton extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: AppFontSize.value,
               height: 1,
               fontWeight: AppWeight.medium,
               color: foreground,

@@ -73,18 +73,15 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
     });
   }
 
-  /// 把输入框内容并入已选：支持逗号一次输入多个，自动去掉前导 `#`。
+  /// 把输入框内容并入已选：与读盘、标签管理共用同一套清洗规则，
+  /// 支持逗号一次输入多个，自动去掉前导 `#`。
   void _commitInput() {
     final String raw = _input.text.trim();
     if (raw.isEmpty) {
       return;
     }
-    final Iterable<String> parts = raw
-        .split(RegExp(r'[,，]'))
-        .map((String part) => part.trim().replaceFirst(RegExp(r'^#+'), ''))
-        .where((String part) => part.isNotEmpty);
-    for (final String part in parts) {
-      _selected.add(part);
+    for (final String tag in Note.parseTags(raw)) {
+      _selected.add(tag);
     }
     _input.clear();
   }
@@ -120,7 +117,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
               Text(
                 '标签',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppFontSize.body,
                   fontWeight: AppWeight.medium,
                   color: colors.text,
                 ),
@@ -132,15 +129,17 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                     child: TextField(
                       controller: _input,
                       autofocus: true,
+                      maxLength: 20,
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _addFromInput(),
-                      style: TextStyle(fontSize: 15, color: colors.text),
+                      style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
                       decoration: InputDecoration(
                         hintText: '输入新标签，回车添加',
                         hintStyle:
-                            TextStyle(fontSize: 13.5, color: colors.tertiary),
+                            TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
                         border: InputBorder.none,
                         isDense: true,
+                        counterText: '',
                         contentPadding:
                             const EdgeInsets.symmetric(vertical: 8),
                       ),
@@ -157,7 +156,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                         child: Text(
                           '添加',
                           style: TextStyle(
-                            fontSize: 13.5,
+                            fontSize: AppFontSize.labelLg,
                             color: enabled ? colors.accent : colors.tertiary,
                           ),
                         ),
@@ -170,20 +169,27 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                 const SizedBox(height: 10),
                 Text(
                   _selected.isEmpty ? '已有标签' : '标签（点一下选中/取消）',
-                  style: TextStyle(fontSize: 12.5, color: colors.tertiary),
+                  style: TextStyle(fontSize: AppFontSize.meta, color: colors.tertiary),
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    for (final String tag in candidates)
-                      _TagCandidateChip(
-                        label: tag,
-                        selected: _selected.contains(tag),
-                        onTap: () => _toggle(tag),
-                      ),
-                  ],
+                // 候选可能很多：限制高度并允许滚动，避免把弹层撑出屏幕。
+                // 之前只取前 12 个，后面的标签根本选不到。
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: SingleChildScrollView(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        for (final String tag in candidates)
+                          _TagCandidateChip(
+                            label: tag,
+                            selected: _selected.contains(tag),
+                            onTap: () => _toggle(tag),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
               const SizedBox(height: 20),
@@ -252,7 +258,7 @@ class _TagCandidateChip extends StatelessWidget {
           child: Text(
             '#$label',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppFontSize.label,
               height: 1,
               color: tone.foreground,
               fontWeight: selected ? AppWeight.medium : AppWeight.regular,
@@ -292,7 +298,7 @@ class _TagSheetButton extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: AppFontSize.body,
               height: 1,
               fontWeight: AppWeight.medium,
               color: foreground,

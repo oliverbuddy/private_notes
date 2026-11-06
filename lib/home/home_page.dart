@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -10,8 +11,10 @@ import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../settings/settings_page.dart';
 import '../theme/app_theme.dart';
+import '../ui/action_sheet.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
+import '../util/share.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
 
@@ -35,19 +38,73 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
   bool _searchMode = false;
+
+  /// 防止「冷启动 + 回到前台」两次消费到同一份分享内容。
+  bool _importingShare = false;
 
   NoteRepository get _repo => widget.repository;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     newNoteRequests.addListener(_onShortcutNewNote);
     if (widget.startWithNewNote) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openEditor(null));
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeShared());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 应用在后台时从别的 App 分享进来，系统会走 onNewIntent，
+    // 原生存下内容；回到前台时再取一次。
+    if (state == AppLifecycleState.resumed) {
+      _consumeShared();
+    }
+  }
+
+  /// 冷启动 / 回到前台时把「分享到小记」的内容落成一条笔记。
+  Future<void> _consumeShared() async {
+    if (_importingShare) {
+      return;
+    }
+    _importingShare = true;
+    try {
+      final SharedContent? content = await consumeSharedContent();
+      if (content == null || !mounted) {
+        return;
+      }
+      final DateTime now = DateTime.now();
+      final String id = Note.generateId(now);
+      String body = (content.text ?? '').trim();
+      if (content.imagePath != null) {
+        final String relative = await _repo.store.importAttachment(
+          noteId: id,
+          sourcePath: content.imagePath!,
+        );
+        body = body.isEmpty ? '![]($relative)' : '$body\n\n![]($relative)';
+      }
+      final Note note =
+          Note(id: id, created: now, updated: now, body: body);
+      await _repo.upsert(note);
+      if (!mounted) {
+        return;
+      }
+      await _openEditor(note);
+      if (mounted) {
+        showSnack(context, message: '已从其他 App 导入');
+      }
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '导入失败：$error');
+      }
+    } finally {
+      _importingShare = false;
     }
   }
 
@@ -60,6 +117,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     newNoteRequests.removeListener(_onShortcutNewNote);
     _searchController.dispose();
     _searchFocus.dispose();
@@ -111,7 +169,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) {
       return;
     }
-    // 离开列表页时收起提示条，避免「已移到最近删除」跟着进入编辑页。
+    // 离开列表页时收起提示条，避免「已移到回收站」跟着进入编辑页。
     hideSnack(context);
     final effective = unlocked ??
         Note(
@@ -141,44 +199,144 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _showNoteActions(Note note) async {
-    final action = await showXiaojiSheet<String>(
+    // 长按是「重」手势，给一次轻震反馈，用户能确认按到了（与系统列表一致）。
+    HapticFeedback.mediumImpact();
+    // 列表长按只放高频动作：置顶 / 锁定 / 删除。
+    // 复制文本、编辑标签需要先看内容再决定，留在详情页「更多」里；
+    // 两处共用的动作保持同一图标、同一顺序，删除永远是最后一项。
+    final String firstLine =
+        note.locked ? '' : plainSummary(note.body).split('\n').first.trim();
+    final String menuTitle =
+        note.locked ? '已锁定' : (firstLine.isEmpty ? '（无正文）' : firstLine);
+    final action = await showXiaojiActionSheet<String>(
       context: context,
-      builder: (BuildContext sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _sheetTile(
-                sheetContext,
-                note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                note.pinned ? '取消置顶' : '置顶',
-                'pin',
-              ),
-              _sheetTile(sheetContext, Icons.delete_outline, '删除', 'delete'),
-              const SizedBox(height: 8),
-            ],
+      title: menuTitle,
+      actions: <SheetAction<String>>[
+        SheetAction<String>(
+          value: 'pin',
+          label: note.pinned ? '取消置顶' : '置顶',
+          icon: note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+        ),
+        // 锁定笔记的正文不在内存里，这里只做加密状态切换。
+        if (note.locked)
+          const SheetAction<String>(
+            value: 'unlock',
+            label: '取消锁定',
+            icon: Icons.lock_open_outlined,
+          )
+        else
+          const SheetAction<String>(
+            value: 'lock',
+            label: '锁定笔记',
+            icon: Icons.lock_outline,
           ),
-        );
-      },
+        const SheetAction<String>(
+          value: 'delete',
+          label: '删除',
+          icon: Icons.delete_outline,
+          destructive: true,
+        ),
+      ],
     );
     if (action == null || !mounted) {
       return;
     }
-    if (action == 'pin') {
-      await _repo.togglePin(note);
+    switch (action) {
+      case 'pin':
+        await _repo.togglePin(note);
+      case 'lock':
+        await _lockNote(note);
+      case 'unlock':
+        await _unlockNote(note);
+      case 'delete':
+        await _confirmDelete(note);
+    }
+  }
+
+  /// 从列表直接锁定：与编辑页「锁定」同一套语义（正文加密，附件不加密）。
+  Future<void> _lockNote(Note note) async {
+    final bool? confirmed = await showXiaojiConfirmSheet(
+      context: context,
+      title: '锁定这条笔记？',
+      message: '锁定后正文加密保存，每次打开都要验证身份。图片和附件不加密。',
+      confirmLabel: '锁定',
+    );
+    if (confirmed != true || !mounted) {
       return;
     }
-    if (action == 'delete') {
-      await _confirmDelete(note);
+    // 没有系统锁屏、也没有备用 PIN 时先设一个，否则锁定后无从验证。
+    if (!await _ensureVerificationAvailable()) {
+      return;
+    }
+    try {
+      await _repo.upsert(note.copyWith(locked: true, updated: DateTime.now()));
+      if (mounted) {
+        showSnack(context, message: '已锁定，正文已加密保存');
+      }
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '锁定失败：$error');
+      }
+    }
+  }
+
+  /// 取消锁定：先验证身份，再把解密后的正文明文写回。
+  Future<void> _unlockNote(Note note) async {
+    final bool ok = await verifyIdentity(
+      context,
+      settings: _repo.settings,
+      reason: '取消锁定这条笔记',
+    );
+    if (!ok || !mounted) {
+      return;
+    }
+    try {
+      final String plain = await _repo.store.readNoteBody(note);
+      await _repo.upsert(
+        note.copyWith(body: plain, locked: false, updated: DateTime.now()),
+      );
+      if (mounted) {
+        showSnack(context, message: '已取消锁定');
+      }
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '取消锁定失败：$error');
+      }
+    }
+  }
+
+  /// 确保至少有一种可用的身份验证方式（系统凭证或应用 PIN）。
+  Future<bool> _ensureVerificationAvailable() async {
+    final NoteSettings settings = _repo.settings;
+    try {
+      if (await kSecurity.isDeviceSecure() || settings.pinHash != null) {
+        return true;
+      }
+      if (!mounted) {
+        return false;
+      }
+      final String? pin = await promptPinSheet(context, title: '设置解锁 PIN');
+      if (pin == null || !mounted) {
+        return false;
+      }
+      final String salt = await kSecurity.randomSalt();
+      final String hash = await kSecurity.hashPin(pin: pin, salt: salt);
+      await _repo.updateSettings(
+        settings.copyWith(pinHash: hash, pinSalt: salt),
+      );
+      return true;
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '无法启用锁定：$error');
+      }
+      return false;
     }
   }
 
   /// 标题栏标签按钮 → 「按标签筛选」弹层。
   ///
   /// 点选即生效并收起弹层：筛选是个轻动作，不值得再多按一次「确定」。
-  /// 每个标签右侧带 ×，可以直接删除标签（只从所有小记里摘掉这个标签，
-  /// 正文一个字都不动）—— 标签是用户自己攒出来的，攒乱了得能自己收拾。
+  /// 标签的改名 / 合并 / 删除统一收在「设置 → 标签管理」，这里只负责筛选。
   Future<void> _showTagFilterSheet() async {
     await showXiaojiSheet<void>(
       context: context,
@@ -216,22 +374,21 @@ class _HomePageState extends State<HomePage> {
                         ),
                         for (final tag in tags)
                           _FilterChip(
-                            label: tag,
+                            label: '#$tag',
                             selected: active == tag,
                             onTap: () {
                               _repo.setActiveTag(tag);
                               Navigator.of(sheetContext).pop();
                             },
-                            onDelete: () => _deleteTag(tag),
                           ),
                       ],
                     ),
                     if (tags.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 14),
                       Text(
-                        '点标签右侧的 × 可以删除标签，小记内容不受影响。',
+                        '标签的改名、合并、删除在「设置 → 标签管理」里。',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: AppFontSize.caption,
                           height: 1.5,
                           color: colors.tertiary,
                         ),
@@ -247,52 +404,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 删除一个标签（需要二次确认：一次点错就可能抹掉攒了很久的分类）。
-  Future<void> _deleteTag(String tag) async {
-    final count =
-        _repo.notes.where((Note note) => note.tags.contains(tag)).length;
-    final confirmed = await showXiaojiConfirmSheet(
-      context: context,
-      title: '删除标签 #$tag？',
-      message: count > 0 ? '会从 $count 条小记里移除这个标签，小记本身不会被删除。' : '目前没有小记使用这个标签。',
-      confirmLabel: '删除',
-      destructive: true,
-    );
-    if (confirmed != true || !mounted) {
-      return;
-    }
-    await _repo.deleteTag(tag);
-  }
-
-  Widget _sheetTile(
-    BuildContext sheetContext,
-    IconData icon,
-    String label,
-    String value,
-  ) {
-    final colors = AppColors.of(sheetContext);
-    return InkWell(
-      onTap: () => Navigator.of(sheetContext).pop(value),
-      child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        alignment: Alignment.centerLeft,
-        child: Row(
-          children: <Widget>[
-            Icon(icon, size: 20, color: colors.text),
-            const SizedBox(width: 14),
-            Text(label, style: TextStyle(fontSize: 16, color: colors.text)),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _confirmDelete(Note note) async {
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '删除这条小记？',
-      message: '正文和附件会一起移到「最近删除」，30 天后自动清理。',
+      message: '正文和附件会一起移到「回收站」，30 天后自动清理。',
       confirmLabel: '删除',
       destructive: true,
     );
@@ -318,7 +434,7 @@ class _HomePageState extends State<HomePage> {
     // 删除不再「不可逆」：正文和附件整体进了回收站，这里给一次即时撤销。
     showSnack(
       context,
-      message: '已移到「最近删除」',
+      message: '已移到「回收站」',
       action: SnackBarAction(
         label: '撤销',
         onPressed: () => _repo.undoDelete(note.id),
@@ -368,7 +484,7 @@ class _HomePageState extends State<HomePage> {
                       child: Text(
                         '共 ${notes.length} 条',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: AppFontSize.caption,
                           letterSpacing: 0.2,
                           color: colors.tertiary,
                         ),
@@ -400,7 +516,21 @@ class _HomePageState extends State<HomePage> {
           },
         ),
       ),
-      floatingActionButton: _buildFab(colors),
+      // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
+      // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
+      floatingActionButton: _searchMode
+          ? null
+          : FloatingActionButton(
+              onPressed: () => _openEditor(null),
+              tooltip: '新建小记',
+              backgroundColor: colors.fabBackground,
+              foregroundColor: colors.fabForeground,
+              elevation: 0,
+              highlightElevation: 0,
+              shape: const CircleBorder(),
+              child: const Icon(Icons.edit_outlined, size: 22),
+            ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -410,7 +540,7 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(
         AppSpace.page,
         AppSpace.sm,
-        10,
+        8,
         AppSpace.sm,
       ),
       child: Row(
@@ -434,7 +564,7 @@ class _HomePageState extends State<HomePage> {
             icon: Icons.search,
             onTap: _enterSearch,
           ),
-          _IconAction(icon: Icons.more_horiz, onTap: _openSettings),
+          _IconAction(icon: Icons.settings_outlined, onTap: _openSettings),
         ],
       ),
     );
@@ -469,7 +599,7 @@ class _HomePageState extends State<HomePage> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: AppFontSize.label,
                   height: 1,
                   letterSpacing: 0.1,
                   fontWeight: AppWeight.medium,
@@ -500,7 +630,9 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildSearchBar(AppColors colors) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 10, 8),
+      // 左边距与标题、列表卡片统一（AppSpace.page），否则搜索框会比其他
+      // 内容往左凸出 4dp，进入搜索态时整页像被挪了一下。
+      padding: const EdgeInsets.fromLTRB(AppSpace.page, 6, 10, 8),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -512,7 +644,7 @@ class _HomePageState extends State<HomePage> {
                 // 搜索框直接「隐身」。改成 page 底 + 描边：浅色 = 白胶囊浮
                 // 米底（微信搜索框同款），深色 = 深底 + 清晰描边。
                 color: colors.page,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 border: Border.all(color: colors.chipBorder, width: 0.5),
               ),
               child: Row(
@@ -524,7 +656,7 @@ class _HomePageState extends State<HomePage> {
                       controller: _searchController,
                       focusNode: _searchFocus,
                       onChanged: _repo.setQuery,
-                      style: TextStyle(fontSize: 16, color: colors.text),
+                      style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
                       cursorColor: colors.accent,
                       decoration: InputDecoration(
                         isDense: true,
@@ -532,7 +664,7 @@ class _HomePageState extends State<HomePage> {
                         border: InputBorder.none,
                         hintText: '搜索',
                         hintStyle:
-                            TextStyle(fontSize: 16, color: colors.tertiary),
+                            TextStyle(fontSize: AppFontSize.body, color: colors.tertiary),
                       ),
                     ),
                   ),
@@ -557,7 +689,7 @@ class _HomePageState extends State<HomePage> {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Text(
                 '取消',
-                style: TextStyle(fontSize: 15.5, color: colors.accent),
+                style: TextStyle(fontSize: AppFontSize.summary, color: colors.accent),
               ),
             ),
           ),
@@ -578,14 +710,18 @@ class _HomePageState extends State<HomePage> {
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
-      padding: EdgeInsets.only(top: density == ListDensity.compact ? 4 : 8),
+      // 底部留 88dp：56dp 悬浮球 + 上下呼吸，保证最后一条不被遮住。
+      padding: EdgeInsets.only(
+        top: density == ListDensity.compact ? 4 : 8,
+        bottom: 88,
+      ),
       itemCount: notes.length + 1,
       itemBuilder: (BuildContext context, int index) {
         // 最后一项是「到底了」提示行，不是笔记。
         // 笔记为空时走的是上面的 _EmptyState，不会进到这里。
         if (index == notes.length) {
           return Padding(
-            padding: const EdgeInsets.only(top: 28, bottom: 120),
+            padding: const EdgeInsets.only(top: 28, bottom: 24),
             child: Center(
               child: Text(
                 '· 到底了 ·',
@@ -598,28 +734,35 @@ class _HomePageState extends State<HomePage> {
         // 锁定笔记：正文不在内存里，也不展示缩略图（附件未加密，
         // 但列表里露出图片等于绕过正文锁定）。
         final images = note.locked ? const <ImageBlock>[] : imageBlocksOf(note.body);
+        // URL 末尾可能带「小图」标记（`#xiaoji-small`）：缩略图必须按
+        // 去标记后的真实文件路径取图，否则 Image.file 找不到文件，
+        // 列表里只剩一个「破图」图标（详情页正常、首页全坏）。
+        final paths = images
+            .take(3)
+            .map((block) =>
+                _repo.store.absoluteAssetPath(imageFilePath(block.path)))
+            .toList(growable: false);
 
         Widget tile;
         if (density == ListDensity.compact) {
           tile = NoteTileCompact(
             note: note,
             query: query,
+            // 紧凑档同样带图：右侧 36dp 小图 + 计数，有附件时退回回形针。
+            thumbnailPaths: paths,
+            imageCount: images.length,
+            hasAttachment:
+                !note.locked && hasLocalAttachment(note.body),
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
           );
         } else {
-          final visible = images.take(3).toList();
-          // URL 末尾可能带「小图」标记（`#xiaoji-small`）：缩略图必须按
-          // 去标记后的真实文件路径取图，否则 Image.file 找不到文件，
-          // 列表里只剩一个「破图」图标（详情页正常、首页全坏）。
-          final paths = visible
-              .map((block) => _repo.store
-                  .absoluteAssetPath(imageFilePath(block.path)))
-              .toList();
           tile = NoteTileComfortable(
             note: note,
             query: query,
-            maxSummaryLines: _repo.isSearching ? 2 : 5,
+            // 纯文字给 5 行；有图时压到 3 行，把高度让给缩略图行，
+            // 避免「5 行字 + 一排图」把一张卡撑得半屏高。
+            maxSummaryLines: _repo.isSearching ? 2 : (paths.isEmpty ? 5 : 3),
             thumbnailPaths: paths,
             hiddenThumbnailCount: images.length > 3 ? images.length - 3 : 0,
             onTap: () => _openEditor(note),
@@ -646,36 +789,12 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             children: <Widget>[
               tile,
-              const SizedBox(height: 10),
+              // 卡片间距 12：比 10 更有呼吸感，长列表滚动时卡片边界更清楚。
+              const SizedBox(height: AppSpace.md),
             ],
           ),
         );
       },
-    );
-  }
-
-  Widget _buildFab(AppColors colors) {
-    // Scaffold 默认给 16 边距，这里只补 4 的底部 → 实际 16 / 20，
-    // 比正右方略高一点，是单手更容易够到的位置。
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Material(
-        color: colors.fabBackground,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => _openEditor(null),
-          child: SizedBox(
-            width: 54,
-            height: 54,
-            child: Icon(
-              Icons.edit_outlined,
-              size: 23,
-              color: colors.fabForeground,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -692,9 +811,10 @@ class _IconAction extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: SizedBox(
-        width: 40,
-        height: 40,
-        child: Icon(icon, size: 22, color: colors.text),
+        // 44dp 是移动端最小可点面积；图标 21dp，三个入口并排也不会挤在一起。
+        width: 44,
+        height: 44,
+        child: Icon(icon, size: 21, color: colors.text),
       ),
     );
   }
@@ -703,19 +823,17 @@ class _IconAction extends StatelessWidget {
 /// 标签筛选弹层里的 chip：「全部」和各标签共用。
 ///
 /// 选中 = accentBg 实底 + accent 文字；未选中 = 描边 + 次要文字。
-/// 传了 [onDelete] 时右侧多一个 × 删除键（只用于真实标签，「全部」没有）。
+/// 这里只做筛选，标签的改名 / 合并 / 删除统一收在「设置 → 标签管理」。
 class _FilterChip extends StatelessWidget {
   const _FilterChip({
     required this.label,
     required this.selected,
     required this.onTap,
-    this.onDelete,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -741,16 +859,13 @@ class _FilterChip extends StatelessWidget {
               // 固定高度 + widthFactor: 1：靠 padding 撑出来的高度会让文字
               // 看起来偏上（字形盒子自带 leading），Container 的 alignment
               // 又会撑满父级约束，所以两者都不用。
-              padding: EdgeInsets.only(
-                left: 12,
-                right: onDelete == null ? 12 : 4,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Center(
                 widthFactor: 1,
                 child: Text(
                   label,
                   style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: AppFontSize.labelLg,
                     height: 1,
                     letterSpacing: 0.1,
                     color: foreground,
@@ -760,15 +875,6 @@ class _FilterChip extends StatelessWidget {
               ),
             ),
           ),
-          if (onDelete != null)
-            InkWell(
-              onTap: onDelete,
-              child: SizedBox(
-                width: 24,
-                height: 30,
-                child: Icon(Icons.close, size: 12, color: foreground),
-              ),
-            ),
         ],
       ),
     );
@@ -792,7 +898,7 @@ class _EmptyState extends StatelessWidget {
       return Center(
         child: Text(
           '没有匹配的小记',
-          style: TextStyle(fontSize: 13, color: colors.tertiary),
+          style: TextStyle(fontSize: AppFontSize.label, color: colors.tertiary),
         ),
       );
     }
@@ -835,7 +941,7 @@ class _EmptyState extends StatelessWidget {
           Text(
             '还没有小记',
             style: TextStyle(
-              fontSize: 17,
+              fontSize: AppFontSize.subtitle,
               fontWeight: AppWeight.semibold,
               letterSpacing: 0.2,
               color: colors.text,
@@ -845,15 +951,15 @@ class _EmptyState extends StatelessWidget {
           Text(
             '点右下角的笔开始',
             style: TextStyle(
-              fontSize: 13.5,
+              fontSize: AppFontSize.labelLg,
               height: 1.75,
               color: colors.secondary,
             ),
           ),
           Text(
-            '或在锁屏小组件、分享菜单里直接记',
+            '或从桌面小组件直接记录',
             style: TextStyle(
-              fontSize: 13.5,
+              fontSize: AppFontSize.labelLg,
               height: 1.75,
               color: colors.secondary,
             ),

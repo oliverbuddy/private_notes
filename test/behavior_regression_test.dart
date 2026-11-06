@@ -11,6 +11,7 @@ import 'package:xiaoji/editor/markdown_view.dart';
 import 'package:xiaoji/editor/widgets/image_block_view.dart';
 import 'package:xiaoji/home/home_page.dart';
 import 'package:xiaoji/models/note.dart';
+import 'package:xiaoji/settings/tags_page.dart';
 import 'package:xiaoji/theme/app_theme.dart';
 
 /// 编辑页一轮修复的行为回归：
@@ -208,7 +209,7 @@ void main() {
     );
   });
 
-  testWidgets('主页标签弹层里点 × 可以删除标签', (WidgetTester tester) async {
+  testWidgets('主页标签弹层只做筛选，不再提供删除入口', (WidgetTester tester) async {
     final root = _tempRoot('xiaoji_tag_ui_');
     late NoteRepository repository;
     await tester.runAsync(() async {
@@ -232,17 +233,53 @@ void main() {
     );
     await _pumpFrames(tester, frames: 8);
 
-    // 打开标签筛选弹层。
+    // 打开标签筛选弹层，点标签即筛选并收起。
     await tester.tap(find.byIcon(Icons.label_outline));
     await _pumpFrames(tester, frames: 8);
-    expect(find.text('读书'), findsOneWidget);
+    // 列表卡片上也有一个 #读书 chip，弹层里的那个在树里更靠后。
+    expect(find.text('#读书'), findsWidgets);
 
-    // 点标签右侧的 × → 二次确认 → 删除。
-    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.tap(find.text('#读书').last);
     await _pumpFrames(tester, frames: 8);
-    expect(find.text('删除标签 #读书？'), findsOneWidget);
 
-    await tester.tap(find.text('删除'));
+    expect(repository.activeTag, '读书');
+    expect(find.text('删除标签 #读书？'), findsNothing);
+    expect(repository.tags, <String>['读书']);
+  });
+
+  testWidgets('标签管理页点「…」可以删除标签', (WidgetTester tester) async {
+    final root = _tempRoot('xiaoji_tag_manage_');
+    late NoteRepository repository;
+    await tester.runAsync(() async {
+      repository = NoteRepository(await NoteStore.openAt(root));
+      await repository.upsert(
+        Note(
+          id: 'tagged',
+          created: DateTime(2026, 11, 1, 8, 0),
+          updated: DateTime(2026, 11, 1, 8, 0),
+          tags: const <String>['读书'],
+          body: '带标签的一条',
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: TagsPage(repository: repository),
+      ),
+    );
+    await _pumpFrames(tester, frames: 8);
+    expect(find.text('#读书'), findsOneWidget);
+
+    // 行尾「…」→ 删除标签 → 二次确认。
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await _pumpFrames(tester, frames: 8);
+    await tester.tap(find.text('删除标签'));
+    await _pumpFrames(tester, frames: 8);
+    expect(find.text('删除标签「读书」？'), findsOneWidget);
+
+    await tester.tap(find.text('删除标签'));
     // 删除要真实落盘（saveNote 是真实文件 I/O）：交替「让出真实时间」与
     // 「pump 冲刷微任务」，await 链才能一步步推进。
     for (var i = 0; i < 6; i++) {
@@ -253,6 +290,10 @@ void main() {
     }
 
     expect(repository.tags, isEmpty);
+
+    // 删除成功会出 4 秒提示条：把计时器走完，避免测试结束仍挂着 Timer。
+    await tester.pump(const Duration(seconds: 5));
+    await _pumpFrames(tester, frames: 4);
   });
 
   testWidgets('图片查看器的视口是整屏，双击放大后仍铺满屏幕', (WidgetTester tester) async {

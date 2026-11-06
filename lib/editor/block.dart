@@ -155,6 +155,14 @@ List<ImageBlock> imageBlocksOf(String markdown) {
   return parseBlocks(markdown).whereType<ImageBlock>().toList(growable: false);
 }
 
+/// 正文里是否有本地附件（文件块）。紧凑列表用它显示回形针标记。
+bool hasLocalAttachment(String markdown) {
+  if (markdown.trim().isEmpty) {
+    return false;
+  }
+  return parseBlocks(markdown).any((block) => block is FileBlock);
+}
+
 /// 把 markdown 剥成纯文本，用于列表摘要。
 ///
 /// 摘要里出现 `**` `#` 这类符号非常难看，而用户真正想「扫一眼」的是文字，

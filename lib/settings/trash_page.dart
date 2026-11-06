@@ -8,7 +8,7 @@ import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/date_format.dart';
 
-/// 「最近删除」：删除后的正文与附件都在这里，可恢复或彻底删除。
+/// 「回收站」：删除后的正文与附件都在这里，可恢复或彻底删除。
 ///
 /// 保留 30 天，超期由启动时的清理任务自动移除；页面底部常驻说明，
 /// 用户不用去猜「删了还能不能找回来」。
@@ -100,7 +100,7 @@ class _TrashPageState extends State<TrashPage> {
   Future<void> _clearAll() async {
     final confirmed = await showXiaojiConfirmSheet(
       context: context,
-      title: '清空最近删除？',
+      title: '清空回收站？',
       message: '${_entries.length} 条小记的正文和附件都会被永久删除。',
       confirmLabel: '清空',
       destructive: true,
@@ -151,7 +151,7 @@ class _TrashPageState extends State<TrashPage> {
                 child: Text(
                   '删除的小记会保留 30 天，到期自动清理。',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppFontSize.caption,
                     height: 1.6,
                     color: colors.tertiary,
                   ),
@@ -180,7 +180,7 @@ class _TrashPageState extends State<TrashPage> {
             ),
           ),
           Text(
-            '最近删除',
+            '回收站',
             style: AppText.sheetTitle.copyWith(color: colors.text),
           ),
           const Spacer(),
@@ -189,7 +189,7 @@ class _TrashPageState extends State<TrashPage> {
               onPressed: _clearAll,
               child: Text(
                 '清空',
-                style: TextStyle(fontSize: 14, color: colors.danger),
+                style: TextStyle(fontSize: AppFontSize.value, color: colors.danger),
               ),
             ),
         ],
@@ -206,7 +206,7 @@ class _TrashPageState extends State<TrashPage> {
           const SizedBox(height: 12),
           Text(
             '回收站是空的',
-            style: TextStyle(fontSize: 15, color: colors.secondary),
+            style: TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
           ),
         ],
       ),
@@ -268,7 +268,7 @@ class _TrashTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 15.5,
+                              fontSize: AppFontSize.summary,
                               height: 1.3,
                               fontWeight: AppWeight.medium,
                               color: entry.locked
@@ -285,7 +285,7 @@ class _TrashTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppFontSize.caption,
                         height: 1.3,
                         color: colors.tertiary,
                       ),
@@ -297,7 +297,7 @@ class _TrashTile extends StatelessWidget {
                 onPressed: onRestore,
                 child: Text(
                   '恢复',
-                  style: TextStyle(fontSize: 14, color: colors.accent),
+                  style: TextStyle(fontSize: AppFontSize.value, color: colors.accent),
                 ),
               ),
             ],

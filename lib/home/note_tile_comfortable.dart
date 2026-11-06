@@ -65,7 +65,7 @@ class NoteTileComfortable extends StatelessWidget {
 
     // 与详情页完全同一套正文：15.5 / 1.7 / 字距 0.3。
     final summaryStyle = TextStyle(
-      fontSize: 15.5,
+      fontSize: AppFontSize.summary,
       height: 1.7,
       letterSpacing: 0.3,
       leadingDistribution: TextLeadingDistribution.even,
@@ -79,7 +79,7 @@ class NoteTileComfortable extends StatelessWidget {
       child: Material(
         // 深色下卡片用 pageAlt（比底色亮一档），与设置页的白卡处理一致。
         color: isDark ? colors.pageAlt : colors.page,
-        borderRadius: BorderRadius.circular(AppRadius.card + 2),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -98,7 +98,7 @@ class NoteTileComfortable extends StatelessWidget {
                       Text(
                         '已锁定',
                         style: TextStyle(
-                          fontSize: 13.5,
+                          fontSize: AppFontSize.labelLg,
                           height: 1.4,
                           color: colors.tertiary,
                         ),
@@ -106,11 +106,15 @@ class NoteTileComfortable extends StatelessWidget {
                     ],
                   )
                 else if (summary.isEmpty)
-                  Text(
-                    '（无正文）',
-                    style: summaryStyle.copyWith(color: colors.tertiary),
-                  )
-                else
+                  // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
+                  // 多一行提示会让它看起来像空笔记。
+                  thumbnailPaths.isEmpty
+                      ? Text(
+                          '（无正文）',
+                          style: summaryStyle.copyWith(color: colors.tertiary),
+                        )
+                      : const SizedBox.shrink()
+                else if (query.isEmpty)
                 // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
                 // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
                 // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
@@ -155,6 +159,10 @@ class NoteTileComfortable extends StatelessWidget {
                           ),
                           child: _Thumbnail(
                             path: thumbnailPaths[i],
+                            // 只有一张图时放大到 88：仍属「小图」，但单独一张
+                            // 56 的方块放在整行里会显得空。多图仍走 56 方格，
+                            // 三张刚好排满一行。
+                            size: thumbnailPaths.length == 1 ? 88 : 56,
                             overlayCount: (i == thumbnailPaths.length - 1 &&
                                     hiddenThumbnailCount > 0)
                                 ? hiddenThumbnailCount
@@ -259,7 +267,7 @@ class _SummaryMarkdown extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: AppFontSize.labelLg,
                 height: 1.2,
                 fontWeight: AppWeight.medium,
                 color: colors.text,
@@ -383,24 +391,27 @@ class _SummaryBlock {
 }
 
 class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.path, this.overlayCount = 0});
+  const _Thumbnail({required this.path, this.size = 56, this.overlayCount = 0});
 
   final String path;
+  final double size;
   final int overlayCount;
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    final double radius =
+        size >= 80 ? AppRadius.block : AppRadius.thumb;
     final image = ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(radius),
       child: Image.file(
         File(path),
-        width: 56,
-        height: 56,
+        width: size,
+        height: size,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Container(
-          width: 56,
-          height: 56,
+          width: size,
+          height: size,
           color: colors.surface2,
           alignment: Alignment.center,
           child: Icon(Icons.image_not_supported_outlined,
@@ -414,21 +425,21 @@ class _Thumbnail extends StatelessWidget {
     }
 
     return SizedBox(
-      width: 56,
-      height: 56,
+      width: size,
+      height: size,
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
           image,
           ClipRRect(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(radius),
             child: Container(
               color: const Color(0xFF000000).withValues(alpha: 0.45),
               alignment: Alignment.center,
               child: Text(
                 '+$overlayCount',
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: AppFontSize.caption,
                   color: Color(0xFFFFFFFF),
                   fontWeight: AppWeight.medium,
                 ),
@@ -462,11 +473,6 @@ class _MetaRow extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 6),
             child: Icon(Icons.push_pin, size: 12, color: colors.accent),
-          ),
-        if (note.locked)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: Icon(Icons.lock_outline, size: 12, color: colors.secondary),
           ),
         Text(
           formatListTime(note.updated),
