@@ -1,30 +1,62 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1×1 的「新建小记」小组件：一个 App 图标 + 一行标题。
-     尺寸与桌面图标同一格，顶部与其它图标对齐；不占第二格、不带卡片底。 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 2×1 的「新建小记」小组件。
+     上半是卡片（应用图标 + 一行描述），下半是标题「新建小记」——
+     很多桌面不会绘制组件名，所以标题由我们自己画在卡片下方，
+     视觉上就等同于图标下面那行 App 名称。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="top|center_horizontal"
-    android:orientation="vertical"
-    android:paddingTop="2dp">
+    android:paddingTop="12dp">
 
-    <ImageView
-        android:id="@+id/widget_icon"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:contentDescription="@null"
-        android:src="@mipmap/ic_launcher" />
-
-    <TextView
-        android:id="@+id/widget_title"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:text="@string/shortcut_new_note_long"
-        android:textColor="@color/widget_sub"
-        android:textSize="10sp" />
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
 
-</LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_card"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:background="@drawable/widget_new_note_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp">
+
+            <ImageView
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:contentDescription="@null"
+                android:src="@mipmap/ic_launcher" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/widget_new_note_desc_text"
+                android:textColor="@color/widget_text"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:shadowColor="#66000000"
+            android:shadowDx="0"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:text="@string/shortcut_new_note_long"
+            android:textColor="@color/widget_sub"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+</FrameLayout>

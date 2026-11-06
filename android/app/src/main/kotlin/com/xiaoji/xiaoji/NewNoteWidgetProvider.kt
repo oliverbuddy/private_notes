@@ -23,8 +23,9 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_new_note)
         val pending = newNoteIntent(context)
-        // 整个 1×1 区域都可点（图标与标题之间、四周留白也算）。
+        // 整块卡片与卡片外的留白都可点。
         views.setOnClickPendingIntent(R.id.widget_root, pending)
+        views.setOnClickPendingIntent(R.id.widget_card, pending)
         appWidgetManager.updateAppWidget(appWidgetIds, views)
     }
 
