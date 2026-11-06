@@ -3,6 +3,21 @@
 一个本地优先的 Markdown 小记应用。形态对齐语雀小记，砍掉所有依赖服务端的能力。
 无账号、无网络、无同步 —— 内容就是一群 `.md` 文件。
 
+[官网与截图](https://oliverbuddy.github.io/private_notes/) ·
+[下载最新版 APK](https://github.com/oliverbuddy/private_notes/releases/latest) ·
+[问题反馈](https://github.com/oliverbuddy/private_notes/issues) ·
+[讨论区](https://github.com/oliverbuddy/private_notes/discussions)
+
+## 安装
+
+1. 从 [Releases](https://github.com/oliverbuddy/private_notes/releases/latest) 下载 `private_notes-<版本>.apk`（Android 7.0+），按提示允许安装未知来源应用。
+2. 覆盖安装即可升级，笔记与设置保留。
+3. 想自动接收更新：在 [Obtainium](https://github.com/ImranR98/Obtainium) 里添加仓库 `oliverbuddy/private_notes`。
+
+每个 Release 附带 `.sha256` 校验文件；安装包由 GitHub Actions 用项目签名密钥构建。
+
+许可：[MIT](LICENSE)。落地页源码见 `docs/`，推送 `main` 时自动部署到 GitHub Pages。
+
 ## 状态
 
 | 项 | 值 |
@@ -322,7 +337,12 @@ lib/util/date_format.dart                     严格时间解析、相对时间�
 lib/util/text_highlight.dart                  搜索命中高亮
 android/app/src/main/kotlin/com/xiaoji/xiaoji/{BackupBridge,SecurityBridge}.kt
                                               原生 zip / 解压 / SAF、Keyguard / Keystore / FLAG_SECURE
+docs/                                         GitHub Pages 落地页（下载 / 截图 / 隐私说明）
+.github/workflows/release.yml                 推 v* 标签 → 构建签名 APK → Release
+.github/workflows/pages.yml                   推 main（docs/ 变更）→ 部署落地页
 ```
+
+落地页本地预览：`python3 -m http.server 8080 --directory docs`，然后打开 `http://localhost:8080`。
 
 ## 已知限制
 
@@ -348,6 +368,7 @@ android/app/src/main/kotlin/com/xiaoji/xiaoji/{BackupBridge,SecurityBridge}.kt
 - [x] Android 导出接 SAF，不再依赖第三方文件管理器
 - [x] 应用锁 / 单篇锁定 / 回收站恢复 / 自动备份与备份列表恢复
 - [x] 底部手势导航适配、统一提示条自动消失
+- [x] 落地页（GitHub Pages）+ Release 校验和 + Issue 模板 + Obtainium 分发
 - [ ] 锁定笔记「验证后 5 分钟内免重复验证」（对齐 Apple Notes 的会话窗口）
 - [ ] 锁定笔记附件加密（整篇保护）
 - [ ] 可选备份到外部目录，防止设备级丢失

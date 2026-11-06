@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小记 · 本地优先的 Markdown 笔记</title>
+  <meta name="description" content="无账号、无网络、无同步。小记把笔记存成设备上的一群 .md 文件，支持应用锁、单篇加密、回收站与自动备份。">
+  <meta name="theme-color" content="#F7F5F0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161514" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="canonical" href="https://oliverbuddy.github.io/private_notes/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="小记">
+  <meta property="og:title" content="小记 · 你的笔记，只属于你">
+  <meta property="og:description" content="本地优先的 Markdown 小记。无账号、无网络、无同步，所有内容都是你自己的 .md 文件。">
+  <meta property="og:url" content="https://oliverbuddy.github.io/private_notes/">
+  <meta property="og:image" content="https://oliverbuddy.github.io/private_notes/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="小记 · 你的笔记，只属于你">
+  <meta name="twitter:description" content="本地优先的 Markdown 小记。无账号、无网络、无同步。">
+  <meta name="twitter:image" content="https://oliverbuddy.github.io/private_notes/assets/og.png">
+
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="./" aria-label="小记首页">
+        <img src="assets/icon.png" width="36" height="36" alt="">
+        <span>小记</span>
+      </a>
+      <nav class="nav" aria-label="主导航">
+        <a href="#features">功能</a>
+        <a href="#security">安全</a>
+        <a href="#screens">截图</a>
+        <a href="#download">下载</a>
+        <a class="nav-github" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">本地优先 · Android 7.0+ · 开源 MIT</p>
+          <h1>你的笔记，<br>只属于你。</h1>
+          <p class="lede">无账号、无网络、无同步。像便签一样快，像文件夹一样透明 —— 所有内容都是设备上的一群 <code>.md</code> 文件。</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" data-download-link href="https://github.com/oliverbuddy/private_notes/releases/latest">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15 7.5 10.5M4 19h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              下载最新版
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">查看源码</a>
+          </div>
+          <p class="hero-meta">
+            <span data-latest-version>v1.3.1</span>
+            <span data-latest-size>55.5 MB</span>
+            <span>签名 APK</span>
+          </p>
+        </div>
+
+        <div class="hero-visual">
+          <div class="phone phone-hero">
+            <img src="assets/screens/home-light.webp" width="1072" height="2392" alt="小记首页：按时间排列的笔记列表">
+          </div>
+          <span class="float-card float-a">AES-256-GCM</span>
+          <span class="float-card float-b">每日自动备份</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">功能</p>
+          <h2>轻，但不简陋</h2>
+          <p class="section-sub">把高频的小动作做顺，把危险的操作收口。没有多余面板，也没有社交功能。</p>
+        </div>
+
+        <div class="grid grid-3">
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>打开就能写</h3>
+            <p>没有标题、没有层级。点开就记，输入即自动保存，退出不用确认。</p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="12" width="18" height="4.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>单态块编辑</h3>
+            <p>浏览即最终效果，点哪块编哪块。收起键盘立刻回到阅读，不用来回切换模式。</p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>Markdown 实时渲染</h3>
+            <p>标题、列表、待办、代码、引用、图片输入即成型；有序列表自动续号与重排。</p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>搜索与标签</h3>
+            <p>全文搜索带高亮，标签可筛选、可删除；重要内容一键置顶。</p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8.5" cy="9" r="1.6" fill="currentColor"/><path d="m4 17 5-5 4 4 3-2.5L20 17" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>图片与附件</h3>
+            <p>拍照、选图、附件直接进笔记，按笔记归档在 <code>assets/</code> 下，导出时一起带走。</p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5v5l3.2 2.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <h3>明暗双主题</h3>
+            <p>跟随系统，也可以手动锁定浅色或深色；底部手势导航条自动融入页面。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="security" class="section section-dark">
+      <div class="container security-inner">
+        <div class="security-copy">
+          <p class="eyebrow eyebrow-dark">安全</p>
+          <h2>安全不是开关，<br>是默认。</h2>
+          <p class="section-sub">手机丢了、借给别人、被 screenshot —— 笔记应该在设计上就防住，而不是寄希望于「记得加锁」。</p>
+          <ul class="check-list">
+            <li><strong>应用锁</strong>：系统 PIN / 图案 / 密码或指纹；退后台按「立即 / 1 分钟 / 5 分钟」自动锁定，锁屏覆盖所有页面。</li>
+            <li><strong>单篇锁定</strong>：正文 AES-256-GCM 加密，密钥存在 Android Keystore、不出设备；打开、取消锁定、删除都要重新验证。</li>
+            <li><strong>截屏保护</strong>：锁定内容禁止截屏与多任务预览，普通页面不受影响。</li>
+            <li><strong>不留后路</strong>：Release 包不申请联网权限，系统备份关闭（<code>allowBackup=false</code>）。</li>
+          </ul>
+        </div>
+
+        <div class="fact-grid">
+          <div class="fact"><span>0</span><p>Release 包的网络权限</p></div>
+          <div class="fact"><span>30 天</span><p>回收站保留，可随时恢复</p></div>
+          <div class="fact"><span>24 h</span><p>自动备份间隔，恢复前再留快照</p></div>
+          <div class="fact"><span>AES-256</span><p>GCM 加密，密钥绑定本机</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screens" class="section">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">截图</p>
+          <h2>长这样</h2>
+          <p class="section-sub">来自 Android 14 模拟器的真实界面，未做修饰。</p>
+        </div>
+
+        <div class="shot-grid">
+          <figure class="shot">
+            <div class="phone phone-shot"><img src="assets/screens/home-light.webp" width="1072" height="2392" loading="lazy" alt="时间线首页"></div>
+            <figcaption>时间线首页 · 置顶、标签、待办</figcaption>
+          </figure>
+          <figure class="shot">
+            <div class="phone phone-shot"><img src="assets/screens/editor-light.webp" width="1072" height="2392" loading="lazy" alt="笔记阅读与编辑页"></div>
+            <figcaption>阅读即编辑 · Markdown 渲染</figcaption>
+          </figure>
+          <figure class="shot">
+            <div class="phone phone-shot"><img src="assets/screens/settings-light.webp" width="1072" height="2392" loading="lazy" alt="安全与数据设置"></div>
+            <figcaption>安全与数据 · 备份、恢复、导出</figcaption>
+          </figure>
+          <figure class="shot">
+            <div class="phone phone-shot"><img src="assets/screens/home-dark.webp" width="1072" height="2392" loading="lazy" alt="深色模式首页"></div>
+            <figcaption>深色模式 · 跟随系统或手动切换</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="data" class="section section-alt">
+      <div class="container data-inner">
+        <div>
+          <p class="eyebrow">数据</p>
+          <h2>格式透明，随时带走</h2>
+          <p class="section-sub">一篇笔记就是一个 Markdown 文件，按年和月分目录。没有数据库、没有私有格式、没有云端索引。</p>
+          <ul class="plain-list">
+            <li>应用私有目录存储，系统「文件」管理器看不到，也不随云备份上传</li>
+            <li>「导出全部」生成 zip（SAF 保存到任意位置），图片附件一起打包</li>
+            <li>锁定笔记正文是密文信封，换机后无法解密 —— 迁移请选择「含锁定笔记（明文）」导出</li>
+            <li>备份与导出都排除「最近删除」；恢复是合并覆盖，不删除本地其它笔记</li>
+          </ul>
+        </div>
+        <pre class="code-sample"><code><span class="c">---
+id: 20261106-0830-a1f2
+created: 2026-11-06T08:30:00
+updated: 2026-11-06T12:10:00
+tags: 想法, 工作
+pinned: true
+---</span>
+
+# 周五回顾
+
+这周把备份链路理顺了：
+- 自动备份改成 **距上次 ≥24 小时**
+- 恢复前先留一份快照
+
+> 宁可多留一份，也不要让任何一篇笔记消失</code></pre>
+      </div>
+    </section>
+
+    <section id="download" class="section">
+      <div class="container">
+        <div class="download-card">
+          <div class="download-main">
+            <img src="assets/icon.png" width="72" height="72" alt="小记应用图标">
+            <div>
+              <h2>下载小记</h2>
+              <p class="download-meta">
+                <span data-latest-version>v1.3.1</span>
+                <span data-latest-date>2026-11-06</span>
+                <span data-latest-size>55.5 MB</span>
+                <span>Android 7.0+</span>
+              </p>
+            </div>
+          </div>
+          <div class="download-actions">
+            <a class="btn btn-primary" data-download-link href="https://github.com/oliverbuddy/private_notes/releases/latest">
+              下载 APK
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">全部版本 / 校验和</a>
+          </div>
+          <p class="download-note">APK 由 GitHub Actions 使用项目签名密钥构建；每个 Release 附带 SHA-256 校验文件。</p>
+        </div>
+
+        <div class="grid grid-3 download-steps">
+          <article class="step">
+            <span class="step-no">01</span>
+            <h3>下载并安装</h3>
+            <p>下载 APK 后按系统提示安装。首次可能需要允许「安装未知来源应用」。</p>
+          </article>
+          <article class="step">
+            <span class="step-no">02</span>
+            <h3>覆盖升级</h3>
+            <p>新版本直接覆盖安装即可，笔记与设置保留；不需要卸载旧版。</p>
+          </article>
+          <article class="step">
+            <span class="step-no">03</span>
+            <h3>自动更新</h3>
+            <p><a href="https://github.com/ImranR98/Obtainium" target="_blank" rel="noopener">Obtainium</a> 添加仓库地址 <code>oliverbuddy/private_notes</code>，有新 Release 会提示升级。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="section section-alt">
+      <div class="container faq-inner">
+        <div class="section-head">
+          <p class="eyebrow">常见问题</p>
+          <h2>先把丑话说在前面</h2>
+        </div>
+        <details>
+          <summary>卸载 App 会删除笔记吗？</summary>
+          <p>会。数据在应用私有目录里，卸载即删除。换机、刷机或卸载前请先「导出全部」保存 zip。</p>
+        </details>
+        <details>
+          <summary>换机后锁定笔记还能打开吗？</summary>
+          <p>不能。锁定笔记正文用本机 Keystore 密钥加密，密钥不出设备。迁移时选择「导出（含锁定笔记，明文）」更合适，导入后重新锁定。</p>
+        </details>
+        <details>
+          <summary>真的完全不联网吗？</summary>
+          <p>Release 包没有声明 <code>INTERNET</code> 权限，可以从 APK 的权限列表自行验证。应用内没有账号、同步、统计或远程配置。</p>
+        </details>
+        <details>
+          <summary>自动备份存在哪？会丢吗？</summary>
+          <p>自动与手动备份都在应用私有 <code>backups/</code> 目录，每 24 小时最多一份，默认保留 3 份，恢复前还会另存一份快照。备份与数据同盘，设备损坏仍会一起丢失，长期归档请用「导出全部」。</p>
+        </details>
+        <details>
+          <summary>有 iOS 版本吗？</summary>
+          <p>暂时没有。当前只提供 Android APK，iOS 工程尚未生成。</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/icon.png" width="28" height="28" alt="">
+        <span>小记</span>
+        <span class="footer-tag">本地优先的 Markdown 小记</span>
+      </div>
+      <nav class="footer-links" aria-label="页脚链接">
+        <a href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">源码</a>
+        <a href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">更新日志</a>
+        <a href="https://github.com/oliverbuddy/private_notes/issues" target="_blank" rel="noopener">问题反馈</a>
+      </nav>
+      <p class="copyright">© <span data-year>2026</span> 小记 · MIT License</p>
+    </div>
+  </footer>
+
+  <script src="assets/app.js" defer></script>
+</body>
+</html>
