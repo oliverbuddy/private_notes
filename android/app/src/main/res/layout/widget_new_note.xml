@@ -13,10 +13,10 @@
         android:id="@+id/widget_card"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
+        android:layout_gravity="top"
         android:background="@drawable/widget_new_note_bg"
         android:gravity="center_vertical"
-        android:minHeight="48dp"
+        android:minHeight="44dp"
         android:orientation="horizontal"
         android:paddingStart="12dp"
         android:paddingEnd="10dp">
