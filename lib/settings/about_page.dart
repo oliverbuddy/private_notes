@@ -1,0 +1,308 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+
+import '../theme/app_theme.dart';
+import '../ui/content_frame.dart';
+import '../ui/show_sheet.dart';
+import '../ui/snack.dart';
+import '../util/app_info.dart';
+import '../util/external_link.dart';
+
+/// 关于页。
+///
+/// 设置页只留一个「关于」入口：版本、许可、联系方式都属于低频信息，
+/// 平铺在设置页里会把「外观 / 安全 / 数据」三组的节奏打断。
+/// 这里单独一页，顶部是应用身份，下面是可操作的元信息。
+class AboutPage extends StatefulWidget {
+  const AboutPage({super.key});
+
+  @override
+  State<AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<AboutPage> {
+  static const String _repoUrl =
+      'https://github.com/oliverbuddy/private_notes';
+  static const String _contactEmail = 'qiwei0727@gmail.com';
+
+  /// 从已安装的 APK 读取版本；拿不到时页面其余内容照常显示。
+  AppInfo? _appInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppInfo();
+  }
+
+  Future<void> _loadAppInfo() async {
+    final AppInfo? info = await loadAppInfo();
+    if (mounted) {
+      setState(() => _appInfo = info);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppColors colors = AppColors.of(context);
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color cardColor = isDark ? colors.pageAlt : colors.page;
+
+    return Scaffold(
+      backgroundColor: isDark ? colors.page : colors.pageAlt,
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            _buildHeader(context, colors),
+            Expanded(
+              // 平板/宽屏上限宽居中，与设置页保持同一套版心。
+              child: ContentFrame(
+                child: ListView(
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                  children: <Widget>[
+                    const SizedBox(height: 24),
+                    _buildIdentity(colors),
+                    const SizedBox(height: 32),
+                    _buildCard(
+                      cardColor: cardColor,
+                      rows: <Widget>[
+                        _AboutRow(
+                          label: '开源许可',
+                          value: 'PolyForm 非商业',
+                          onTap: _showLicenseSheet,
+                        ),
+                        _divider(colors),
+                        _AboutRow(
+                          label: '联系作者',
+                          value: _contactEmail,
+                          onTap: _copyContactEmail,
+                        ),
+                        _divider(colors),
+                        _AboutRow(
+                          label: '项目主页',
+                          value: 'GitHub',
+                          onTap: () => openExternalLink(_repoUrl),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Center(
+                      child: Text(
+                        '${_appInfo?.packageName ?? 'com.xiaoji.xiaoji'}'
+                        ' · 数据仅保存在本机',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: colors.tertiary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 应用身份区：图标、名称、一句话定位、版本号。
+  ///
+  /// 版本号做成小胶囊而不是普通行，是为了让「我现在用的是哪个版本」
+  /// 这一眼能被看到（反馈问题时用户第一句话往往就是这个）。
+  Widget _buildIdentity(AppColors colors) {
+    return Column(
+      children: <Widget>[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Image.asset(
+            'assets/app_icon.png',
+            width: 76,
+            height: 76,
+            filterQuality: FilterQuality.high,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '小记',
+          style: TextStyle(
+            fontSize: 20,
+            height: 1.3,
+            fontWeight: AppWeight.semibold,
+            letterSpacing: 0.3,
+            color: colors.text,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '你的笔记，只属于你。',
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.4,
+            color: colors.tertiary,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: colors.surface2,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            _appInfo == null ? '版本 —' : '版本 ${_appInfo!.displayVersion}',
+            style: TextStyle(fontSize: 12, color: colors.secondary),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, AppColors colors) {
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 48,
+            child: InkWell(
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Icon(
+                Icons.arrow_back_ios_new,
+                size: 18,
+                color: colors.secondary,
+              ),
+            ),
+          ),
+          Text(
+            '关于',
+            style: AppText.sheetTitle.copyWith(color: colors.text),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard({
+    required Color cardColor,
+    required List<Widget> rows,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Column(children: rows),
+    );
+  }
+
+  Widget _divider(AppColors colors) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16),
+      child: Container(height: 0.5, color: colors.dividerStrong),
+    );
+  }
+
+  Future<void> _copyContactEmail() async {
+    await Clipboard.setData(const ClipboardData(text: _contactEmail));
+    if (mounted) {
+      showSnack(
+        context,
+        message: '邮箱已复制',
+        duration: const Duration(seconds: 3),
+      );
+    }
+  }
+
+  Future<void> _showLicenseSheet() {
+    return showXiaojiSheet<void>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '开源许可',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'PolyForm Noncommercial 1.0.0\n\n'
+                  '个人与非商业用途可以自由使用、修改和分发；'
+                  '商业用途需要获得作者的书面授权。',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.7,
+                    color: colors.secondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '授权咨询：$_contactEmail',
+                  style: TextStyle(fontSize: 12.5, color: colors.tertiary),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 关于页的信息行：与设置页的行高、字号保持一致。
+class _AboutRow extends StatelessWidget {
+  const _AboutRow({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppColors colors = AppColors.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.centerLeft,
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 16, color: colors.text),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // 与设置页同一套：值占满剩余空间再右对齐，箭头才会贴齐行尾。
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 14, color: colors.secondary),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
+          ],
+        ),
+      ),
+    );
+  }
+}

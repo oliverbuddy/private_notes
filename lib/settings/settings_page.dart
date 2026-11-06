@@ -13,17 +13,19 @@ import '../theme/app_theme.dart';
 import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
+import '../util/app_info.dart';
 import '../util/date_format.dart';
 import '../util/native_zip.dart';
+import 'about_page.dart';
 import 'backup_sheets.dart';
 import 'trash_page.dart';
 
 /// 设置页。
 ///
-/// 三组：外观、安全、数据。刻意不放「关于」「反馈」「云同步」——
-/// 一个本地优先的工具，设置项越少越可信。
+/// 三组：外观、安全、数据，底部一个「关于」入口。不做云同步入口 —— 本地优先。
 /// 数据卡片只保留「备份与恢复」「最近删除」两行：备份的自动/手动/导出
 /// 全部收进弹层，避免主界面出现多个看起来差不多的入口。
+/// 版本、许可、联系方式属于低频信息，收进独立的关于页，不打断分组节奏。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.repository});
 
@@ -49,10 +51,21 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 「立即备份」进行中：防止重复点击。
   bool _backingUp = false;
 
+  /// 版本信息（从已安装的 APK 读取，异步拿，拿不到时显示占位符）。
+  AppInfo? _appInfo;
+
   @override
   void initState() {
     super.initState();
     _refreshLastBackup();
+    _loadAppInfo();
+  }
+
+  Future<void> _loadAppInfo() async {
+    final AppInfo? info = await loadAppInfo();
+    if (mounted) {
+      setState(() => _appInfo = info);
+    }
   }
 
   Future<void> _refreshLastBackup() async {
@@ -186,7 +199,19 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 32),
+                      _buildCard(
+                        colors: colors,
+                        cardColor: cardColor,
+                        rows: <Widget>[
+                          _SettingRow(
+                            label: '关于',
+                            value: _appInfo?.displayVersion,
+                            onTap: _openAbout,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
                       _buildDataNote(colors),
                     ],
                   ),
@@ -196,6 +221,15 @@ class _SettingsPageState extends State<SettingsPage> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Future<void> _openAbout() async {
+    hideSnack(context);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const AboutPage(),
       ),
     );
   }
@@ -990,7 +1024,11 @@ class _ExportResultSheet extends StatelessWidget {
 }
 
 class _SettingRow extends StatelessWidget {
-  const _SettingRow({required this.label, this.value, required this.onTap});
+  const _SettingRow({
+    required this.label,
+    this.value,
+    required this.onTap,
+  });
 
   final String label;
   final String? value;
@@ -1010,14 +1048,25 @@ class _SettingRow extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 16, color: colors.text),
               ),
             ),
-            if (value != null)
-              Text(
-                value!,
-                style: TextStyle(fontSize: 14, color: colors.secondary),
+            if (value != null) ...<Widget>[
+              const SizedBox(width: 12),
+              // 值必须放进 Expanded 再右对齐：用 Flexible 会和左侧标签
+              // 平分剩余空间，值一长一短，右侧箭头就跟着飘、对不齐。
+              Expanded(
+                child: Text(
+                  value!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 14, color: colors.secondary),
+                ),
               ),
+            ],
             const SizedBox(width: 6),
             Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
           ],

@@ -1,10 +1,14 @@
 package com.xiaoji.xiaoji
 
 import android.app.PendingIntent
+import android.app.WallpaperManager
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.os.Build
+import android.util.Log
 import android.widget.RemoteViews
 
 /**
@@ -26,7 +30,32 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
         // 整块卡片与卡片外的留白都可点。
         views.setOnClickPendingIntent(R.id.widget_root, pending)
         views.setOnClickPendingIntent(R.id.widget_card, pending)
+        // 卡片下方的标题直接画在壁纸上，颜色必须跟着壁纸深浅走，
+        // 否则浅色壁纸配白字会「看起来没有标题」（真机上出现过）。
+        views.setTextColor(R.id.widget_title, titleColor(context))
         appWidgetManager.updateAppWidget(appWidgetIds, views)
+    }
+
+    /**
+     * 标题颜色：浅色壁纸用深色字，深色壁纸用白字（与桌面给图标名称自动反色的做法一致）。
+     * 读不到壁纸颜色时退回白色——深色壁纸是默认壁纸最常见的形态。
+     */
+    private fun titleColor(context: Context): Int {
+        val lightText = Color.WHITE
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return lightText
+        return try {
+            val colors = WallpaperManager.getInstance(context)
+                .getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+            val primary = colors?.primaryColor?.toArgb() ?: return lightText
+            // 感知亮度：绿色权重最高，符合人眼对明暗的判断。
+            val luminance = (299 * Color.red(primary) +
+                587 * Color.green(primary) +
+                114 * Color.blue(primary)) / 1000
+            if (luminance > 150) Color.parseColor("#2C2C2A") else lightText
+        } catch (error: Exception) {
+            Log.w(TAG, "读取壁纸颜色失败，标题使用白色", error)
+            lightText
+        }
     }
 
     /** 点小组件 → 拉起 MainActivity，带一个「新建小记」动作。 */
@@ -44,5 +73,9 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
             // 同一个 PendingIntent 反复使用：内容固定，用 UPDATE_CURRENT 覆盖。
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
+
+    private companion object {
+        const val TAG = "NewNoteWidget"
     }
 }

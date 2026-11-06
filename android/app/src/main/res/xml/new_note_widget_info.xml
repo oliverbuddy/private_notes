@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 桌面小组件声明。updatePeriodMillis=0：内容静态，不需要系统定时唤醒，
-     省电也避免后台刷新。 -->
+<!-- 桌面小组件声明。
+     updatePeriodMillis=1800000（系统允许的最小值）：组件本身是静态的，
+     定时唤醒只为在用户换壁纸后重算标题颜色（浅色壁纸配深色字），
+     否则标题会一直沿用旧颜色，在真机上表现为「标题消失」。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_new_note_desc"
     android:initialLayout="@layout/widget_new_note"
@@ -10,5 +12,5 @@
     android:resizeMode="none"
     android:targetCellHeight="1"
     android:targetCellWidth="2"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen" />

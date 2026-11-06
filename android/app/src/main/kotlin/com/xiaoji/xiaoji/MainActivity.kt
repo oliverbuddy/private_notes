@@ -82,6 +82,7 @@ class MainActivity : FlutterActivity() {
                     )
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
+                    "appInfo" -> appInfo(result)
                     "zipTree" -> backupBridge.zipTree(
                         call.argument<String>("sourceRoot") ?: "",
                         call.argument<String>("targetPath") ?: "",
@@ -191,6 +192,30 @@ class MainActivity : FlutterActivity() {
         "gif" -> "image/gif"
         "heic", "heif" -> "image/heic"
         else -> "image/jpeg"
+    }
+
+    /**
+     * 版本信息：从已安装的 APK 里读，避免 Dart 侧手写版本号与 pubspec 漂移。
+     */
+    private fun appInfo(result: MethodChannel.Result) {
+        try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            result.success(
+                mapOf(
+                    "versionName" to (info.versionName ?: ""),
+                    "versionCode" to versionCode,
+                    "packageName" to packageName,
+                ),
+            )
+        } catch (error: Exception) {
+            result.error("app_info_failed", error.message, null)
+        }
     }
 
     /**
