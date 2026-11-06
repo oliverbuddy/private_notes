@@ -25,7 +25,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.4.7 |
+| 版本 | 1.4.8 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 326 / 326 通过 |
 | 静态检查 | `flutter analyze` No issues found |
