@@ -16,19 +16,21 @@
 
 每个 Release 附带 `.sha256` 校验文件；安装包由 GitHub Actions 用项目签名密钥构建。
 
-许可：[PolyForm Noncommercial 1.0.0](LICENSE)。**允许个人使用、学习、修改与分发，禁止商业使用；商业授权需另行联系作者。**
+许可：[PolyForm Noncommercial 1.0.0](LICENSE)。**允许个人使用、学习、修改与分发，禁止商业使用。**
+商业授权请联系 [qiwei0727@gmail.com](mailto:qiwei0727@gmail.com?subject=%E5%B0%8F%E8%AE%B0%E5%95%86%E4%B8%9A%E6%8E%88%E6%9D%83)。
+
 落地页源码见 `docs/`，推送 `main` 时自动部署到 GitHub Pages。
 
 ## 状态
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.3.2 |
+| 版本 | 1.4.0 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 311 / 311 通过 |
+| 测试 | `flutter test` 326 / 326 通过 |
 | 静态检查 | `flutter analyze` No issues found |
-| APK | `build/app/outputs/flutter-apk/app-release.apk`，约 36MB（arm64 + armv7 双 ABI），包名 `com.xiaoji.xiaoji` |
-| 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、手势导航适配 |
+| APK | `build/app/outputs/flutter-apk/app-release.apk`，约 41MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
+| 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口、FTS5 搜索、外置文件夹导出、手势导航适配 |
 
 ## 功能
 
@@ -39,14 +41,15 @@
 标签候选 · 长按系统选择菜单（中文）· Markdown 实时样式渲染 ·
 底栏图片/待办/列表/引用/Aa + 收起键盘（不横滑）· 图片与附件 ·
 全弹窗统一底部弹层（`showXiaojiSheet`：grabber + 320ms 曲线动画）· 列表「到底了」提示 ·
-置顶 · 全文搜索（含高亮，跳过锁定笔记）· 明暗双主题 · 底部手势导航适配 ·
-**长按桌面图标「新建小记」**
+置顶 · 全文搜索（SQLite FTS5，中文按单字 + 二字切词，前缀匹配，含高亮，跳过锁定笔记）·
+明暗双主题 · 底部手势导航适配 · **桌面小组件「记一条」** · **长按桌面图标「新建小记」**
 
 **隐私与数据安全**：应用锁（系统 PIN/图案/密码或指纹 + PIN 回退，退后台自动锁定，锁屏覆盖所有路由）·
 单篇锁定（正文 AES-256-GCM 加密，系统凭证/指纹/PIN 解锁，列表显示锁图标，删除也需验证）·
 锁定笔记截屏/多任务预览保护（FLAG_SECURE，可关）· 回收站（正文 + 附件整体保留 30 天，可恢复/彻底删除）·
 删除后即时撤销 · 每日自动备份（距上次 ≥24h）· 立即备份 · 恢复前快照 ·
 应用内备份列表恢复 · 整库导出（SAF 保存，默认排除锁定笔记与回收站，settings 脱敏）·
+**自动导出到文件夹**（SAF 目录授权，每 24h 写一份，保留最近 3 份）·
 Android 系统备份已关闭（`allowBackup=false` + `data_extraction_rules`）
 
 **明确不做**：分享链接（需服务端）· 知识库 / 生成文档 · 账号与同步 · 单篇版本历史（路线图中）
@@ -61,6 +64,7 @@ Android 系统备份已关闭（`allowBackup=false` + `data_extraction_rules`）
 ├── assets/<id>/1.jpg
 ├── trash/<id>/{note.md, assets/, meta.json}   删除的笔记整体移到这里，保留 30 天
 ├── backups/{auto-YYYYMMDD-HHmm.zip, manual-*.zip, pre-restore-*.zip}
+├── index/search-v1.db                          FTS5 搜索索引（派生数据，可随时删，自动重建）
 ├── tmp/                                       导出临时文件（1 小时后清理）
 └── settings.json                              {"theme":"system","density":"comfortable",...}
 ```
@@ -102,7 +106,8 @@ XIAOJI-LOCK-1:9dF3...
 - 写入一律「先写 `.tmp` 再 rename」，防止进程被杀导致文件截断
 - 单条文件解析失败会被跳过，不会让应用起不来
 - 锁定笔记的内存副本正文为空，打开时才按需解密；搜索与列表不会碰到明文
-- `backups/` 里是应用私有备份（含锁定笔记密文，同机可恢复）；`trash/`、旧备份、`tmp/` 不会进入备份或导出
+- `backups/` 里是应用私有备份（含锁定笔记密文，同机可恢复）；`trash/`、旧备份、`tmp/`、`index/` 不会进入备份或导出
+- `index/` 是搜索索引：里面是正文分词后的明文片段，所以同样不进备份、不进导出；删掉后下次启动按笔记重建
 
 ## 编辑器架构
 
@@ -317,8 +322,9 @@ lib/main.dart
 lib/theme/app_theme.dart                      颜色 token（ThemeExtension）+ 明/暗 ThemeData
 lib/models/note.dart                          Note + frontmatter 编解码（含 locked）
 lib/models/note_settings.dart                 主题 / 密度 / 应用锁配置
-lib/data/note_store.dart                      文件读写、附件、回收站、备份、导出、settings.json
+lib/data/note_store.dart                      文件读写、附件、回收站、备份、导出、外置备份、settings.json
 lib/data/note_repository.dart                 ChangeNotifier：列表 / 搜索 / 筛选 / 排序 / 后台维护
+lib/data/search_index.dart                    SQLite FTS5 索引：中文单字 + 二字切词、对账、增量更新
 lib/editor/block.dart                         块模型 + parse / serialize + 列表续号 / 编号重排
 lib/editor/lab/new_editor_page.dart           新内核编辑页（super_editor，当前使用）
 lib/editor/markdown_toolbar.dart              工具条（底栏块级插入 + Aa 文字样式面板）
@@ -338,7 +344,9 @@ lib/util/native_zip.dart                      原生流式 zip / SAF 保存
 lib/util/date_format.dart                     严格时间解析、相对时间、文件大小
 lib/util/text_highlight.dart                  搜索命中高亮
 android/app/src/main/kotlin/com/xiaoji/xiaoji/{BackupBridge,SecurityBridge}.kt
-                                              原生 zip / 解压 / SAF、Keyguard / Keystore / FLAG_SECURE
+                                              原生 zip / 解压 / SAF 保存与目录写回、Keyguard / Keystore / FLAG_SECURE
+android/app/src/main/kotlin/com/xiaoji/xiaoji/NewNoteWidgetProvider.kt
+                                              桌面小组件「记一条」：RemoteViews + 直达编辑页的 PendingIntent
 docs/                                         GitHub Pages 落地页（下载 / 截图 / 隐私说明）
 .github/workflows/release.yml                 推 v* 标签 → 构建签名 APK → Release
 .github/workflows/pages.yml                   推 main（docs/ 变更）→ 部署落地页
@@ -357,8 +365,9 @@ docs/                                         GitHub Pages 落地页（下载 / 
    但备份 zip 内包含这些明文附件。要彻底保护需后续做整篇（含附件）加密。
 3. **锁定笔记密钥绑定设备。** 用 Android Keystore 加密，换机/重装后密文解不开；
    迁移锁定笔记请用「导出（含锁定笔记，明文）」后重新锁定。
-4. **备份与数据同盘。** 自动/手动备份都在应用私有 `backups/`，设备损坏或清除应用数据会一起丢失；
-   跨设备/长期归档仍应使用「导出全部」保存到外部。恢复是合并覆盖（不会删除本地其它笔记），
+4. **应用内备份与数据同盘。** 自动/手动备份都在应用私有 `backups/`，设备损坏或清除应用数据会一起丢失。
+   设置里可开启「自动导出到文件夹」（SAF 目录授权，每 24 小时一份、保留最近 3 份），把同样的导出包写到
+   SD 卡或网盘同步目录；长期归档仍建议用「导出全部」。恢复是合并覆盖（不会删除本地其它笔记），
    且**只还原笔记与附件**：应用锁、主题等设置保持本机现状，避免把别的设备的 PIN 带进来。
 5. **没有单篇版本历史。** 整库备份只能回到某个时间点；撤销栈只在当前编辑会话内有效。
 6. **release 签名依赖本地 `android/key.properties`**（CI 从 Secrets 恢复），密钥需自行备份，丢失后无法覆盖升级。
@@ -378,8 +387,9 @@ docs/                                         GitHub Pages 落地页（下载 / 
 - [x] 落地页（GitHub Pages）+ Release 校验和 + Issue 模板 + Obtainium 分发
 - [ ] 锁定笔记「验证后 5 分钟内免重复验证」（对齐 Apple Notes 的会话窗口）
 - [ ] 锁定笔记附件加密（整篇保护）
-- [ ] 可选备份到外部目录，防止设备级丢失
+- [x] 自动导出到外部目录（SAF 目录授权，每 24h，保留 3 份）
+- [x] 桌面小组件「记一条」（手机端的捕获入口）
+- [x] 搜索换 SQLite FTS5（中文单字 + 二字切词，前缀匹配）
 - [ ] 单篇版本历史（按编辑会话归档，保留 10 版 / 30 天）
-- [ ] 锁屏小组件 + 分享扩展（手机端真正的捕获入口）
-- [ ] 笔记超过 3000 条时迁到 SQLite + FTS5（中文需逐字拆词，`trigram` 对两字词无效）
+- [ ] 分享扩展 / 锁屏小组件
 - [ ] iOS 平台工程与 Info.plist 配置

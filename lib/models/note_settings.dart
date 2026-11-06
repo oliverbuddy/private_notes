@@ -66,6 +66,8 @@ class NoteSettings {
     this.pinHash,
     this.pinSalt,
     this.secureScreen = true,
+    this.externalBackupUri,
+    this.lastExternalBackupAt,
   });
 
   final AppThemeMode theme;
@@ -84,6 +86,15 @@ class NoteSettings {
   /// 锁定内容打开期间禁止截屏 / 多任务预览（FLAG_SECURE）。
   final bool secureScreen;
 
+  /// 外置备份目录（SAF 树 URI）；null = 未开启。
+  ///
+  /// 存在用户选的位置（SD 卡 / 其他 App 的文件夹）而不是应用私有目录，
+  /// 解决「手机丢了，数据和备份一起没」的问题。
+  final String? externalBackupUri;
+
+  /// 上一次外置备份的时间（ISO 字符串，24 小时节奏用）。
+  final String? lastExternalBackupAt;
+
   ThemeMode get themeMode => theme.themeMode;
 
   NoteSettings copyWith({
@@ -94,6 +105,9 @@ class NoteSettings {
     String? pinHash,
     String? pinSalt,
     bool? secureScreen,
+    String? externalBackupUri,
+    String? lastExternalBackupAt,
+    bool clearExternalBackup = false,
   }) {
     return NoteSettings(
       theme: theme ?? this.theme,
@@ -103,6 +117,12 @@ class NoteSettings {
       pinHash: pinHash ?? this.pinHash,
       pinSalt: pinSalt ?? this.pinSalt,
       secureScreen: secureScreen ?? this.secureScreen,
+      // 可空字段没法用 ?? 表达「清空」，关闭外置备份时显式传 clear。
+      externalBackupUri: clearExternalBackup
+          ? null
+          : (externalBackupUri ?? this.externalBackupUri),
+      lastExternalBackupAt:
+          lastExternalBackupAt ?? this.lastExternalBackupAt,
     );
   }
 
@@ -114,6 +134,9 @@ class NoteSettings {
         if (pinHash != null) 'pinHash': pinHash,
         if (pinSalt != null) 'pinSalt': pinSalt,
         'secureScreen': secureScreen,
+        if (externalBackupUri != null) 'externalBackupUri': externalBackupUri,
+        if (lastExternalBackupAt != null)
+          'lastExternalBackupAt': lastExternalBackupAt,
       };
 
   /// 容错解析：字段缺失或类型不对都回落到默认值，配置文件坏掉不能让 app 起不来。
@@ -129,6 +152,8 @@ class NoteSettings {
     final pinHash = json['pinHash'];
     final pinSalt = json['pinSalt'];
     final secureScreen = json['secureScreen'];
+    final externalBackupUri = json['externalBackupUri'];
+    final lastExternalBackupAt = json['lastExternalBackupAt'];
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
       density: ListDensity.fromWire(density is String ? density : null),
@@ -137,6 +162,13 @@ class NoteSettings {
       pinHash: pinHash is String && pinHash.isNotEmpty ? pinHash : null,
       pinSalt: pinSalt is String && pinSalt.isNotEmpty ? pinSalt : null,
       secureScreen: secureScreen is bool ? secureScreen : true,
+      externalBackupUri: externalBackupUri is String && externalBackupUri.isNotEmpty
+          ? externalBackupUri
+          : null,
+      lastExternalBackupAt:
+          lastExternalBackupAt is String && lastExternalBackupAt.isNotEmpty
+              ? lastExternalBackupAt
+              : null,
     );
   }
 
@@ -149,7 +181,9 @@ class NoteSettings {
       other.autoLockSeconds == autoLockSeconds &&
       other.pinHash == pinHash &&
       other.pinSalt == pinSalt &&
-      other.secureScreen == secureScreen;
+      other.secureScreen == secureScreen &&
+      other.externalBackupUri == externalBackupUri &&
+      other.lastExternalBackupAt == lastExternalBackupAt;
 
   @override
   int get hashCode => Object.hash(
@@ -160,5 +194,7 @@ class NoteSettings {
         pinHash,
         pinSalt,
         secureScreen,
+        externalBackupUri,
+        lastExternalBackupAt,
       );
 }

@@ -12,6 +12,7 @@ import '../models/note_settings.dart';
 import '../security/security_service.dart';
 import '../util/date_format.dart';
 import '../util/native_zip.dart';
+import 'search_index.dart';
 
 /// 文件布局：
 ///
@@ -30,6 +31,9 @@ class NoteStore {
   NoteStore._(this.root);
 
   static const SecurityService _security = SecurityService();
+
+  /// 原子写的临时文件序号（见 [saveNote]）。
+  static int _tmpSeq = 0;
 
   /// `<appDocuments>/Xiaoji`
   final Directory root;
@@ -58,6 +62,10 @@ class NoteStore {
   Directory get backupsDir => Directory(p.join(root.path, 'backups'));
 
   File get settingsFile => File(p.join(root.path, 'settings.json'));
+
+  /// 搜索索引（派生数据，不进备份/导出，删掉自动重建）。
+  String get searchIndexPath =>
+      p.join(root.path, 'index', 'search-v${SearchIndex.schemaVersion}.db');
 
   Future<void> ensureDirectories() async {
     await root.create(recursive: true);
@@ -152,7 +160,10 @@ class NoteStore {
     }
     final target = File(pathFor(toWrite));
     await target.parent.create(recursive: true);
-    final tmp = File('${target.path}.tmp');
+    // 临时文件名带序号：同一条笔记可能有两笔保存同时在飞（例如防抖保存
+    // 和「锁定笔记」的强制保存），共用一个 `.tmp` 会互相截断内容。
+    // 仍然以 `.tmp` 结尾，备份/恢复/导出都按这个后缀跳过临时文件。
+    final tmp = File('${target.path}.${_tmpSeq++}.tmp');
     await tmp.writeAsString(toWrite.encode(), flush: true);
     await tmp.rename(target.path);
   }
@@ -420,6 +431,9 @@ class NoteStore {
     'backups',
     'trash',
     'tmp',
+    // 搜索索引是派生数据，且里面是正文分词后的明文：既不该进备份，
+    // 也不该被导出。删掉后下次启动会自动重建。
+    'index',
   ];
 
   /// 恢复时同样跳过这些目录（旧导出包里可能带着它们）。
@@ -521,6 +535,55 @@ class NoteStore {
     final File created = await createBackupFile(name: 'auto-$stamp.zip');
     await pruneAutoBackups(keep: keep);
     return created;
+  }
+
+  /// 把导出包写进用户授权的 SAF 目录（外置备份）。
+  ///
+  /// 解决「应用私有目录 + 私有备份同归于尽」的问题：手机丢失/刷机时，
+  /// 用户选的文件夹（SD 卡、其他 App 目录、网盘同步目录）里还有一份。
+  ///
+  /// 语义与「导出全部」的默认一致：**不含锁定笔记的明文**（密文换机也解不开），
+  /// 也不含回收站与旧备份。
+  ///
+  /// [lastAt] 是上次成功时间：不足 24 小时直接跳过（[force] 为 true 时忽略），
+  /// 避免每次回前台都重新打包。返回本次备份时间；跳过时返回 null。
+  Future<DateTime?> ensureExternalBackup({
+    required String treeUri,
+    DateTime? lastAt,
+    int keep = 3,
+    bool force = false,
+  }) async {
+    final DateTime now = DateTime.now();
+    if (!force &&
+        lastAt != null &&
+        now.difference(lastAt) < const Duration(hours: 24)) {
+      return null;
+    }
+    // 文件名带秒：同一分钟内连点两次「立即导出」也不会撞名。
+    final String stamp =
+        '${formatExportStamp(now)}-${now.second.toString().padLeft(2, '0')}';
+    final String name = 'xiaoji-$stamp.zip';
+    final File temp = await createTempExportFile('external-$stamp.zip');
+    try {
+      await buildExportZipToFile(temp.path);
+      await writeFileToTree(
+        treeUri: treeUri,
+        sourcePath: temp.path,
+        fileName: name,
+        keepPrefix: 'xiaoji-',
+        keep: keep,
+      );
+      return now;
+    } finally {
+      // 临时 zip 是完整数据副本：写完必须删，失败也不能留。
+      try {
+        if (await temp.exists()) {
+          await temp.delete();
+        }
+      } catch (_) {
+        // 删不掉由 cleanTempDir 在下次启动时兜底。
+      }
+    }
   }
 
   /// 只保留最近 [keep] 份 `auto-*.zip`（`pre-restore-*` 不动）。

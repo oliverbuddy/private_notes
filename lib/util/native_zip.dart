@@ -50,3 +50,35 @@ Future<String?> saveFileToUser({
     'fileName': fileName,
   });
 }
+
+/// 让用户选一个文件夹作为「外置备份」位置（SAF 目录授权）。
+///
+/// 返回树 URI（授权已持久化，重启后仍可写入）；用户取消返回 null。
+Future<String?> pickBackupDirectory() async {
+  return _channel.invokeMethod<String>('pickDirectory');
+}
+
+/// 把本地文件写进已授权的目录，并按前缀保留最近 [keep] 份备份。
+///
+/// 返回写入后的 content uri。目录授权失效（用户删了文件夹/撤销权限）时
+/// 原生侧抛错，由上层提示「重新选择文件夹」。
+Future<String> writeFileToTree({
+  required String treeUri,
+  required String sourcePath,
+  required String fileName,
+  String keepPrefix = 'xiaoji-',
+  int keep = 3,
+}) async {
+  final String? uri =
+      await _channel.invokeMethod<String>('writeToTree', <String, Object?>{
+    'treeUri': treeUri,
+    'sourcePath': sourcePath,
+    'fileName': fileName,
+    'keepPrefix': keepPrefix,
+    'keep': keep,
+  });
+  if (uri == null || uri.isEmpty) {
+    throw StateError('外置目录写入失败');
+  }
+  return uri;
+}

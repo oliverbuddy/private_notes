@@ -1,11 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_store.dart';
 import 'package:xiaoji/models/note_settings.dart';
 
 void main() {
+  // 外置备份用例需要走 MethodChannel（无插件时抛 MissingPluginException）。
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('边界：NoteSettings 容错解析', () {
     test('空 map 回落默认值', () {
       final settings = NoteSettings.fromJson(<String, dynamic>{});
@@ -188,6 +192,77 @@ void main() {
       );
       await store.saveSettings(settings);
       expect(await store.loadSettings(), settings);
+    });
+  });
+
+  group('外置备份：配置与节奏', () {
+    test('目录与时间可序列化往返', () {
+      const original = NoteSettings(
+        externalBackupUri: 'content://com.android.externalstorage.documents/tree/primary%3ADownload',
+        lastExternalBackupAt: '2026-11-06T10:30:00.000',
+      );
+      expect(NoteSettings.fromJson(original.toJson()), original);
+    });
+
+    test('clearExternalBackup 清空目录但不影响其它字段', () {
+      const base = NoteSettings(
+        theme: AppThemeMode.dark,
+        externalBackupUri: 'content://tree/x',
+        lastExternalBackupAt: '2026-11-06T10:30:00.000',
+      );
+      final cleared = base.copyWith(clearExternalBackup: true);
+      expect(cleared.externalBackupUri, isNull);
+      expect(cleared.theme, AppThemeMode.dark);
+    });
+
+    test('非字符串字段回落 null（不抛异常）', () {
+      final settings = NoteSettings.fromJson(<String, dynamic>{
+        'externalBackupUri': 42,
+        'lastExternalBackupAt': <String>[],
+      });
+      expect(settings.externalBackupUri, isNull);
+      expect(settings.lastExternalBackupAt, isNull);
+    });
+
+    late Directory tempDir;
+    late NoteStore store;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('xiaoji_external_');
+      store = await NoteStore.openAt(tempDir);
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test('距上次不足 24 小时直接跳过（不碰原生通道）', () async {
+      final at = await store.ensureExternalBackup(
+        treeUri: 'content://tree/x',
+        lastAt: DateTime.now().subtract(const Duration(hours: 23)),
+      );
+      expect(at, isNull);
+    });
+
+    test('超过 24 小时会重新导出；无原生通道时报错但不留临时文件', () async {
+      await expectLater(
+        store.ensureExternalBackup(
+          treeUri: 'content://tree/x',
+          lastAt: DateTime.now().subtract(const Duration(hours: 25)),
+        ),
+        throwsA(isA<MissingPluginException>()),
+      );
+      final tmp = Directory('${tempDir.path}/tmp');
+      final files = tmp.existsSync()
+          ? tmp.listSync().whereType<File>().toList()
+          : <File>[];
+      expect(
+        files.where((File file) => file.path.endsWith('.zip')),
+        isEmpty,
+        reason: '失败的导出不能把完整数据副本留在私有目录',
+      );
     });
   });
 }

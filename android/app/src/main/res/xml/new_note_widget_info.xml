@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面小组件声明。updatePeriodMillis=0：内容静态，不需要系统定时唤醒，
+     省电也避免后台刷新。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_new_note_desc"
+    android:initialLayout="@layout/widget_new_note"
+    android:minHeight="48dp"
+    android:minWidth="180dp"
+    android:previewLayout="@layout/widget_new_note"
+    android:resizeMode="horizontal"
+    android:targetCellHeight="1"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

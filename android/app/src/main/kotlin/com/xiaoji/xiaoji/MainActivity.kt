@@ -99,6 +99,15 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("fileName") ?: "backup.zip",
                         result,
                     )
+                    "pickDirectory" -> backupBridge.pickDirectory(result)
+                    "writeToTree" -> backupBridge.writeToTree(
+                        call.argument<String>("treeUri") ?: "",
+                        call.argument<String>("sourcePath") ?: "",
+                        call.argument<String>("fileName") ?: "backup.zip",
+                        call.argument<String>("keepPrefix") ?: "xiaoji-",
+                        call.argument<Int>("keep") ?: 3,
+                        result,
+                    )
                     else -> result.notImplemented()
                 }
             }
@@ -237,7 +246,12 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "xiaoji/shortcuts"
         private const val NATIVE_CHANNEL = "xiaoji/native"
-        private const val EXTRA_ACTION = "xiaoji.action"
+
+        /** 快捷方式 / 桌面小组件带过来的动作 extra。 */
+        const val EXTRA_ACTION = "xiaoji.action"
+
+        /** 动作值：新建一条小记。 */
+        const val ACTION_NEW_NOTE = "new_note"
 
         /** 允许交给系统浏览器/拨号/SMS 的协议。 */
         private val ALLOWED_URL_SCHEMES =

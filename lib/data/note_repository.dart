@@ -8,6 +8,7 @@ import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../util/date_format.dart';
 import 'note_store.dart';
+import 'search_index.dart';
 
 /// 笔记的内存视图。
 ///
@@ -25,6 +26,13 @@ class NoteRepository extends ChangeNotifier {
   bool _loading = true;
   String _query = '';
   String? _activeTag;
+
+  /// 全文搜索索引；原生 SQLite 不可用时为 null（回退到线性扫描）。
+  SearchIndex? _index;
+
+  /// 当前搜索词命中的笔记 id；null 表示「没有走索引」。
+  Set<String>? _searchHits;
+  String _searchHitsQuery = '';
 
   bool get isLoading => _loading;
 
@@ -62,6 +70,7 @@ class NoteRepository extends ChangeNotifier {
   List<Note> get visibleNotes {
     final keyword = _query.trim().toLowerCase();
     final tag = _activeTag;
+    final Set<String>? hits = keyword.isEmpty ? null : _searchIds(keyword);
 
     final result = _notes.where((note) {
       if (tag != null && !note.tags.contains(tag)) {
@@ -70,11 +79,15 @@ class NoteRepository extends ChangeNotifier {
       if (keyword.isEmpty) {
         return true;
       }
-      // 锁定笔记的正文不在内存里（列表里只剩空串），搜索命中只会来自
-      // 标签 —— 正文内容不该被搜出来，也不该出现在结果里。
+      // 锁定笔记的正文不在内存里（列表里只剩空串），也不进索引 ——
+      // 正文内容不该被搜出来，也不该出现在结果里。
       if (note.locked) {
         return false;
       }
+      if (hits != null) {
+        return hits.contains(note.id);
+      }
+      // 索引不可用时的兜底：保持原有线性匹配语义。
       if (note.body.toLowerCase().contains(keyword)) {
         return true;
       }
@@ -100,7 +113,45 @@ class NoteRepository extends ChangeNotifier {
     _settings = await _store.loadSettings();
     _notes = loaded;
     _loading = false;
+    _rebuildSearchIndex();
     notifyListeners();
+  }
+
+  /// 确保索引存在并与内存里的笔记一致。
+  ///
+  /// 索引是派生数据：打不开（原生库缺失/文件损坏）就静默降级为线性搜索；
+  /// 对账只重建 `updated` 变化的条目，几千条笔记也是毫秒级。
+  void _rebuildSearchIndex() {
+    _index ??= SearchIndex.tryOpen(_store.searchIndexPath);
+    _searchHits = null;
+    _searchHitsQuery = '';
+    try {
+      _index?.reconcile(_notes);
+    } catch (_) {
+      // 索引写失败（磁盘满等）不影响笔记本身，搜索退回线性扫描。
+      _index?.close();
+      _index = null;
+    }
+  }
+
+  /// 取当前搜索词的命中集合（按词缓存，避免每帧重复查库）。
+  Set<String>? _searchIds(String keyword) {
+    final index = _index;
+    if (index == null) {
+      return null;
+    }
+    if (_searchHits != null && _searchHitsQuery == keyword) {
+      return _searchHits;
+    }
+    _searchHits = index.search(keyword);
+    _searchHitsQuery = keyword;
+    return _searchHits;
+  }
+
+  /// 内存与索引都失效的时机（保存 / 删除 / 批量改标签）。
+  void _invalidateSearchCache() {
+    _searchHits = null;
+    _searchHitsQuery = '';
   }
 
   /// 最近一次自动备份失败的原因（成功时清空）。
@@ -109,6 +160,71 @@ class NoteRepository extends ChangeNotifier {
   /// 「上次备份失败，点此重试」，避免备份坏了用户却不知道。
   String? _lastBackupError;
   String? get lastBackupError => _lastBackupError;
+
+  /// 最近一次外置备份失败的原因（成功时清空）。
+  String? _lastExternalBackupError;
+  String? get lastExternalBackupError => _lastExternalBackupError;
+
+  /// 最近一次外置备份成功的时间（未开启/从未成功时为 null）。
+  DateTime? get lastExternalBackupTime =>
+      DateTime.tryParse(_settings.lastExternalBackupAt ?? '');
+
+  /// 外置备份是否正在跑：设置页据此禁用重复点击。
+  bool _externalBackupRunning = false;
+  bool get externalBackupRunning => _externalBackupRunning;
+
+  /// 上次尝试外置备份的时间（无论成败）。
+  ///
+  /// 目录被删/授权失效时，失败不会写 `lastExternalBackupAt`；没有这个节流，
+  /// 用户每次回前台都会重新打一遍全量 zip。失败后 1 小时内不再自动重试，
+  /// 手动「立即导出」不受限。
+  DateTime? _lastExternalAttempt;
+
+  /// 把导出包写进用户授权的外置目录；[force] 为 false 时不足 24 小时会跳过。
+  ///
+  /// 返回本次备份时间；未开启、跳过或失败（见 [lastExternalBackupError]）返回 null。
+  Future<DateTime?> runExternalBackup({bool force = false}) async {
+    final String? treeUri = _settings.externalBackupUri;
+    if (treeUri == null || _externalBackupRunning) {
+      return null;
+    }
+    final DateTime now = DateTime.now();
+    final DateTime? lastAttempt = _lastExternalAttempt;
+    if (!force &&
+        lastAttempt != null &&
+        now.difference(lastAttempt) < const Duration(hours: 1)) {
+      return null;
+    }
+    _lastExternalAttempt = now;
+    _externalBackupRunning = true;
+    notifyListeners();
+    try {
+      final DateTime? at = await _store.ensureExternalBackup(
+        treeUri: treeUri,
+        lastAt: lastExternalBackupTime,
+        force: force,
+      );
+      if (at != null) {
+        // 记下成功时间，避免下次回前台又重打一遍。
+        await updateSettings(
+          _settings.copyWith(lastExternalBackupAt: at.toIso8601String()),
+        );
+      }
+      if (_lastExternalBackupError != null) {
+        _lastExternalBackupError = null;
+        notifyListeners();
+      }
+      return at;
+    } catch (error) {
+      // 授权失效、目录被删、磁盘满：都要让用户看到并能重新选择。
+      _lastExternalBackupError = '$error';
+      notifyListeners();
+      return null;
+    } finally {
+      _externalBackupRunning = false;
+      notifyListeners();
+    }
+  }
 
   /// 防止「启动 + 回前台」短时间内并发跑维护（两个备份写同一目录）。
   bool _maintenanceRunning = false;
@@ -145,6 +261,11 @@ class NoteRepository extends ChangeNotifier {
         _lastBackupError = '自动备份失败';
         notifyListeners();
       }
+      // 外置备份（用户开启了才有）：失败原因记录在
+      // [lastExternalBackupError]，设置页显示「上次失败，点此重试」。
+      if (_settings.externalBackupUri != null) {
+        await runExternalBackup();
+      }
     } finally {
       _maintenanceRunning = false;
     }
@@ -180,12 +301,17 @@ class NoteRepository extends ChangeNotifier {
       next.add(stored);
     }
     _notes = next;
+    // 索引里存的是正文分词，锁定笔记会被移除。
+    _index?.upsertNote(stored);
+    _invalidateSearchCache();
     notifyListeners();
   }
 
   Future<void> remove(Note note) async {
     await _store.deleteNote(note);
     _notes = _notes.where((item) => item.id != note.id).toList();
+    _index?.removeNote(note.id);
+    _invalidateSearchCache();
     notifyListeners();
   }
 
@@ -261,8 +387,10 @@ class NoteRepository extends ChangeNotifier {
         tags: note.tags.where((String item) => item != tag).toList(),
       );
       await _store.saveNote(next[index]);
+      _index?.upsertNote(next[index]);
     }
     _notes = next;
+    _invalidateSearchCache();
     if (_activeTag == tag) {
       _activeTag = null;
     }

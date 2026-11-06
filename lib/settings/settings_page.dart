@@ -77,6 +77,24 @@ class _SettingsPageState extends State<SettingsPage> {
     return '上次 ${formatListTime(_lastBackup!)}';
   }
 
+  /// 「自动导出到文件夹」行的状态文案。
+  ///
+  /// 外置备份是唯一的「换机/丢失手机也能找回」通道，失败必须显性化，
+  /// 否则用户会以为数据已经有第二份了。
+  String _externalBackupStatusText() {
+    if (repository.externalBackupRunning) {
+      return '导出中…';
+    }
+    if (repository.lastExternalBackupError != null) {
+      return '上次失败，点此重试';
+    }
+    if (repository.settings.externalBackupUri == null) {
+      return '未开启';
+    }
+    final DateTime? at = repository.lastExternalBackupTime;
+    return at == null ? '每 24 小时' : '上次 ${formatListTime(at)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
@@ -181,6 +199,16 @@ class _SettingsPageState extends State<SettingsPage> {
                             onTap: _backingUp ? null : _backupNow,
                           ),
                           _divider(colors),
+                          // 外置备份：写进用户授权的文件夹（SD 卡/网盘目录），
+                          // 是「手机丢了备份还在」的唯一通道。
+                          _SettingRow(
+                            label: '自动导出到文件夹',
+                            value: _externalBackupStatusText(),
+                            onTap: repository.externalBackupRunning
+                                ? null
+                                : () => _openExternalBackup(),
+                          ),
+                          _divider(colors),
                           _SettingRow(
                             label: '最近删除',
                             onTap: _openTrash,
@@ -196,7 +224,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           '换机或卸载前请用「导出全部」。'
                           '每天首次启动会自动备份一份（保留最近 3 份）；'
                           '备份包含锁定笔记的密文（只能在本机恢复）；'
-                          '导出默认不含锁定笔记与「最近删除」。',
+                          '导出默认不含锁定笔记与「最近删除」。'
+                          '开启「自动导出到文件夹」后会每 24 小时把同样的'
+                          '导出包写进所选目录（保留最近 3 份）。',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.75,
@@ -454,6 +484,117 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) {
         setState(() => _backingUp = false);
       }
+    }
+  }
+
+  /// 外置备份入口：未开启 → 直接选文件夹；已开启 → 操作菜单。
+  Future<void> _openExternalBackup() async {
+    if (repository.settings.externalBackupUri == null) {
+      await _chooseExternalBackupFolder();
+      return;
+    }
+    final String? action = await _pickExternalAction();
+    if (action == null || !mounted) {
+      return;
+    }
+    switch (action) {
+      case 'export':
+        await _exportToFolder();
+        return;
+      case 'change':
+        await _chooseExternalBackupFolder();
+        return;
+      case 'off':
+        await repository.updateSettings(
+          repository.settings.copyWith(clearExternalBackup: true),
+        );
+        if (mounted) {
+          _showSnack('已关闭自动导出');
+        }
+        return;
+    }
+  }
+
+  Future<String?> _pickExternalAction() {
+    return showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors sheetColors = AppColors.of(sheetContext);
+        Widget tile({required String label, required String value}) {
+          return InkWell(
+            onTap: () => Navigator.of(sheetContext).pop(value),
+            child: Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              alignment: Alignment.centerLeft,
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 16, color: sheetColors.text),
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '自动导出到文件夹',
+                    style: AppText.caption.copyWith(color: sheetColors.tertiary),
+                  ),
+                ),
+              ),
+              tile(label: '立即导出', value: 'export'),
+              tile(label: '更换文件夹', value: 'change'),
+              tile(label: '关闭自动导出', value: 'off'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 选择文件夹并立刻导出一次：用户选完就能看到结果，不用再点一次。
+  Future<void> _chooseExternalBackupFolder() async {
+    String? uri;
+    try {
+      uri = await pickBackupDirectory();
+    } on MissingPluginException {
+      _showSnack('当前平台不支持选择文件夹');
+      return;
+    } catch (error) {
+      _showSnack('无法打开文件夹选择器：$error');
+      return;
+    }
+    if (uri == null || !mounted) {
+      return; // 用户取消
+    }
+    await repository.updateSettings(
+      repository.settings.copyWith(externalBackupUri: uri),
+    );
+    await _exportToFolder();
+  }
+
+  /// 立即把导出包写进外置目录（强制，忽略 24 小时间隔）。
+  Future<void> _exportToFolder() async {
+    final DateTime? at = await repository.runExternalBackup(force: true);
+    if (!mounted) {
+      return;
+    }
+    if (at != null) {
+      _showSnack('已导出到所选文件夹');
+      return;
+    }
+    final String? error = repository.lastExternalBackupError;
+    if (error != null) {
+      _showSnack('导出失败：$error');
     }
   }
 

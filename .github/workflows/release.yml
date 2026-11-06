@@ -52,7 +52,8 @@ jobs:
         run: |
           flutter pub get
           # 只打真机用得到的两种 ABI：默认三 ABI 会把 Flutter 引擎和 Dart
-          # 产物各拷三份（55MB）；去掉仅供模拟器的 x86_64 后约 36MB。
+          # 产物各拷三份（55MB）；去掉仅供模拟器的 x86_64 后约 41MB
+          # （含 FTS5 搜索所需的 SQLite 原生库）。
           flutter build apk --release \
             --target-platform android-arm,android-arm64
 

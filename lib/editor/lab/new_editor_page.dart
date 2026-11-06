@@ -621,8 +621,15 @@ class _NewEditorPageState extends State<NewEditorPage>
     _saveDebounce = Timer(const Duration(milliseconds: 800), _flushSave);
   }
 
-  void _flushSave() {
-    if (_disposed) {
+  /// 这条笔记已经被删除：dispose 时绝不能再回写。
+  ///
+  /// 删除后页面 pop，`dispose` 里的 [_flushSave] 若还带着未落盘的正文，
+  /// 会把刚删掉的笔记重新写回 notes/ 并重新插进列表 —— 用户看到的就是
+  /// 「删了又回来」。
+  bool _discarded = false;
+
+  Future<void> _flushSave() async {
+    if (_disposed || _discarded) {
       return;
     }
     // 用小记方言序列化器（自带的不保真，见 xiaoji_markdown.dart 头注释）。
@@ -636,6 +643,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (!_dirty || md == _lastSavedBody) {
       return;
     }
+    final String previousSavedBody = _lastSavedBody;
     _dirty = false;
     _lastSavedBody = md;
     _updated = DateTime.now();
@@ -651,7 +659,17 @@ class _NewEditorPageState extends State<NewEditorPage>
       locked: _currentNote.locked,
       body: md,
     );
-    widget.repository.upsert(_currentNote);
+    try {
+      await widget.repository.upsert(_currentNote);
+    } catch (error) {
+      // 写盘失败（磁盘满、权限等）时不能装作已保存：恢复 dirty 与
+      // 「上次落盘内容」，下一次防抖 / 退出会重试，并明确告诉用户。
+      _dirty = true;
+      _lastSavedBody = previousSavedBody;
+      if (mounted && !_disposing) {
+        _showHint('保存失败：$error');
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1474,7 +1492,12 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 否则刚锁定就退出，最后一段输入会被当成「锁定前的正文」重复加密。
   Future<void> _applyLock(bool locked) async {
     _saveDebounce?.cancel();
-    _flushSave();
+    // 必须等这一笔写完再写锁定态：两笔保存同时落在同一条路径上，
+    // 后写的那笔可能把「已加密」覆盖回明文（或反之）。
+    await _flushSave();
+    if (_discarded) {
+      return;
+    }
     _currentNote = _currentNote.copyWith(
       locked: locked,
       updated: DateTime.now(),
@@ -1667,7 +1690,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (confirmed != true || !mounted) {
       return;
     }
+    // 先停掉防抖，再删；删除成功后标记 _discarded，dispose 就不会把
+    // 刚删掉的正文写回去（否则笔记会「删了又回来」）。
+    _saveDebounce?.cancel();
     await widget.repository.remove(_currentNote);
+    _discarded = true;
     if (mounted) {
       Navigator.of(context).pop();
     }
@@ -1921,7 +1948,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               ],
             ),
             // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
-            if (_panelExpanded) _buildPanelSheet(colors),
+            if (_panelExpanded) _buildPanelSheet(colors, imeInset),
             // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
             // 挪光标（旧版实测的坑）。
             _buildToolbar(imeInset),
@@ -1931,61 +1958,77 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  /// 子菜单面板：占据原键盘区域，内容贴顶部。
+  /// 子菜单面板：占据原键盘区域，内容垂直居中。
   ///
-  /// 高度取展开那一刻的键盘高度，所以贴在它上沿的工具条位置完全不动；
-  /// 面板内容固定高度，剩余部分保持页面底色 —— 视觉上就是「键盘被
-  /// 面板替换」，点「×」关闭后键盘原位回来，工具栏不跳。
-  Widget _buildPanelSheet(AppColors colors) {
-    final double sheetHeight = _toolbarAnchorIme ?? 0;
+  /// 高度必须取「工具条底边到 body 底边」的距离（即锚点减去当前 ime），
+  /// 而不是固定取锚点：
+  ///
+  /// 打开面板时键盘是逐帧收起的，body 也在逐帧变高。如果面板按锚点高度
+  /// 直接铺满，在键盘还没完全收起的那些帧里，它的顶边会跑到工具条**上方**，
+  /// 面板内容就会在工具栏上面闪一下（用户实测）。改成跟着工具条底边走，
+  /// 面板永远从工具栏下沿开始展开；内容按最终高度（锚点）布局后再裁剪，
+  /// 所以内容本身不随动画上下漂移。
+  Widget _buildPanelSheet(AppColors colors, double imeInset) {
+    final double full = _toolbarAnchorIme ?? 0;
+    final double visible = math.max(full - imeInset, 0);
+    if (full <= 0 || visible <= 0) {
+      return const SizedBox.shrink();
+    }
     return Positioned(
       left: 0,
       right: 0,
       bottom: 0,
-      height: sheetHeight,
-      child: ColoredBox(
-        // 与面板同色：面板只占键盘区域的一段，剩余的上下留白必须同色，
-        // 才能读成「一块完整的键盘替代面板」而不是白带浮在灰底上。
-        color: colors.page,
-        // 面板内容垂直居中：＋ 面板只有一组、Aa 面板四行，顶在上沿会让
-        // 下面留一大片空白（用户反馈「太空」）。居中后上下留白对称。
-        child: Center(
-          child: ValueListenableBuilder<Set<MarkdownCommand>>(
-            valueListenable: _activeCommands,
-            builder: (
-              BuildContext context,
-              Set<MarkdownCommand> active,
-              _,
-            ) {
-              return switch (_panel) {
-                // 子菜单铺在工具条下方的键盘区域里，本身就是独立白面：
-                // 不再画顶部分隔线（否则工具栏和面板之间多出一道横线）。
-                MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel(
-                    active: active,
-                    showTopDivider: false,
-                    onPick: _runPanelCommand,
-                  ),
-                MarkdownToolbarPanel.insert => MarkdownInsertPanel(
-                    active: active,
-                    showTopDivider: false,
-                    onPick: (MarkdownCommand command) {
-                      // 插入是一次性动作：收面板、回键盘，再执行。
-                      _closePanel(showKeyboard: true);
-                      _runToolbarCommand(command);
-                    },
-                  ),
-                MarkdownToolbarPanel.attach => MarkdownAttachPanel(
-                    showTopDivider: false,
-                    onPick: (MarkdownAttachAction action) {
-                      // 选完收起面板，交给系统选择器（它会接管焦点）。
-                      _closePanel(showKeyboard: false);
-                      _onPanelOpening();
-                      _handleAttachAction(action);
-                    },
-                  ),
-                MarkdownToolbarPanel.none => const SizedBox.shrink(),
-              };
-            },
+      height: visible,
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topCenter,
+          minHeight: full,
+          maxHeight: full,
+          child: ColoredBox(
+            // 与面板同色：面板只占键盘区域的一段，剩余的上下留白必须同色，
+            // 才能读成「一块完整的键盘替代面板」而不是白带浮在灰底上。
+            color: colors.page,
+            // 面板内容垂直居中：＋ 面板只有一组、Aa 面板四行，顶在上沿会让
+            // 下面留一大片空白（用户反馈「太空」）。居中后上下留白对称。
+            child: Center(
+              child: ValueListenableBuilder<Set<MarkdownCommand>>(
+                valueListenable: _activeCommands,
+                builder: (
+                  BuildContext context,
+                  Set<MarkdownCommand> active,
+                  _,
+                ) {
+                  return switch (_panel) {
+                    // 子菜单铺在工具条下方的键盘区域里，本身就是独立白面：
+                    // 不再画顶部分隔线（否则工具栏和面板之间多出一道横线）。
+                    MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel(
+                        active: active,
+                        showTopDivider: false,
+                        onPick: _runPanelCommand,
+                      ),
+                    MarkdownToolbarPanel.insert => MarkdownInsertPanel(
+                        active: active,
+                        showTopDivider: false,
+                        onPick: (MarkdownCommand command) {
+                          // 插入是一次性动作：收面板、回键盘，再执行。
+                          _closePanel(showKeyboard: true);
+                          _runToolbarCommand(command);
+                        },
+                      ),
+                    MarkdownToolbarPanel.attach => MarkdownAttachPanel(
+                        showTopDivider: false,
+                        onPick: (MarkdownAttachAction action) {
+                          // 选完收起面板，交给系统选择器（它会接管焦点）。
+                          _closePanel(showKeyboard: false);
+                          _onPanelOpening();
+                          _handleAttachAction(action);
+                        },
+                      ),
+                    MarkdownToolbarPanel.none => const SizedBox.shrink(),
+                  };
+                },
+              ),
+            ),
           ),
         ),
       ),

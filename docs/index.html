@@ -61,8 +61,8 @@
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">查看源码</a>
           </div>
           <p class="hero-meta">
-            <span data-latest-version>v1.3.1</span>
-            <span data-latest-size>55.5 MB</span>
+            <span data-latest-version>v1.4.0</span>
+            <span data-latest-size>41.0 MB</span>
             <span>签名 APK</span>
           </p>
         </div>
@@ -89,7 +89,7 @@
           <article class="card">
             <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
             <h3>打开就能写</h3>
-            <p>没有标题、没有层级。点开就记，输入即自动保存，退出不用确认。</p>
+            <p>没有标题、没有层级。点开就记，输入即自动保存，退出不用确认。桌面小组件「记一条」一步进编辑页。</p>
           </article>
 
           <article class="card">
@@ -107,7 +107,7 @@
           <article class="card">
             <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15 15 5 5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
             <h3>搜索与标签</h3>
-            <p>全文搜索带高亮，标签可筛选、可删除；重要内容一键置顶。</p>
+            <p>SQLite FTS5 索引，中文按单字 + 二字切词，支持前缀匹配与高亮；标签可筛选、可删除，重要内容一键置顶。</p>
           </article>
 
           <article class="card">
@@ -182,10 +182,11 @@
         <div>
           <p class="eyebrow">数据</p>
           <h2>格式透明，随时带走</h2>
-          <p class="section-sub">一篇笔记就是一个 Markdown 文件，按年和月分目录。没有数据库、没有私有格式、没有云端索引。</p>
+          <p class="section-sub">一篇笔记就是一个 Markdown 文件，按年和月分目录。笔记不是数据库里的记录，搜索索引只是随时可删的派生数据。</p>
           <ul class="plain-list">
             <li>应用私有目录存储，系统「文件」管理器看不到，也不随云备份上传</li>
             <li>「导出全部」生成 zip（SAF 保存到任意位置），图片附件一起打包</li>
+            <li>可选「自动导出到文件夹」：每 24 小时把导出包写进你选定的目录（保留最近 3 份），手机丢失也有第二份</li>
             <li>锁定笔记正文是密文信封，换机后无法解密 —— 迁移请选择「含锁定笔记（明文）」导出</li>
             <li>备份与导出都排除「最近删除」；恢复是合并覆盖，不删除本地其它笔记</li>
           </ul>
@@ -216,9 +217,9 @@ pinned: true
             <div>
               <h2>下载小记</h2>
               <p class="download-meta">
-                <span data-latest-version>v1.3.1</span>
+                <span data-latest-version>v1.4.0</span>
                 <span data-latest-date>2026-11-06</span>
-                <span data-latest-size>55.5 MB</span>
+                <span data-latest-size>41.0 MB</span>
                 <span>Android 7.0+</span>
               </p>
             </div>
@@ -272,11 +273,15 @@ pinned: true
         </details>
         <details>
           <summary>自动备份存在哪？会丢吗？</summary>
-          <p>自动与手动备份都在应用私有 <code>backups/</code> 目录，每 24 小时最多一份，默认保留 3 份，恢复前还会另存一份快照。备份与数据同盘，设备损坏仍会一起丢失，长期归档请用「导出全部」。</p>
+          <p>自动与手动备份都在应用私有 <code>backups/</code> 目录，每 24 小时最多一份，默认保留 3 份，恢复前还会另存一份快照。备份与数据同盘，设备损坏仍会一起丢失 —— 建议在设置里开启「自动导出到文件夹」，把备份写到 SD 卡或网盘同步目录；长期归档仍用「导出全部」。</p>
         </details>
         <details>
           <summary>有 iOS 版本吗？</summary>
           <p>暂时没有。当前只提供 Android APK，iOS 工程尚未生成。</p>
+        </details>
+        <details>
+          <summary>可以商用吗？</summary>
+          <p>不可以。项目采用 <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/" target="_blank" rel="noopener">PolyForm Noncommercial 1.0.0</a>，个人使用、学习、修改与分发免费；商业用途需要单独授权，可发邮件到 <a href="mailto:qiwei0727@gmail.com?subject=%E5%B0%8F%E8%AE%B0%E5%95%86%E4%B8%9A%E6%8E%88%E6%9D%83">qiwei0727@gmail.com</a>。</p>
         </details>
       </div>
     </section>
@@ -293,6 +298,7 @@ pinned: true
         <a href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">源码</a>
         <a href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">更新日志</a>
         <a href="https://github.com/oliverbuddy/private_notes/issues" target="_blank" rel="noopener">问题反馈</a>
+        <a href="mailto:qiwei0727@gmail.com?subject=%E5%B0%8F%E8%AE%B0%E5%95%86%E4%B8%9A%E6%8E%88%E6%9D%83">商业授权</a>
       </nav>
       <p class="copyright">© <span data-year>2026</span> 小记 · PolyForm Noncommercial 1.0.0（禁止商用，商用需授权）</p>
     </div>
