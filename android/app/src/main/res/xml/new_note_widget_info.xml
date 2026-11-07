@@ -6,7 +6,7 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_new_note_desc"
     android:initialLayout="@layout/widget_new_note"
-    android:minHeight="26dp"
+    android:minHeight="40dp"
     android:minWidth="110dp"
     android:previewLayout="@layout/widget_new_note"
     android:resizeMode="none"

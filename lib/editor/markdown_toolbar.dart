@@ -4,7 +4,7 @@ import '../theme/app_theme.dart';
 
 /// 工具条能发出的命令。
 ///
-/// 受控模式（小记详情页）下全部收在 **Aa 面板**，按四组排列：
+/// 全部格式收在 **Aa 面板**，按四组排列：
 /// - 标题（[paragraph] / [h1] / [h2] / [h3]）；
 /// - 段落（[todo] / [bullet] / [ordered] / [quote]）；
 /// - 文字（[bold] / [italic] / [strike] / [code] / [link]）；
@@ -12,7 +12,6 @@ import '../theme/app_theme.dart';
 ///
 /// 底栏只留 ＋（媒体）、Aa、标签、撤销、还原、收键盘 —— 高频入口一屏可见，
 /// 低频格式都进 Aa 一层，不用横滑（横滑没有视觉暗示，用户找不到）。
-/// 非受控模式（旧编辑器）仍按原样把块级命令放在底栏，不受影响。
 enum MarkdownCommand {
   paragraph,
   h1,
@@ -48,22 +47,18 @@ enum MarkdownAttachAction { camera, gallery, file }
 
 /// 贴在键盘上方的编辑工具条。
 ///
-/// 新版（受控模式，小记详情页）分三组：＋添加 / Aa 字体样式 / 标签
-/// ｜撤销 / 还原｜收起键盘 —— 对齐滴答清单/语雀的「高频入口一屏可见」。
-/// 待办/列表/引用/代码块/分隔线/缩进这些低频格式全部收进 Aa 面板，
-/// ＋ 只负责媒体（相册/拍照/文件），内容与排版二分。
-/// 旧版（非受控模式）保持原有五按钮布局，旧编辑器不受影响。
+/// 分三组：＋添加 / Aa 字体样式 / 标签 ｜撤销 / 还原｜收起键盘 —— 对齐
+/// 滴答清单/语雀的「高频入口一屏可见」。待办/列表/引用/代码块/分隔线/缩进
+/// 这些低频格式全部收进 Aa 面板，＋ 只负责媒体（相册/拍照/文件）。
 class MarkdownToolbar extends StatefulWidget {
   const MarkdownToolbar({
     super.key,
     required this.onCommand,
     required this.onAttachAction,
     required this.onHideKeyboard,
-    this.onPanelOpening,
-    this.panelHeight,
+    required this.panel,
+    required this.onPanelToggle,
     this.active = const <MarkdownCommand>{},
-    this.panel,
-    this.onPanelToggle,
     this.onEditTags,
     this.onUndo,
     this.onRedo,
@@ -79,31 +74,16 @@ class MarkdownToolbar extends StatefulWidget {
   /// 收起键盘并回到浏览态（自动保存照常进行）。
   final VoidCallback onHideKeyboard;
 
-  /// 弹层即将打开时回调（showXiaojiSheet 之前）。
-  ///
-  /// modal 一打开焦点就转移，编辑器选区会被折叠成末尾光标；调用方
-  /// 必须在这一刻冻结选区快照，关闭后才能恢复出「用户原本选中的一段」。
-  final VoidCallback? onPanelOpening;
-
-  /// 二级面板展开时的高度（0 = 未展开）。
-  ///
-  /// 非受控模式下：面板叠在工具条上方，页面拿这个值给正文底部预留空间，
-  /// 避免面板盖住最后几行。受控模式由页面自己排版面板，不会写这个值。
-  final ValueNotifier<double>? panelHeight;
-
   /// 当前光标所处行的块级格式，用于按钮激活态。
   final Set<MarkdownCommand> active;
 
-  /// 受控模式的当前子菜单（null/未传 = 非受控，保持旧行为）。
-  ///
-  /// 受控模式下工具条只画按钮行，面板由页面自己渲染在**工具条下方**
-  /// （语雀的做法：隐藏输入法，面板铺在原键盘区域，工具条位置不动）。
-  final MarkdownToolbarPanel? panel;
+  /// 当前子菜单。工具条只画按钮行，面板由页面渲染在工具条下方。
+  final MarkdownToolbarPanel panel;
 
-  /// 受控模式的子菜单开关回调。
-  final ValueChanged<MarkdownToolbarPanel>? onPanelToggle;
+  /// 子菜单开关回调。
+  final ValueChanged<MarkdownToolbarPanel> onPanelToggle;
 
-  /// 点「标签」：打开标签编辑弹层（仅受控模式显示）。
+  /// 点「标签」：打开标签编辑弹层。
   final VoidCallback? onEditTags;
 
   /// 撤销 / 还原。
@@ -119,119 +99,20 @@ class MarkdownToolbar extends StatefulWidget {
 }
 
 class _MarkdownToolbarState extends State<MarkdownToolbar> {
-  MarkdownToolbarPanel _panel = MarkdownToolbarPanel.none;
-
   Set<MarkdownCommand> get active => widget.active;
 
-  /// 是否由页面托管面板（此时本组件不渲染面板、不写 panelHeight）。
-  bool get _controlled => widget.onPanelToggle != null;
-
-  MarkdownToolbarPanel get _effectivePanel =>
-      _controlled ? (widget.panel ?? MarkdownToolbarPanel.none) : _panel;
+  MarkdownToolbarPanel get _effectivePanel => widget.panel;
 
   void _setPanel(MarkdownToolbarPanel panel) {
-    if (_controlled) {
-      if (_effectivePanel != panel) {
-        widget.onPanelToggle!(panel);
-      }
-      return;
+    if (_effectivePanel != panel) {
+      widget.onPanelToggle(panel);
     }
-    if (_panel == panel) {
-      return;
-    }
-    setState(() => _panel = panel);
-    widget.panelHeight?.value = switch (panel) {
-      MarkdownToolbarPanel.none => 0,
-      MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel.height,
-      MarkdownToolbarPanel.insert => MarkdownInsertPanel.height,
-      MarkdownToolbarPanel.attach => MarkdownAttachPanel.height,
-    };
   }
 
   bool _isHeadingActive() {
     return active.contains(MarkdownCommand.h1) ||
         active.contains(MarkdownCommand.h2) ||
         active.contains(MarkdownCommand.h3);
-  }
-
-  /// 格式区：空间够时图标均匀分布（语雀的陈列逻辑），窄屏退回横滑兜底。
-  ///
-  /// 陈列对齐语雀：底栏只放**块级插入**（图片/待办/列表/引用），
-  /// 文字样式（粗斜删/行内码/链接）收进「Aa」面板 —— 和语雀一样，
-  /// 底栏一屏可见、Aa 一层兜住所有样式。加粗不再占底栏位置。
-  Widget _formatArea(BuildContext context) {
-    final buttons = <Widget>[
-      _ToolButton(
-        // 「+」而不是图片图标：这一层是「添加内容」的总入口（拍照/相册/
-        // 文件），用图片图标会让人以为只能插图（用户反馈）。
-        icon: _effectivePanel == MarkdownToolbarPanel.attach
-            ? Icons.close
-            : Icons.add,
-        selected: _effectivePanel == MarkdownToolbarPanel.attach,
-        onTap: () => _setPanel(
-          _effectivePanel == MarkdownToolbarPanel.attach
-              ? MarkdownToolbarPanel.none
-              : MarkdownToolbarPanel.attach,
-        ),
-      ),
-      _ToolButton(
-        icon: Icons.check_box_outlined,
-        selected: active.contains(MarkdownCommand.todo),
-        onTap: () => widget.onCommand(MarkdownCommand.todo),
-      ),
-      _ToolButton(
-        // 展开时变成「×」：再点一下就是关闭当前子菜单（用户反馈的交互）。
-        icon: _effectivePanel == MarkdownToolbarPanel.insert
-            ? Icons.close
-            : Icons.format_list_bulleted,
-        selected: active.contains(MarkdownCommand.bullet) ||
-            active.contains(MarkdownCommand.ordered) ||
-            _effectivePanel == MarkdownToolbarPanel.insert,
-        onTap: () => _setPanel(
-          _effectivePanel == MarkdownToolbarPanel.insert
-              ? MarkdownToolbarPanel.none
-              : MarkdownToolbarPanel.insert,
-        ),
-      ),
-      _ToolButton(
-        icon: Icons.format_quote_rounded,
-        selected: active.contains(MarkdownCommand.quote),
-        onTap: () => widget.onCommand(MarkdownCommand.quote),
-      ),
-      // 「Aa」用文字不用图标：语雀的做法，比任何图标都直观。
-      // 面板展开时同样变成「×」，与另外两个入口一致。
-      _TextToolButton(
-        selected:
-            _isHeadingActive() || _effectivePanel == MarkdownToolbarPanel.textStyle,
-        showClose: _effectivePanel == MarkdownToolbarPanel.textStyle,
-        onTap: () => _setPanel(
-          _effectivePanel == MarkdownToolbarPanel.textStyle
-              ? MarkdownToolbarPanel.none
-              : MarkdownToolbarPanel.textStyle,
-        ),
-      ),
-    ];
-
-    return Expanded(
-      child: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints constraints) {
-          // 5 个 48dp 按钮 + 两侧最小呼吸边距。低于这个宽度（罕见的老设备）
-          // 才启用横滑；正常机型 spaceEvenly 铺满，与语雀一致。
-          const minWidth = 5 * 48 + 8;
-          if (constraints.maxWidth >= minWidth) {
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: buttons,
-            );
-          }
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const ClampingScrollPhysics(),
-            child: Row(children: buttons),
-          );
-        },
-      ),
-    );
   }
 
   /// 受控模式（详情页）的按钮行：内容组（＋ / Aa / 标签）+ 历史组 + 收键盘。
@@ -248,8 +129,8 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
         children: <Widget>[
           _ToolButton(
             icon: _effectivePanel == MarkdownToolbarPanel.attach
-                ? Icons.close
-                : Icons.add,
+                ? Icons.close_rounded
+                : Icons.add_rounded,
             selected: _effectivePanel == MarkdownToolbarPanel.attach,
             onTap: () => _setPanel(
               _effectivePanel == MarkdownToolbarPanel.attach
@@ -270,19 +151,19 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
           ),
           const SizedBox(width: 8),
           _ToolButton(
-            icon: Icons.sell_outlined,
+            icon: Icons.tag_rounded,
             onTap: widget.onEditTags ?? () {},
           ),
           // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
           // 两侧各占一块，不再把五个按钮均匀撒满整条。
           const Spacer(),
           _FixedButton(
-            icon: Icons.undo,
+            icon: Icons.undo_rounded,
             enabled: widget.canUndo,
             onTap: widget.onUndo,
           ),
           _FixedButton(
-            icon: Icons.redo,
+            icon: Icons.redo_rounded,
             enabled: widget.canRedo,
             onTap: widget.onRedo,
           ),
@@ -299,8 +180,9 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-
-    final Widget toolbarRow = Container(
+    // 面板由页面渲染在工具条下方（原键盘区域），这里只返回按钮行，
+    // 保证工具条位置不随面板移动。
+    return Container(
       decoration: BoxDecoration(
         color: colors.page,
         border: Border(top: BorderSide(color: colors.divider, width: 0.5)),
@@ -309,62 +191,9 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
         top: false,
         child: SizedBox(
           height: AppSize.navBar,
-          // 受控模式按语义分三组（见 [_controlledToolbarRow]）；
-          // 非受控模式保持旧陈列（格式区均匀分布 + 收键盘）。
-          child: _controlled
-              ? _controlledToolbarRow(context, colors)
-              : Row(
-                  children: <Widget>[
-                    _formatArea(context),
-                    _GroupDivider(color: colors.divider),
-                    _FixedButton(
-                      icon: Icons.keyboard_hide_outlined,
-                      onTap: widget.onHideKeyboard,
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                ),
+          child: _controlledToolbarRow(context, colors),
         ),
       ),
-    );
-
-    // 受控模式（小记详情页）：面板由页面渲染在工具条**下方**（原键盘
-    // 区域），这里只返回按钮行，保证工具条位置不随面板移动。
-    if (_controlled) {
-      return toolbarRow;
-    }
-
-    // 非受控模式（旧编辑器）：二级面板叠在工具条上方，整列底部对齐，
-    // 面板向上展开，不改变工具条本身的高度（它始终是页面底部的一条浮层）。
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (_panel == MarkdownToolbarPanel.textStyle)
-          MarkdownTextStylePanel(
-            active: active,
-            onPick: widget.onCommand,
-          )
-        else if (_panel == MarkdownToolbarPanel.insert)
-          MarkdownInsertPanel(
-            active: active,
-            onPick: (MarkdownCommand command) {
-              // 插入是一次性动作：选完即收起（语雀同款）。
-              _setPanel(MarkdownToolbarPanel.none);
-              widget.onCommand(command);
-            },
-          )
-        else if (_panel == MarkdownToolbarPanel.attach)
-          MarkdownAttachPanel(
-            onPick: (MarkdownAttachAction action) {
-              // 选完即收起面板，再把系统选择器打开。
-              _setPanel(MarkdownToolbarPanel.none);
-              // 系统选择器会抢焦点：先冻结当前选区，选完才能插回原位。
-              widget.onPanelOpening?.call();
-              widget.onAttachAction(action);
-            },
-          ),
-        toolbarRow,
-      ],
     );
   }
 }
@@ -476,7 +305,7 @@ class _MediaCard extends StatelessWidget {
             children: <Widget>[
               Icon(
                 icon,
-                size: 24,
+                size: AppIcon.action,
                 color: colors.text.withValues(alpha: 0.78),
               ),
               const SizedBox(height: 8),
@@ -524,28 +353,28 @@ class MarkdownTextStylePanel extends StatelessWidget {
   static const List<(MarkdownCommand, IconData, String)> _blockItems =
       <(MarkdownCommand, IconData, String)>[
     (MarkdownCommand.todo, Icons.check_box_outlined, '待办'),
-    (MarkdownCommand.bullet, Icons.format_list_bulleted, '无序'),
-    (MarkdownCommand.ordered, Icons.format_list_numbered, '有序'),
+    (MarkdownCommand.bullet, Icons.format_list_bulleted_rounded, '无序'),
+    (MarkdownCommand.ordered, Icons.format_list_numbered_rounded, '有序'),
     (MarkdownCommand.quote, Icons.format_quote_rounded, '引用'),
   ];
 
   /// 行内样式：加粗 / 斜体 / 删除线 / 行内码 / 链接。
   static const List<(MarkdownCommand, IconData, String)> _inlineItems =
       <(MarkdownCommand, IconData, String)>[
-    (MarkdownCommand.bold, Icons.format_bold, '加粗'),
-    (MarkdownCommand.italic, Icons.format_italic, '斜体'),
-    (MarkdownCommand.strike, Icons.strikethrough_s, '删除线'),
-    (MarkdownCommand.code, Icons.code, '行内码'),
-    (MarkdownCommand.link, Icons.link, '链接'),
+    (MarkdownCommand.bold, Icons.format_bold_rounded, '加粗'),
+    (MarkdownCommand.italic, Icons.format_italic_rounded, '斜体'),
+    (MarkdownCommand.strike, Icons.strikethrough_s_rounded, '删除线'),
+    (MarkdownCommand.code, Icons.code_rounded, '行内码'),
+    (MarkdownCommand.link, Icons.link_rounded, '链接'),
   ];
 
   /// 结构：分隔线 / 代码块 / 缩进 / 减少缩进（原「＋ → 插入块」）。
   static const List<(MarkdownCommand, IconData, String)> _structureItems =
       <(MarkdownCommand, IconData, String)>[
-    (MarkdownCommand.divider, Icons.horizontal_rule, '分隔线'),
+    (MarkdownCommand.divider, Icons.horizontal_rule_rounded, '分隔线'),
     (MarkdownCommand.codeBlock, Icons.code_rounded, '代码块'),
-    (MarkdownCommand.indent, Icons.format_indent_increase, '缩进'),
-    (MarkdownCommand.outdent, Icons.format_indent_decrease, '减少缩进'),
+    (MarkdownCommand.indent, Icons.format_indent_increase_rounded, '缩进'),
+    (MarkdownCommand.outdent, Icons.format_indent_decrease_rounded, '减少缩进'),
   ];
 
   @override
@@ -707,12 +536,12 @@ class MarkdownInsertPanel extends StatelessWidget {
 
   static const List<(MarkdownCommand, IconData, String)> _items =
       <(MarkdownCommand, IconData, String)>[
-    (MarkdownCommand.bullet, Icons.format_list_bulleted, '无序'),
-    (MarkdownCommand.ordered, Icons.format_list_numbered, '有序'),
-    (MarkdownCommand.divider, Icons.horizontal_rule, '分隔线'),
+    (MarkdownCommand.bullet, Icons.format_list_bulleted_rounded, '无序'),
+    (MarkdownCommand.ordered, Icons.format_list_numbered_rounded, '有序'),
+    (MarkdownCommand.divider, Icons.horizontal_rule_rounded, '分隔线'),
     (MarkdownCommand.codeBlock, Icons.code_rounded, '代码块'),
-    (MarkdownCommand.indent, Icons.format_indent_increase, '缩进'),
-    (MarkdownCommand.outdent, Icons.format_indent_decrease, '减少缩进'),
+    (MarkdownCommand.indent, Icons.format_indent_increase_rounded, '缩进'),
+    (MarkdownCommand.outdent, Icons.format_indent_decrease_rounded, '减少缩进'),
   ];
 
   @override
@@ -925,27 +754,38 @@ class _TextToolButton extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.button),
-      child: Container(
+      child: SizedBox(
         width: 48,
         height: 48,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.button),
+        // 命中区仍是 48；选中只画 36 圆形底，避免「一个大色块」压住图标
+        // （用户反馈关闭按钮的背景太大）。
+        child: Center(
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: selected
+                ? BoxDecoration(
+                    color: colors.accentBg,
+                    shape: BoxShape.circle,
+                  )
+                : null,
+            child: showClose
+                ? Icon(Icons.close_rounded,
+                    size: AppIcon.compact, color: colors.accent)
+                : Text(
+                    'Aa',
+                    style: TextStyle(
+                      fontSize: AppFontSize.hint,
+                      height: 1,
+                      fontWeight: AppWeight.medium,
+                      color: selected
+                          ? colors.accent
+                          : colors.text.withValues(alpha: 0.78),
+                    ),
+                  ),
+          ),
         ),
-        child: showClose
-            ? Icon(Icons.close, size: AppIcon.action, color: colors.accent)
-            : Text(
-                'Aa',
-                style: TextStyle(
-                  fontSize: AppFontSize.hint,
-                  height: 1,
-                  fontWeight: AppWeight.medium,
-                  color: selected
-                      ? colors.accent
-                      : colors.text.withValues(alpha: 0.78),
-                ),
-              ),
       ),
     );
   }
@@ -968,21 +808,30 @@ class _ToolButton extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.button),
-      child: Container(
+      child: SizedBox(
         width: 48,
         height: 48,
-        decoration: BoxDecoration(
-          color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.button),
-        ),
-        child: Icon(
-          icon,
-          size: AppIcon.action,
-          // 未选中用弱化正文色：纯黑太重，secondary 又像禁用，
-          // 主色只留给「当前生效」的状态。
-          color: selected
-              ? colors.accent
-              : colors.text.withValues(alpha: 0.72),
+        child: Center(
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: selected
+                ? BoxDecoration(
+                    color: colors.accentBg,
+                    shape: BoxShape.circle,
+                  )
+                : null,
+            child: Icon(
+              icon,
+              size: AppIcon.action,
+              // 未选中用弱化正文色：纯黑太重，secondary 又像禁用，
+              // 主色只留给「当前生效」的状态。
+              color: selected
+                  ? colors.accent
+                  : colors.text.withValues(alpha: 0.72),
+            ),
+          ),
         ),
       ),
     );

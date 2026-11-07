@@ -2,12 +2,16 @@
 <!-- 2×1 的「新建小记」小组件。
      上半是卡片（应用图标 + 一行描述），下半是标题「新建小记」——
      很多桌面不会绘制组件名，所以标题由我们自己画在卡片下方，
-     视觉上就等同于图标下面那行 App 名称。 -->
+     视觉上就等同于图标下面那行 App 名称。
+
+     高度必须压在 1 行单元格内：不同启动器给 1 行的高度约 40–72dp，
+     旧版 52+12+标题 ≈ 82dp，真机上标题被裁掉一半（用户反馈）。
+     现在卡片 38 + 间距 3 + 标题约 13 ≈ 54dp；宿主更矮时由 Provider
+     读取 OPTION_APPWIDGET_MIN_HEIGHT 隐藏标题，只留 38dp 卡片。 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:paddingTop="2dp">
+    android:layout_height="match_parent">
 
     <!-- 整块（卡片 + 标题）垂直居中：启动器摆放「图标 + 名称」也是居中，
          这样换启动器或真机时不需要再手调顶部偏移。 -->
@@ -21,7 +25,7 @@
         <LinearLayout
             android:id="@+id/widget_card"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="38dp"
             android:background="@drawable/widget_new_note_bg"
             android:gravity="center_vertical"
             android:orientation="horizontal"
@@ -29,11 +33,11 @@
             android:paddingEnd="12dp">
 
             <ImageView
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
                 android:background="@drawable/widget_icon_circle"
                 android:contentDescription="@null"
-                android:padding="6dp"
+                android:padding="5dp"
                 android:src="@drawable/ic_widget_pen"
                 android:tint="@color/widget_icon_fg" />
 
@@ -48,7 +52,7 @@
                 android:autoSizeTextType="uniform"
                 android:ellipsize="end"
                 android:fontFamily="sans-serif-medium"
-                android:letterSpacing="0.1"
+                android:letterSpacing="0"
                 android:maxLines="1"
                 android:text="@string/widget_new_note_desc_text"
                 android:textColor="@color/widget_text"
@@ -59,17 +63,17 @@
             android:id="@+id/widget_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="3dp"
             android:ellipsize="end"
             android:fontFamily="sans-serif-medium"
             android:maxLines="1"
-            android:shadowColor="#66000000"
+            android:shadowColor="#B3000000"
             android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="4"
+            android:shadowDy="0"
+            android:shadowRadius="3"
             android:text="@string/shortcut_new_note_long"
             android:textColor="@color/widget_sub"
-            android:textSize="12sp" />
+            android:textSize="11sp" />
 
     </LinearLayout>
 

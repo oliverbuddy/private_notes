@@ -114,7 +114,7 @@ class KernelCommands {
     }
   }
 
-  /// 插入 `[文字](url)` 并把选区选住 url 段 —— 旧编辑器 _applyLink 同款
+  /// 插入 `[文字](url)` 并把选区选住 url 段 —— 早期版本 _applyLink 同款
   /// 交互：插入后直接打字就是在写链接地址。
   void _applyLink() {
     final node = _selectedNode;
@@ -449,7 +449,7 @@ class KernelCommands {
   /// 不垫的话插完图就没地方打字了）。
   ///
   /// [imageUrl] 是小记方言的相对路径（`assets/<noteId>/1.jpg`），存储与
-  /// 渲染都直接用它，与旧编辑器的附件目录布局保持同构。
+  /// 渲染都直接用它，与早期版本的附件目录布局保持同构。
   void insertImageNode(String imageUrl) {
     final selection = composer.selection;
     final anchor = selection == null
@@ -504,7 +504,7 @@ class KernelCommands {
   /// 计算当前光标/选区对应的激活命令集合。
   ///
   /// 块级看 extent 节点类型；行内只在**展开选区**上判断 —— 折叠光标不猜
-  /// （猜错比不亮更困惑，旧编辑器 2026-11 调研的定论）。
+  /// （猜错比不亮更困惑，早期版本 2026-11 调研的定论）。
   Set<MarkdownCommand> computeActiveCommands() {
     final selection = composer.selection;
     if (selection == null) {

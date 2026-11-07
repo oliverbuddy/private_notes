@@ -10,6 +10,7 @@ import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../security/unlock.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/pressable.dart';
@@ -369,7 +370,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           '本机每天 1 份；开启文件夹后每 24 小时 1 份，各保留最近 3 份。',
                         ),
                         item(
-                          Icons.lock_outline,
+                          Icons.lock_outline_rounded,
                           '锁定笔记',
                           '密文只在本机可解密；导出 zip 默认不含锁定笔记与「回收站」。',
                         ),
@@ -412,17 +413,7 @@ class _SettingsPageState extends State<SettingsPage> {
       height: AppSize.navBar,
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: AppSize.navBar,
-            child: InkWell(
-              onTap: () => Navigator.of(context).maybePop(),
-              child: Icon(
-                Icons.arrow_back_ios_new,
-                size: AppIcon.nav,
-                color: colors.secondary,
-              ),
-            ),
-          ),
+          const AppBackButton(),
           Text(
             '设置',
             style: AppText.sheetTitle.copyWith(color: colors.text),
@@ -1016,7 +1007,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 tile(
-                  icon: Icons.lock_outline,
+                  icon: Icons.lock_outline_rounded,
                   label: '导出（不含锁定笔记）',
                   subtitle: '默认。锁定正文是设备加密的，换机后也无法解密。',
                   value: false,

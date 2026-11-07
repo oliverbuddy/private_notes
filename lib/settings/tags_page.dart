@@ -5,6 +5,7 @@ import '../models/note.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
 import '../ui/app_field.dart';
+import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
@@ -340,8 +341,8 @@ class TagsPage extends StatelessWidget {
                                         tooltip: '管理标签',
                                         visualDensity: VisualDensity.compact,
                                         icon: Icon(
-                                          Icons.more_horiz,
-                                          size: AppIcon.nav,
+                                          Icons.more_horiz_rounded,
+                                          size: AppIcon.action,
                                           color: colors.tertiary,
                                         ),
                                       ),
@@ -366,17 +367,7 @@ class TagsPage extends StatelessWidget {
       height: AppSize.navBar,
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: AppSize.navBar,
-            child: InkWell(
-              onTap: () => Navigator.of(context).maybePop(),
-              child: Icon(
-                Icons.arrow_back_ios_new,
-                size: AppIcon.nav,
-                color: colors.secondary,
-              ),
-            ),
-          ),
+          const AppBackButton(),
           Text(
             '标签管理',
             style: AppText.sheetTitle.copyWith(color: colors.text),

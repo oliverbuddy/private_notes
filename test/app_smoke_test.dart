@@ -1,17 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
-import 'package:xiaoji/editor/editor_page.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
-import 'package:xiaoji/editor/markdown_toolbar.dart';
-import 'package:xiaoji/editor/markdown_view.dart';
-import 'package:xiaoji/editor/markdown_controller.dart';
-import 'package:xiaoji/editor/widgets/image_block_view.dart';
 import 'package:xiaoji/home/home_page.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
@@ -29,82 +22,6 @@ Future<void> _pumpFrames(WidgetTester tester, {int frames = 6}) async {
 }
 
 void main() {
-  group('MarkdownEditingController 只改样式不改文本', () {
-    const samples = <String>[
-      '# 标题一级\n## 标题二级\n###### 标题六级',
-      '普通一段 **粗体** 与 *斜体* 和 `行内码`',
-      '- [ ] 待办\n- [x] 已完成\n- 无序\n1. 有序',
-      '> 引用一段\n\n---\n\n正文',
-      '```dart\nvoid main() {}\n```',
-      '看这里 [链接](https://example.com) 和 #标签 ~~删除线~~',
-      '![](assets/x/1.jpg)\n[a.pdf](assets/x/a.pdf)',
-      '',
-      '结尾没有换行',
-      '结尾有换行\n',
-      '没有闭合的 **粗体 和 *斜体 和 `code',
-    ];
-
-    testWidgets('拼出来的 span 文本与原始 markdown 完全一致', (WidgetTester tester) async {
-      late BuildContext captured;
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: Builder(
-            builder: (BuildContext context) {
-              captured = context;
-              return const SizedBox.shrink();
-            },
-          ),
-        ),
-      );
-
-      for (final sample in samples) {
-        final controller = MarkdownEditingController(text: sample);
-        final span = controller.buildTextSpan(
-          context: captured,
-          style: const TextStyle(fontSize: 15),
-          withComposing: false,
-        );
-        expect(
-          span.toPlainText(),
-          sample,
-          reason: '样本「$sample」的渲染文本与原文不一致，会导致光标错位',
-        );
-        controller.dispose();
-      }
-    });
-
-    testWidgets('组词期间退回默认实现，不破坏输入法', (WidgetTester tester) async {
-      late BuildContext captured;
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: Builder(
-            builder: (BuildContext context) {
-              captured = context;
-              return const SizedBox.shrink();
-            },
-          ),
-        ),
-      );
-
-      final controller = MarkdownEditingController(text: 'zhongwen');
-      controller.value = const TextEditingValue(
-        text: 'zhongwen',
-        selection: TextSelection.collapsed(offset: 8),
-        composing: TextRange(start: 0, end: 8),
-      );
-
-      final span = controller.buildTextSpan(
-        context: captured,
-        style: const TextStyle(fontSize: 15),
-        withComposing: true,
-      );
-      expect(span.toPlainText(), 'zhongwen');
-      controller.dispose();
-    });
-  });
-
   group('界面渲染', () {
     testWidgets('空列表显示空状态，点 FAB 能进编辑页', (WidgetTester tester) async {
       final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
@@ -165,7 +82,7 @@ void main() {
           ),
         );
         // 本用例只验证标签胶囊的 ×；关掉主页一次性备份提示，
-        // 否则它自带的关闭图标会干扰 find.byIcon(Icons.close)。
+        // 否则它自带的关闭图标会干扰 find.byIcon(Icons.close_rounded)。
         await repository.updateSettings(
           repository.settings.copyWith(backupTipShown: true),
         );
@@ -181,20 +98,20 @@ void main() {
 
       // 未筛选：没有筛选条，也没有标题栏胶囊。
       expect(find.text('#想法'), findsOneWidget); // 只有笔记卡片上的标签
-      expect(find.byIcon(Icons.close), findsNothing);
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
 
       // 激活筛选：标题栏原位出现胶囊（卡片标签 + 标题栏胶囊各一个）。
       repository.setActiveTag('想法');
       await _pumpFrames(tester);
       expect(find.text('#想法'), findsNWidgets(2));
-      expect(find.byIcon(Icons.close), findsOneWidget);
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
 
       // 点胶囊上的 × 直接清除筛选。
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byIcon(Icons.close_rounded));
       await _pumpFrames(tester);
       expect(repository.activeTag, isNull);
       expect(find.text('#想法'), findsOneWidget);
-      expect(find.byIcon(Icons.close), findsNothing);
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
     });
 
     testWidgets('主页显示摘要、标签与置顶标记', (WidgetTester tester) async {
@@ -253,352 +170,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('#想法'), findsOneWidget);
-      expect(find.byIcon(Icons.push_pin), findsOneWidget);
+      expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
     });
 
-    testWidgets('编辑态键盘未弹出时工具栏滑出屏幕且不占布局', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-        await repository.load();
-        await repository.upsert(
-          Note(
-            id: 'tb1',
-            created: DateTime(2026, 10, 31, 9, 12),
-            updated: DateTime(2026, 10, 31, 9, 20),
-            body: '工具栏占位',
-          ),
-        );
-      });
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: repository.notes.first),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-
-      // 进编辑态（widget 测试里没有真实 IME，viewInsets 恒为 0）。
-      await tester.tap(find.byType(MarkdownBlockView).first);
-      // 220ms 出入场动画 + 600ms 延时聚焦回调都要走完。
-      await _pumpFrames(tester, frames: 16);
-
-      // 工具条现在是贴在键盘上沿的浮层（Positioned），键盘没弹时滑出屏幕、
-      // 且不参与布局 —— 正文底部不会因此多出死空间。
-      expect(find.byType(MarkdownToolbar), findsOneWidget);
-      final toolbarSlide = tester.widget<AnimatedSlide>(
-        find.ancestor(
-          of: find.byType(MarkdownToolbar),
-          matching: find.byType(AnimatedSlide),
-        ).first,
-      );
-      expect(toolbarSlide.offset, const Offset(0, 1));
-
-      // 内容区高度必须与「浏览器」时一致：键盘是浮层，不能改变列表布局。
-      final listHeight = tester.getSize(find.byType(ListView).first).height;
-      expect(listHeight, greaterThan(0));
-      expect(
-        tester.getBottomLeft(find.byType(MarkdownToolbar)).dy,
-        greaterThanOrEqualTo(
-          tester.getBottomLeft(find.byType(ListView).first).dy,
-        ),
-        reason: '工具栏应该滑到内容区下沿之外',
-      );
-    });
-
-    testWidgets('编辑页把正文渲染成可编辑文本块', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-      });
-
-      final note = Note(
-        id: '20261031-0912-a1b2',
-        created: DateTime(2026, 10, 31, 9, 12, 33),
-        updated: DateTime(2026, 10, 31, 9, 12, 33),
-        body: '第一段',
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: note),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-
-      // 已有笔记打开是阅读态：没有输入框，正文以渲染结果呈现。
-      expect(find.byType(TextField), findsNothing);
-      await tester.tap(find.byType(MarkdownBlockView).first);
-      await _pumpFrames(tester, frames: 3);
-
-      final field = tester.widget<TextField>(find.byType(TextField).first);
-      expect(field.controller?.text, '第一段');
-
-      await tester.enterText(find.byType(TextField).first, '第一段\n第二段');
-      await _pumpFrames(tester, frames: 2);
-
-      // 单态 + 语雀语义：块中回车 = 拆块。聚焦块是「第二段」，
-      // 「第一段」留在前面的渲染块里。
-      expect(find.byType(TextField), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField)).controller?.text,
-        '第二段',
-      );
-      expect(
-        tester.widget<MarkdownBlockView>(find.byType(MarkdownBlockView).first)
-            .text,
-        '第一段',
-      );
-    });
-
-    testWidgets('中文输入法批量提交换行后，有序列表仍然续号', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-      });
-
-      final note = Note(
-        id: 'ime-ordered',
-        created: DateTime(2026, 10, 31, 9, 12, 33),
-        updated: DateTime(2026, 10, 31, 9, 12, 33),
-        body: '1. hello',
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: note),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-      await tester.tap(find.byType(MarkdownBlockView).first);
-      await _pumpFrames(tester, frames: 6);
-
-      // 模拟中文输入法的批量提交：组词「世界」上屏和换行合并成一次
-      // 更新（文本 +N，而不是 +1）。旧实现只认严格 +1，换行会留在
-      // 块内，列表续号随之失效（用户实测）。
-      final controller =
-          tester.widget<TextField>(find.byType(TextField).first).controller!;
-      controller.value = const TextEditingValue(
-        text: '1. hello世界\n',
-        selection: TextSelection.collapsed(offset: 11),
-      );
-      await _pumpFrames(tester, frames: 4);
-
-      // 单态：同一时刻只有聚焦块是 TextField。回车后新块「2. 」接管聚焦，
-      // 旧块转回渲染态。
-      expect(find.byType(TextField), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField)).controller?.text,
-        '2. ',
-      );
-      final rendered =
-          tester.widget<MarkdownBlockView>(find.byType(MarkdownBlockView).first);
-      expect(rendered.text, '1. hello世界');
-    });
-
-    testWidgets('阅读态点击正文，光标落在点击位置附近而不是块尾', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-      });
-
-      const body = '这是一段足够长的正文内容，用来验证点击定位光标的功能。';
-      final note = Note(
-        id: 'tap-caret',
-        created: DateTime(2026, 10, 31, 9, 12, 33),
-        updated: DateTime(2026, 10, 31, 9, 12, 33),
-        body: body,
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: note),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-
-      // 点文本中段：取正文块里 RenderParagraph 的几何中心
-      // （纯文本块的中心就是文字中点）。注意第一个 RichText 是顶栏
-      // 时间的，必须取 MarkdownBlockView 内部的。
-      final paragraph = tester.renderObject<RenderParagraph>(
-        find
-            .descendant(
-              of: find.byType(MarkdownBlockView),
-              matching: find.byType(RichText),
-            )
-            .first,
-      );
-      final mid = paragraph.localToGlobal(
-        Offset(paragraph.size.width / 2, paragraph.size.height / 2),
-      );
-      await tester.tapAt(mid);
-      await _pumpFrames(tester, frames: 6);
-
-      expect(find.byType(TextField), findsOneWidget);
-      final controller =
-          tester.widget<TextField>(find.byType(TextField).first).controller!;
-      // 光标应该在点击处附近（中段），而不是块尾（旧实现落末尾）。
-      expect(controller.selection.baseOffset, lessThan(body.length));
-      expect(controller.selection.baseOffset, greaterThan(0));
-    });
-
-    testWidgets('阅读态点击待办勾选框直接翻转，不进编辑态', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-      });
-
-      final note = Note(
-        id: 'read-todo',
-        created: DateTime(2026, 10, 31, 9, 12, 33),
-        updated: DateTime(2026, 10, 31, 9, 12, 33),
-        body: '- [ ] 买牛奶\n- [x] 已完成',
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: note),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-
-      // 阅读态：待办渲染成真 checkbox 图标（一行一个：1 空 + 1 勾）。
-      expect(find.byType(TextField), findsNothing);
-      expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
-      expect(find.byIcon(Icons.check_box), findsOneWidget);
-
-      // 点未勾选的勾选框：原地翻转，不进编辑态。
-      await tester.tap(find.byIcon(Icons.check_box_outline_blank).first);
-      await _pumpFrames(tester, frames: 4);
-      expect(find.byType(TextField), findsNothing);
-      expect(find.byIcon(Icons.check_box), findsNWidgets(2));
-      expect(find.byIcon(Icons.check_box_outline_blank), findsNothing);
-
-      // 再点「买牛奶」的勾选框翻回去。
-      await tester.tap(find.byIcon(Icons.check_box).first);
-      await _pumpFrames(tester, frames: 4);
-      expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
-      expect(find.byIcon(Icons.check_box), findsOneWidget);
-    });
-
-    testWidgets('粘贴 markdown 自动识别：图片行独立成块', (WidgetTester tester) async {
-      final tempDir = Directory.systemTemp.createTempSync('xiaoji_ui_');
-      addTearDown(() {
-        if (tempDir.existsSync()) {
-          tempDir.deleteSync(recursive: true);
-        }
-      });
-
-      // mock 系统剪贴板（测试环境没有平台通道实现）。
-      // hasStrings 必须返回 true，否则系统长按菜单不显示「粘贴」项。
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        (MethodCall call) async {
-          if (call.method == 'Clipboard.getData') {
-            return const <String, dynamic>{
-              'text': '来自网页的一段文字\n![](assets/n1/1.jpg)\n',
-            };
-          }
-          if (call.method == 'Clipboard.hasStrings') {
-            return const <String, dynamic>{'value': true};
-          }
-          return null;
-        },
-      );
-      addTearDown(() {
-        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          SystemChannels.platform,
-          null,
-        );
-      });
-
-      late NoteRepository repository;
-      await tester.runAsync(() async {
-        final store =
-            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
-        repository = NoteRepository(store);
-      });
-
-      final note = Note(
-        id: 'paste-md',
-        created: DateTime(2026, 10, 31, 9, 12, 33),
-        updated: DateTime(2026, 10, 31, 9, 12, 33),
-        body: '原有内容',
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: EditorPage(repository: repository, note: note),
-        ),
-      );
-      await _pumpFrames(tester, frames: 10);
-      await tester.tap(find.byType(MarkdownBlockView).first);
-      await _pumpFrames(tester, frames: 6);
-
-      // 长按正文：选中一个词并弹出**系统样式**菜单（默认英文本地化），
-      // 点其中的 Paste —— 它已被接管为 markdown 识别粘贴。
-      await tester.longPress(find.byType(TextField));
-      await _pumpFrames(tester, frames: 4);
-      await tester.tap(find.text('Paste'));
-      await _pumpFrames(tester, frames: 6);
-
-      // 图片行被识别成独立图片块；文字并入正文块。
-      expect(find.byType(ImageBlockView), findsOneWidget);
-      final focused =
-          tester.widget<TextField>(find.byType(TextField)).controller?.text;
-      expect(focused, contains('来自网页的一段文字'));
-    });
   });
 
   group('存储与仓库（真实文件 I/O）', () {

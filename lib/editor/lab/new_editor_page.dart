@@ -17,6 +17,7 @@ import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
 import '../../ui/adaptive_image.dart';
+import '../../ui/app_icon_button.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
@@ -35,13 +36,13 @@ import 'editor_request_handlers.dart';
 import 'image_display_size.dart';
 import 'link_tap_handler.dart';
 import 'list_style.dart';
+import 'markdown_paste.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
 
 /// M1：跑在 super_editor 内核上的并行编辑页。
 ///
-/// 与旧编辑器（editor_page.dart）并存，不共用任何编辑逻辑。旧编辑器
-/// 17 轮迭代沉淀的坑在这里按条规避：
+/// 编辑页的踩坑记录（来自 17 轮迭代）：
 ///  - 键盘避让：Scaffold resizeToAvoidBottomInset + 常量底部 padding
 ///    （旧版 180↔68 跳变导致布局期 clamp、内容被顶动——见 2026-11-01 日志）。
 ///  - 自动保存：只在真实变更时触发（super_editor 的 EditListener 本身就
@@ -80,7 +81,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   late final KernelCommands _commands;
 
   /// 工具条激活态。用 ValueNotifier 单独驱动工具条，选区每次移动只重建
-  /// MarkdownToolbar 那一小块，不重建整个页面（对齐旧编辑器的做法）。
+  /// MarkdownToolbar 那一小块，不重建整个页面（对齐早期版本的做法）。
   final ValueNotifier<Set<MarkdownCommand>> _activeCommands =
       ValueNotifier<Set<MarkdownCommand>>(const <MarkdownCommand>{});
 
@@ -132,6 +133,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       focalPoint: focalPoint,
       editorOps: _ops,
       controls: _androidControls,
+      onPaste: _pasteFromClipboard,
     ),
   );
 
@@ -1324,7 +1326,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 另外 `TextInput.hide()` 在当前 Flutter 版本已不可直接调用，
   /// 走 SystemChannels 等价收起。
   // ---------------------------------------------------------------------------
-  // 右上角「⋯」笔记操作菜单（旧编辑器同款：置顶/复制文本/编辑标签/删除）
+  // 右上角「⋯」笔记操作菜单（早期版本同款：置顶/复制文本/编辑标签/删除）
   // ---------------------------------------------------------------------------
 
   Future<void> _showEditorMenu() async {
@@ -1355,12 +1357,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           label: _currentNote.locked ? '取消锁定' : '锁定笔记',
           icon: _currentNote.locked
               ? Icons.lock_open_outlined
-              : Icons.lock_outline,
+              : Icons.lock_outline_rounded,
         ),
         const SheetAction<String>(
           value: 'delete',
           label: '删除',
-          icon: Icons.delete_outline,
+          icon: Icons.delete_outline_rounded,
           destructive: true,
         ),
       ],
@@ -1532,6 +1534,26 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
+  Future<bool> _pasteFromClipboard() async {
+    try {
+      final bool handled = await MarkdownPaster(
+        editor: _editor,
+        document: _document,
+        composer: _composer,
+        ops: _ops,
+      ).paste();
+      if (!handled) {
+        _ops.paste();
+      }
+      return handled;
+    } catch (error, stack) {
+      debugPrint('智能粘贴异常，回退默认粘贴: $error\n$stack');
+      _ops.paste();
+      return false;
+    }
+  }
+
   /// 工具栏「标签」入口：弹层关闭后把焦点和键盘交还编辑器，
   /// 不让用户点完标签还得再点一次正文。
   Future<void> _editTagsFromToolbar() async {
@@ -1583,7 +1605,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         const SheetAction(
           value: _ImageAction.delete,
           label: '删除',
-          icon: Icons.delete_outline,
+          icon: Icons.delete_outline_rounded,
           destructive: true,
         ),
       ],
@@ -2092,7 +2114,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       height: AppSize.navBar,
       child: Stack(
         children: <Widget>[
-          // 顶栏按旧编辑器逻辑：居中显示更新时间（编辑后实时刷新）。
+          // 顶栏按早期版本逻辑：居中显示更新时间（编辑后实时刷新）。
           Center(
             child: Text(
               formatEditorTime(_updated),
@@ -2103,16 +2125,8 @@ class _NewEditorPageState extends State<NewEditorPage>
             left: 0,
             top: 0,
             bottom: 0,
-            child: InkWell(
+            child: AppBackButton(
               onTap: () => Navigator.of(context).maybePop(),
-              child: SizedBox(
-                width: AppSize.navBar,
-                child: Icon(
-                  Icons.arrow_back_ios_new,
-                  size: AppIcon.nav,
-                  color: colors.secondary,
-                ),
-              ),
             ),
           ),
           Positioned(
@@ -2124,16 +2138,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               children: <Widget>[
                 // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
                 // 高频动作），顶栏只留笔记级操作「⋯」。
-                SizedBox(
-                  width: 40,
-                  child: InkWell(
-                    onTap: _showEditorMenu,
-                    child: Icon(
-                      Icons.more_horiz,
-                      size: AppIcon.action,
-                      color: colors.text,
-                    ),
-                  ),
+                AppIconButton(
+                  icon: Icons.more_horiz_rounded,
+                  onTap: _showEditorMenu,
+                  tooltip: '更多',
                 ),
               ],
             ),
@@ -2451,7 +2459,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  /// 工具条：复用旧编辑器验证过的 [MarkdownToolbar]（布局逻辑零改动），
+  /// 工具条：复用早期版本验证过的 [MarkdownToolbar]（布局逻辑零改动），
   /// 命令经 [KernelCommands] 映射到 super_editor 内核。
   ///
   /// 只在编辑态（有光标/选区）显示：浏览态露出来时按钮没有作用对象，
@@ -2510,8 +2518,6 @@ class _NewEditorPageState extends State<NewEditorPage>
                           onCommand: _runToolbarCommand,
                           onAttachAction: _handleAttachAction,
                           onHideKeyboard: _hideKeyboard,
-                          // 选图/选文件会打开系统弹层，按下时冻结选区。
-                          onPanelOpening: _onPanelOpening,
                           // 受控模式：面板由页面渲染在工具条下方（原键盘
                           // 区域），工具条本身不移动、不做正文预留。
                           panel: _panel,

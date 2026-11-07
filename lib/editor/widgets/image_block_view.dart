@@ -586,9 +586,9 @@ class _ImageViewerPageState extends State<ImageViewerPage>
                                         onPressed: () =>
                                             Navigator.of(context).maybePop(),
                                         icon: const Icon(
-                                          Icons.close,
+                                          Icons.close_rounded,
                                           color: Colors.white,
-                                          size: 22,
+                                          size: AppIcon.action,
                                         ),
                                       ),
                                       const SizedBox(width: 4),

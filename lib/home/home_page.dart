@@ -12,6 +12,7 @@ import '../models/note_settings.dart';
 import '../settings/settings_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
+import '../ui/app_icon_button.dart';
 import '../ui/content_frame.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
@@ -229,12 +230,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           const SheetAction<String>(
             value: 'lock',
             label: '锁定笔记',
-            icon: Icons.lock_outline,
+            icon: Icons.lock_outline_rounded,
           ),
         const SheetAction<String>(
           value: 'delete',
           label: '删除',
-          icon: Icons.delete_outline,
+          icon: Icons.delete_outline_rounded,
           destructive: true,
         ),
       ],
@@ -561,13 +562,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           // 一眼可见，也不再用一整行筛选条占掉列表高度。
           if (activeTag == null)
             _IconAction(
-              icon: Icons.label_outline,
+              icon: Icons.label_outline_rounded,
               onTap: _showTagFilterSheet,
             )
           else
             _buildTagPill(colors, activeTag),
           _IconAction(
-            icon: Icons.search,
+            icon: Icons.search_rounded,
             onTap: _enterSearch,
           ),
           _IconAction(icon: Icons.settings_outlined, onTap: _openSettings),
@@ -596,7 +597,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.label, size: 14, color: colors.accent),
+            Icon(Icons.label_rounded,
+                size: AppIcon.chip, color: colors.accent),
             const SizedBox(width: 4),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 96),
@@ -624,7 +626,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 height: 28,
                 child: Align(
                   alignment: Alignment.centerRight,
-                  child: Icon(Icons.close, size: 14, color: colors.accent),
+                  child: Icon(Icons.close_rounded,
+                      size: AppIcon.chip, color: colors.accent),
                 ),
               ),
             ),
@@ -655,7 +658,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               child: Row(
                 children: <Widget>[
-                  Icon(Icons.search, size: AppIcon.action, color: colors.tertiary),
+                  Icon(Icons.search_rounded,
+                      size: AppIcon.action, color: colors.tertiary),
                   const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
@@ -682,7 +686,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         _repo.setQuery('');
                         setState(() {});
                       },
-                      child: Icon(Icons.close,
+                      child: Icon(Icons.close_rounded,
                           size: AppIcon.chevron, color: colors.tertiary),
                     ),
                 ],
@@ -752,7 +756,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     child: SizedBox(
                       width: 36,
                       height: 36,
-                      child: Icon(Icons.close,
+                      child: Icon(Icons.close_rounded,
                           size: AppIcon.inline, color: colors.tertiary),
                     ),
                   ),
@@ -938,16 +942,11 @@ class _IconAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return AppPressable(
+    // 44dp 热区（鸿蒙最小可点 40）：三个入口并排也不挤。
+    return AppIconButton(
+      icon: icon,
       onTap: onTap,
-      pressedScale: 0.9,
-      child: SizedBox(
-        // 40dp 是鸿蒙最小可点热区；图标 24，三个入口并排也不挤。
-        width: 44,
-        height: 44,
-        child: Icon(icon, size: AppIcon.action, color: colors.text),
-      ),
+      hitSize: 44,
     );
   }
 }

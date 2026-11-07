@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/note_repository.dart';
 import '../data/note_store.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/pressable.dart';
@@ -165,17 +166,7 @@ class _TrashPageState extends State<TrashPage> {
       height: AppSize.navBar,
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: AppSize.navBar,
-            child: InkWell(
-              onTap: () => Navigator.of(context).maybePop(),
-              child: Icon(
-                Icons.arrow_back_ios_new,
-                size: AppIcon.nav,
-                color: colors.secondary,
-              ),
-            ),
-          ),
+          const AppBackButton(),
           Text(
             '回收站',
             style: AppText.sheetTitle.copyWith(color: colors.text),
@@ -200,7 +191,7 @@ class _TrashPageState extends State<TrashPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(Icons.delete_outline,
+          Icon(Icons.delete_outline_rounded,
               size: AppIcon.hero, color: colors.tertiary),
           const SizedBox(height: 12),
           Text(
@@ -253,7 +244,7 @@ class _TrashTile extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       if (entry.locked) ...<Widget>[
-                        Icon(Icons.lock_outline,
+                        Icon(Icons.lock_outline_rounded,
                             size: AppIcon.badge, color: colors.tertiary),
                         const SizedBox(width: 6),
                       ],

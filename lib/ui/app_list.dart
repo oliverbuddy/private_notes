@@ -197,7 +197,7 @@ class AppListRow extends StatelessWidget {
           if (chevron) ...<Widget>[
             const SizedBox(width: AppSpace.sm),
             Icon(
-              Icons.chevron_right,
+              Icons.chevron_right_rounded,
               size: AppIcon.chevron,
               color: colors.tertiary,
             ),

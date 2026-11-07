@@ -106,7 +106,7 @@ class NoteTileComfortable extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Icon(Icons.lock_outline,
+                        Icon(Icons.lock_outline_rounded,
                             size: AppIcon.badge, color: colors.tertiary),
                         const SizedBox(width: 6),
                         Text(
@@ -271,7 +271,7 @@ class _SummaryMarkdown extends StatelessWidget {
         children: <Widget>[
           Icon(
             Icons.insert_drive_file_outlined,
-            size: 16,
+            size: AppIcon.inline,
             color: colors.accent,
           ),
           const SizedBox(width: 6),
@@ -428,7 +428,7 @@ class _Thumbnail extends StatelessWidget {
           color: colors.surface2,
           alignment: Alignment.center,
           child: Icon(Icons.image_not_supported_outlined,
-              size: 14, color: colors.tertiary),
+              size: AppIcon.chip, color: colors.tertiary),
         ),
       ),
     );
@@ -485,7 +485,8 @@ class _MetaRow extends StatelessWidget {
         if (note.pinned)
           Padding(
             padding: const EdgeInsets.only(right: 6),
-            child: Icon(Icons.push_pin, size: 12, color: colors.accent),
+            child: Icon(Icons.push_pin_rounded,
+                size: AppIcon.badge, color: colors.accent),
           ),
         Text(
           formatListTime(note.updated),

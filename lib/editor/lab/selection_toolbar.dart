@@ -21,12 +21,16 @@ class XiaojiSelectionToolbar extends StatefulWidget {
     required this.focalPoint,
     required this.editorOps,
     required this.controls,
+    this.onPaste,
   });
 
   final Key floatingToolbarKey;
   final LeaderLink focalPoint;
   final CommonEditorOperations editorOps;
   final SuperEditorAndroidControlsController controls;
+
+  /// 智能粘贴（Markdown / HTML）。为空时退回内核默认粘贴。
+  final Future<bool> Function()? onPaste;
 
   @override
   State<XiaojiSelectionToolbar> createState() =>
@@ -104,8 +108,17 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
                 () => run(widget.editorOps.copy)),
             _button(localizations.cutButtonLabel, foreground,
                 () => run(widget.editorOps.cut)),
-            _button(localizations.pasteButtonLabel, foreground,
-                () => run(widget.editorOps.paste)),
+            _button(localizations.pasteButtonLabel, foreground, () {
+              final Future<bool> Function()? handler = widget.onPaste;
+              if (handler == null) {
+                run(widget.editorOps.paste);
+                return;
+              }
+              // 先收起工具条再做异步读取：剪贴板读取会跨帧，工具条留在
+              // 屏幕上会挡住粘贴结果。
+              widget.controls.hideToolbar();
+              handler();
+            }),
             _button(localizations.selectAllButtonLabel, foreground,
                 () => run(widget.editorOps.selectAll)),
           ],

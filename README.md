@@ -25,9 +25,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.5.0 |
+| 版本 | 1.6.0 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 329 / 329 通过 |
+| 测试 | `flutter test` 301 / 301 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | `build/app/outputs/flutter-apk/app-release.apk`，约 41MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
@@ -113,22 +113,12 @@ XIAOJI-LOCK-1:9dF3...
 
 ## 编辑器架构
 
-Flutter 的 `TextField` 没有原生附件机制（原生 iOS 有 `NSTextAttachment`），图片无法塞进文本框，
-所以编辑器是**块结构**：
+编辑器基于 `super_editor` 的**块模型**：段落、标题、无序/有序列表、待办、引用、代码块、
+图片与附件各自是独立节点，落盘时统一序列化成小记的 Markdown 方言。
 
-| 块类型 | 内容 |
-|---|---|
-| `TextBlock` | 连续文本行，内部仍是原始 markdown，由自定义 `TextEditingController` 渲染样式 |
-| `ImageBlock` | 独占一行的 `![alt](相对路径)` |
-| `FileBlock` | 独占一行的 `[文件名](相对路径)`，渲染成文件卡片 |
-
-**只改样式，不改文本** —— 输入框内容永远是原始 markdown，`##`、`**`、`- [ ]` 这些符号
-用淡色渲染（浅色 `#D3D1C7` / 深色 `#4F4D47`），被标记的内容直接呈现粗体、放大字号、等宽。
-落盘所见即所得，同时手机上不用分屏预览就有排版感。
-
-块解析与序列化保证**往返无损**（`serialize(parse(md)) == md`，末尾换行归一化除外）。
-图片/文件块会保留行尾空白与 `\r`（`trailing` 字段），所以被 Windows 编辑器改过的 `.md` 也能正常识别。
-缩进的图片语法刻意**不**识别成图片块 —— 那通常是列表/引用里的文本，抽成 widget 会把句子切碎。
+- `xiaoji_markdown.dart` 负责解析 / 序列化，保证**往返无损**（图片行、任务行、附件行都有专门处理）。
+- 输入仍然是所见即所得：标题、加粗、列表符号在编辑时直接按最终效果呈现。
+- 图片/文件是真正的块节点，不会被塞进文本框，因此不会出现「光标进不了附件」这类问题。
 
 ### 单态编辑（对齐语雀）
 
@@ -136,16 +126,13 @@ Flutter 的 `TextField` 没有原生附件机制（原生 iOS 有 `NSTextAttachm
 
 | | 表现 |
 |---|---|
-| 未聚焦的块 | 按最终效果渲染：记号剔除、待办可直接点选、图片可预览 |
-| 聚焦的块 | 同一 entry 换成 `TextField`，markdown 源码 + 记号淡显（其余块保持渲染） |
-| 进编辑 | 点哪块编哪块，光标落在点击的位置 |
+| 未聚焦 | 按最终效果渲染：待办可直接点选、图片可预览 |
+| 聚焦 | 点哪块编哪块，光标落在点击的位置 |
 | 退出编辑 | 收起键盘即回到全渲染浏览；自动保存一直在跑，没有要「提交」的状态 |
 
-两套渲染共用同一份语法规则（`markdown_view.dart` 与 `markdown_controller.dart` 要一起改）：
-编辑态不能真删记号，因为字符一旦消失，光标偏移就对不上文本了；未聚焦时可以随便删。
-
-**主页摘要走的是同一套渲染**（`excerptSource` + `markdownSpans`），所以列表里看到的标题、
-加粗、有序列表已经和点进去后一样 —— 只是不吃空行、最多 6 行。搜索时退回纯文本，因为要按关键字高亮。
+**主页摘要**由 `markdown_view.dart` 生成同一套样式的 Span（`excerptSource` + `markdownSpans`），
+所以列表里看到的标题、加粗、有序列表和点进去后一致 —— 只是不吃空行、最多 6 行。
+搜索时退回纯文本，因为要按关键字高亮。
 
 ### 回车规则
 
@@ -236,13 +223,9 @@ Flutter 的 `TextField` 没有原生附件机制（原生 iOS 有 `NSTextAttachm
 
 ### 输入即转换
 
-语雀的 Markdown 快捷输入（`# ` / `- ` / `1. ` / `> `）我们本来就按 markdown 直接渲染，
-真正需要转换的只有等价写法：`[] ` → `- [ ] `、`[x] ` → `- [x] `、`* `/`+ ` → `- `。
-这些走 `TextInputFormatter`（`markdown_shortcut_formatter.dart`），而不是「监听文本变化后改写」——
-组词期间改写文本会被输入法的下一次提交覆盖回去（真机上 `[] ` 只会变成 `- []`）。
-
-同理，**输入法组词期间不再退回朴素样式**：以前整段交回默认实现，英文单词打到一半时
-整个标题会突然变回正文字号；现在自己给组词区加下划线，样式照常生效。
+Markdown 快捷输入（`# ` / `- ` / `1. ` / `> `）由编辑内核直接识别并渲染；
+等价写法在落盘时由 `xiaoji_markdown.dart` 统一归一化（`*`/`+` → `-`、`[] ` → `- [ ] `）。
+不在监听文本变化后改写内容 —— 组词期间改写会被输入法的下一次提交覆盖回去。
 
 ### 桌面图标快捷方式
 
@@ -328,10 +311,10 @@ lib/data/note_store.dart                      文件读写、附件、回收站�
 lib/data/note_repository.dart                 ChangeNotifier：列表 / 搜索 / 筛选 / 排序 / 后台维护
 lib/data/search_index.dart                    SQLite FTS5 索引：中文单字 + 二字切词、对账、增量更新
 lib/editor/block.dart                         块模型 + parse / serialize + 列表续号 / 编号重排
-lib/editor/lab/new_editor_page.dart           新内核编辑页（super_editor，当前使用）
+lib/editor/lab/new_editor_page.dart           编辑页（super_editor 内核）
 lib/editor/markdown_toolbar.dart              工具条（底栏块级插入 + Aa 文字样式面板）
 lib/editor/widgets/image_block_view.dart      图片块 + 全屏查看器（微信式尺寸规则）
-lib/editor/widgets/file_block_view.dart       附件卡片
+lib/editor/lab/attachment_component.dart      附件卡片 / 文件操作弹层
 lib/home/home_page.dart                       标题栏 / 搜索态 / 标签筛选 / FAB / 删除撤销
 lib/home/note_tile_comfortable.dart           舒适密度（锁定笔记只显示「已锁定」）
 lib/home/note_tile_compact.dart               紧凑密度

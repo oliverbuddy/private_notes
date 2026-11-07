@@ -433,7 +433,7 @@ abstract final class AppSize {
   static const double actionRow = 56;
 }
 
-/// 图标尺寸刻度（HarmonyOS 系统图标 24vp，行内 16vp）。
+/// 图标尺寸刻度（HarmonyOS 系统图标 24vp，活动区 22vp；行内 16vp）。
 abstract final class AppIcon {
   /// 返回箭头（系统导航图标 24）。
   static const double nav = 24;
@@ -444,8 +444,14 @@ abstract final class AppIcon {
   /// 顶部栏动作图标、弹层行动图标。
   static const double action = 24;
 
+  /// 次要动作 / 工具条图标（20）。
+  static const double compact = 20;
+
   /// 输入框、提示卡这类行内图标。
   static const double inline = 16;
+
+  /// 标签 chip 里的小图标（14）。
+  static const double chip = 14;
 
   /// 置顶、锁定这类状态小标记。
   static const double badge = 12;
@@ -488,22 +494,15 @@ abstract final class AppShadow {
   ];
 }
 
-/// 动效刻度（HarmonyOS 的时长与缓动）。
+/// 动效刻度。
 ///
-/// 官方推荐 300ms 的页面转场与弹性曲线；按压反馈要更快，取 fast。
+/// 弹层用 300ms 的标准进出；按压反馈要更快，取 120ms。
 abstract final class AppMotion {
   static const Duration fast = Duration(milliseconds: 120);
   static const Duration normal = Duration(milliseconds: 300);
-  static const Duration slow = Duration(milliseconds: 400);
-
-  /// HarmonyOS 标准曲线 cubic-bezier(0.2, 0, 0.2, 1)。
-  static const Curve standard = Cubic(0.2, 0, 0.2, 1);
 
   static const Curve decelerate = Cubic(0.0, 0, 0.2, 1);
   static const Curve accelerate = Cubic(0.4, 0, 1, 1);
-
-  /// 弹性曲线：用于弹层出现、按钮回弹这类「有生命力」的小动效。
-  static const Curve spring = Cubic(0.34, 1.56, 0.64, 1);
 }
 
 /// 响应式断点：手机 / 平板 / 桌面。
@@ -554,15 +553,15 @@ abstract final class AppTheme {
       canvasColor: c.page,
       fontFamily: null,
       visualDensity: VisualDensity.standard,
-      // 全站统一鸿蒙转场：右侧滑入 20% + 淡入，300ms 标准曲线。
+      // 全站统一微信式转场：整屏推入 + 旧页 30% 视差，纯位移。
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: <TargetPlatform, PageTransitionsBuilder>{
-          TargetPlatform.android: HarmonyPageTransitionsBuilder(),
-          TargetPlatform.iOS: HarmonyPageTransitionsBuilder(),
-          TargetPlatform.macOS: HarmonyPageTransitionsBuilder(),
-          TargetPlatform.windows: HarmonyPageTransitionsBuilder(),
-          TargetPlatform.linux: HarmonyPageTransitionsBuilder(),
-          TargetPlatform.fuchsia: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.android: WeChatPageTransitionsBuilder(),
+          TargetPlatform.iOS: WeChatPageTransitionsBuilder(),
+          TargetPlatform.macOS: WeChatPageTransitionsBuilder(),
+          TargetPlatform.windows: WeChatPageTransitionsBuilder(),
+          TargetPlatform.linux: WeChatPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: WeChatPageTransitionsBuilder(),
         },
       ),
     );
@@ -664,13 +663,16 @@ abstract final class AppTheme {
   }
 }
 
-/// HarmonyOS 页面转场。
+/// 微信 / iOS 式页面转场：新页整屏从右侧推入，旧页向左让出 30%。
 ///
-/// 新页从右侧 20% 处滑入并淡入（300ms 标准曲线），旧页轻微左移淡出，
-/// 形成前后层次，而不是整页硬推。挂在 ThemeData 上一次，全站生效，
-/// 后续新增页面不用各自写路由动画。
-class HarmonyPageTransitionsBuilder extends PageTransitionsBuilder {
-  const HarmonyPageTransitionsBuilder();
+/// 纯位移合成，没有透明度、缩放或模糊 —— 这是微信、微博等国内主流 App
+/// 最常用的转场，低端机上最稳。进入用接近 iOS 的 `cubic-bezier(0.32,
+/// 0.72, 0, 1)`，返回用加速曲线，退出更利落。
+class WeChatPageTransitionsBuilder extends PageTransitionsBuilder {
+  const WeChatPageTransitionsBuilder();
+
+  /// 旧页向左让出的比例（视差）。
+  static const double _parallax = 0.3;
 
   @override
   Widget buildTransitions<T>(
@@ -682,18 +684,29 @@ class HarmonyPageTransitionsBuilder extends PageTransitionsBuilder {
   ) {
     final Animation<double> enter = CurvedAnimation(
       parent: animation,
-      curve: AppMotion.standard,
-      reverseCurve: AppMotion.accelerate,
+      curve: const Cubic(0.32, 0.72, 0, 1),
+      reverseCurve: Curves.easeInCubic,
     );
-    // 纯滑动，不加整页淡入：整页 FadeTransition 会让每一帧多一层全屏
-    // 透明合成，低端机/模拟器上肉眼就是「卡一下」。滑动距离收到 12%，
-    // 既有方向感，又不会把整页推出屏幕。
+    final Animation<double> exit = CurvedAnimation(
+      parent: secondaryAnimation,
+      curve: const Cubic(0.32, 0.72, 0, 1),
+      reverseCurve: Curves.easeInCubic,
+    );
+
     return SlideTransition(
+      // 新页：屏幕右侧外部 → 原位。
       position: Tween<Offset>(
-        begin: const Offset(0.12, 0),
+        begin: const Offset(1, 0),
         end: Offset.zero,
       ).animate(enter),
-      child: child,
+      child: SlideTransition(
+        // 旧页：原位 → 左移 30%，形成前后层次。
+        position: Tween<Offset>(
+          begin: Offset.zero,
+          end: const Offset(-_parallax, 0),
+        ).animate(exit),
+        child: child,
+      ),
     );
   }
 }

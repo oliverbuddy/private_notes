@@ -1,6 +1,8 @@
 package com.xiaoji.xiaoji
 
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -8,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -121,6 +124,31 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // 剪贴板通道：Flutter 的 Clipboard 只能取 text/plain，网页复制通常
+        // 还带 text/html。这里把 HTML 一并交给 Dart 侧转成 Markdown。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CLIPBOARD_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getHtml" -> result.success(readClipboardHtml())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /** 读取剪贴板第一项的 HTML；没有 HTML 风味时返回 null。 */
+    private fun readClipboardHtml(): String? {
+        return try {
+            val manager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = manager.primaryClip
+            if (clip == null || clip.itemCount == 0) {
+                null
+            } else {
+                clip.getItemAt(0).htmlText?.takeIf { it.isNotBlank() }
+            }
+        } catch (error: Exception) {
+            Log.w("XiaojiClipboard", "读取剪贴板 HTML 失败", error)
+            null
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -318,6 +346,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "xiaoji/shortcuts"
         private const val NATIVE_CHANNEL = "xiaoji/native"
+        private const val CLIPBOARD_CHANNEL = "xiaoji/clipboard"
 
         /** 快捷方式 / 桌面小组件带过来的动作 extra。 */
         const val EXTRA_ACTION = "xiaoji.action"

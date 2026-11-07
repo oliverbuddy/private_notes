@@ -296,7 +296,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Icon(Icons.lock_outline,
+                      Icon(Icons.lock_outline_rounded,
                           size: AppIcon.hero, color: colors.secondary),
                       const SizedBox(height: 18),
                       Text(

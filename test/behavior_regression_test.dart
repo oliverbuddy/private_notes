@@ -6,17 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
 import 'package:xiaoji/editor/block.dart';
-import 'package:xiaoji/editor/editor_page.dart';
-import 'package:xiaoji/editor/markdown_view.dart';
 import 'package:xiaoji/editor/widgets/image_block_view.dart';
 import 'package:xiaoji/home/home_page.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/settings/tags_page.dart';
 import 'package:xiaoji/theme/app_theme.dart';
 
-/// 编辑页一轮修复的行为回归：
+/// 核心行为回归：
 /// - 有序列表插入/删除一行后自动重新编号；
-/// - 只点开、不编辑时不能刷新 `updated`；
 /// - 删除标签只摘标签，不动正文与修改时间。
 Future<void> _pumpFrames(WidgetTester tester, {int frames = 6}) async {
   for (var i = 0; i < frames; i++) {
@@ -69,103 +66,6 @@ void main() {
       expect(cursor.apply('普通段落'), isNull);
       expect(cursor.apply('9. 九'), isNull);
     });
-  });
-
-  testWidgets('在列表中间回车，后面的编号自动顺延', (WidgetTester tester) async {
-    final root = _tempRoot('xiaoji_renumber_');
-    late NoteRepository repository;
-    await tester.runAsync(() async {
-      repository = NoteRepository(await NoteStore.openAt(root));
-    });
-
-    final note = Note(
-      id: 'renumber',
-      created: DateTime(2026, 11, 1, 9, 0),
-      updated: DateTime(2026, 11, 1, 9, 30),
-      body: '1. 一\n2. 二\n3. 三',
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light(),
-        home: EditorPage(repository: repository, note: note),
-      ),
-    );
-    await _pumpFrames(tester, frames: 10);
-
-    // 点正文进编辑。
-    await tester.tap(find.byType(MarkdownBlockView).first);
-    await _pumpFrames(tester, frames: 8);
-
-    // 模拟输入法一次提交「在第二行末尾换行」。
-    final controller =
-        tester.widget<TextField>(find.byType(TextField)).controller!;
-    const String inserted = '1. 一\n2. 二\n\n3. 三';
-    controller.value = const TextEditingValue(
-      text: inserted,
-      selection: TextSelection.collapsed(offset: 7),
-    );
-    await _pumpFrames(tester, frames: 8);
-
-    // 第一块保留前两行，新块是新的空项 + 顺延后的旧第三行。
-    final rendered = tester
-        .widgetList<MarkdownBlockView>(find.byType(MarkdownBlockView))
-        .map((MarkdownBlockView view) => view.text)
-        .toList();
-    expect(rendered, <String>['1. 一\n2. 二']);
-    expect(
-      tester.widget<TextField>(find.byType(TextField)).controller?.text,
-      '3. \n4. 三',
-    );
-  });
-
-  testWidgets('点开笔记不编辑，退出后修改时间不变', (WidgetTester tester) async {
-    final root = _tempRoot('xiaoji_dirty_');
-    late NoteStore store;
-    late NoteRepository repository;
-    final DateTime created = DateTime(2026, 11, 1, 9, 0);
-    final DateTime updated = DateTime(2026, 11, 1, 9, 30);
-
-    await tester.runAsync(() async {
-      store = await NoteStore.openAt(root);
-      repository = NoteRepository(store);
-      await repository.upsert(
-        Note(
-          id: 'dirty',
-          created: created,
-          updated: updated,
-          body: '只是打开看一眼',
-        ),
-      );
-    });
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light(),
-        home: EditorPage(
-          repository: repository,
-          note: repository.notes.first,
-        ),
-      ),
-    );
-    await _pumpFrames(tester, frames: 10);
-
-    // 点一下正文：只移动光标，没有任何输入。
-    await tester.tap(find.byType(MarkdownBlockView).first);
-    // 走完 600ms 防抖窗口 —— 有改动的话这里就会落盘。
-    await _pumpFrames(tester, frames: 20);
-
-    // 退出页面（dispose 会补写一次，但不应刷新 updated）。
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-    });
-
-    late List<Note> reloaded;
-    await tester.runAsync(() async {
-      reloaded = await store.loadNotes();
-    });
-    expect(reloaded.single.updated, updated);
   });
 
   test('删除标签只摘标签，不动正文和修改时间', () async {
@@ -234,7 +134,7 @@ void main() {
     await _pumpFrames(tester, frames: 8);
 
     // 打开标签筛选弹层，点标签即筛选并收起。
-    await tester.tap(find.byIcon(Icons.label_outline));
+    await tester.tap(find.byIcon(Icons.label_outline_rounded));
     await _pumpFrames(tester, frames: 8);
     // 列表卡片上也有一个 #读书 chip，弹层里的那个在树里更靠后。
     expect(find.text('#读书'), findsWidgets);
@@ -273,7 +173,7 @@ void main() {
     expect(find.text('#读书'), findsOneWidget);
 
     // 行尾「…」→ 删除标签 → 二次确认。
-    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded));
     await _pumpFrames(tester, frames: 8);
     await tester.tap(find.text('删除标签'));
     await _pumpFrames(tester, frames: 8);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../theme/app_theme.dart';
+import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
@@ -172,17 +173,7 @@ class _AboutPageState extends State<AboutPage> {
       height: AppSize.navBar,
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: AppSize.navBar,
-            child: InkWell(
-              onTap: () => Navigator.of(context).maybePop(),
-              child: Icon(
-                Icons.arrow_back_ios_new,
-                size: AppIcon.nav,
-                color: colors.secondary,
-              ),
-            ),
-          ),
+          const AppBackButton(),
           Text(
             '关于',
             style: AppText.sheetTitle.copyWith(color: colors.text),

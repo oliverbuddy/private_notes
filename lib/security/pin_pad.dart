@@ -115,7 +115,7 @@ class PinEntry extends StatelessWidget {
                         height: 50,
                         child: Icon(
                           Icons.backspace_outlined,
-                          size: 20,
+                          size: AppIcon.compact,
                           color: colors.secondary,
                         ),
                       ),

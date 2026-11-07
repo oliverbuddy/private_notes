@@ -179,7 +179,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                 const SizedBox(width: 8),
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Icon(Icons.chevron_right, size: AppIcon.chevron, color: colors.tertiary),
+                  child: Icon(Icons.chevron_right_rounded, size: AppIcon.chevron, color: colors.tertiary),
                 ),
               ],
             ),

@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.RemoteViews
 
 /**
@@ -25,15 +27,53 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray,
     ) {
-        val views = RemoteViews(context.packageName, R.layout.widget_new_note)
-        val pending = newNoteIntent(context)
-        // 整块卡片与卡片外的留白都可点。
-        views.setOnClickPendingIntent(R.id.widget_root, pending)
-        views.setOnClickPendingIntent(R.id.widget_card, pending)
-        // 卡片下方的标题直接画在壁纸上，颜色必须跟着壁纸深浅走，
-        // 否则浅色壁纸配白字会「看起来没有标题」（真机上出现过）。
-        views.setTextColor(R.id.widget_title, titleColor(context))
-        appWidgetManager.updateAppWidget(appWidgetIds, views)
+        updateWidgets(context, appWidgetManager, appWidgetIds)
+    }
+
+    /**
+     * 启动器调整/重新布局后重新计算标题是否显示。
+     *
+     * 1 行单元格在不同启动器上是 40–72dp：内容（卡片 40 + 间距 4 + 标题）
+     * 在矮宿主里会超出并被裁切。这里按宿主给的最小高度决定是否显示标题，
+     * 保证任何启动器都不会出现「标题只剩一半」。
+     */
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle,
+    ) {
+        updateWidgets(context, appWidgetManager, intArrayOf(appWidgetId))
+    }
+
+    private fun updateWidgets(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        for (widgetId in appWidgetIds) {
+            val views = RemoteViews(context.packageName, R.layout.widget_new_note)
+            val pending = newNoteIntent(context)
+            // 整块卡片与卡片外的留白都可点。
+            views.setOnClickPendingIntent(R.id.widget_root, pending)
+            views.setOnClickPendingIntent(R.id.widget_card, pending)
+            // 卡片下方的标题直接画在壁纸上，颜色必须跟着壁纸深浅走，
+            // 否则浅色壁纸配白字会「看起来没有标题」（真机上出现过）。
+            views.setTextColor(R.id.widget_title, titleColor(context))
+            views.setViewVisibility(
+                R.id.widget_title,
+                if (shouldShowTitle(appWidgetManager, widgetId)) View.VISIBLE else View.GONE,
+            )
+            appWidgetManager.updateAppWidget(widgetId, views)
+        }
+    }
+
+    /// 宿主高度未知（0）时按「能显示」处理；内容本身约 54dp，
+    /// 留 2dp 余量，低于 56dp 的宿主直接隐藏标题。
+    private fun shouldShowTitle(appWidgetManager: AppWidgetManager, widgetId: Int): Boolean {
+        val minHeight = appWidgetManager.getAppWidgetOptions(widgetId)
+            .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+        return minHeight <= 0 || minHeight >= 56
     }
 
     /**

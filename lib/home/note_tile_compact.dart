@@ -85,13 +85,15 @@ class NoteTileCompact extends StatelessWidget {
             if (note.pinned)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.push_pin, size: 12, color: colors.accent),
+                child: Icon(Icons.push_pin_rounded,
+                    size: AppIcon.badge, color: colors.accent),
               ),
             if (note.locked)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child:
-                    Icon(Icons.lock_outline, size: 12, color: colors.secondary),
+                    Icon(Icons.lock_outline_rounded,
+                        size: AppIcon.badge, color: colors.secondary),
               ),
             if (leadMedia) ...<Widget>[
               media,
