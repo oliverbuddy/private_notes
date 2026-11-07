@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_field.dart';
 import '../ui/show_sheet.dart';
 import '../ui/tag_palette.dart';
 
@@ -109,40 +110,26 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 '标签',
-                style: TextStyle(
-                  fontSize: AppFontSize.body,
-                  fontWeight: AppWeight.medium,
-                  color: colors.text,
-                ),
+                style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: TextField(
+                    child: AppTextField(
                       controller: _input,
                       autofocus: true,
                       maxLength: 20,
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _addFromInput(),
-                      style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
-                      decoration: InputDecoration(
-                        hintText: '输入新标签，回车添加',
-                        hintStyle:
-                            TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
-                        border: InputBorder.none,
-                        isDense: true,
-                        counterText: '',
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 8),
-                      ),
+                      hintText: '输入新标签，回车添加',
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -156,7 +143,8 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                         child: Text(
                           '添加',
                           style: TextStyle(
-                            fontSize: AppFontSize.labelLg,
+                            fontSize: AppFontSize.body,
+                            fontWeight: AppWeight.medium,
                             color: enabled ? colors.accent : colors.tertiary,
                           ),
                         ),
@@ -169,7 +157,8 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                 const SizedBox(height: 10),
                 Text(
                   _selected.isEmpty ? '已有标签' : '标签（点一下选中/取消）',
-                  style: TextStyle(fontSize: AppFontSize.meta, color: colors.tertiary),
+                  style: TextStyle(
+                      fontSize: AppFontSize.meta, color: colors.tertiary),
                 ),
                 const SizedBox(height: 8),
                 // 候选可能很多：限制高度并允许滚动，避免把弹层撑出屏幕。
@@ -196,7 +185,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: _TagSheetButton(
+                    child: AppSheetButton(
                       label: '取消',
                       background: colors.surface2,
                       foreground: colors.secondary,
@@ -205,7 +194,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _TagSheetButton(
+                    child: AppSheetButton(
                       // 语义是「把标签加到这条小记」，不是保存正文（正文自动保存）。
                       label: '完成',
                       background: colors.accent,
@@ -262,46 +251,6 @@ class _TagCandidateChip extends StatelessWidget {
               height: 1,
               color: tone.foreground,
               fontWeight: selected ? AppWeight.medium : AppWeight.regular,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 保存 / 取消按钮：52 高、圆角 10，和确认弹层同一规格。
-class _TagSheetButton extends StatelessWidget {
-  const _TagSheetButton({
-    required this.label,
-    required this.background,
-    required this.foreground,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 52,
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppFontSize.body,
-              height: 1,
-              fontWeight: AppWeight.medium,
-              color: foreground,
             ),
           ),
         ),

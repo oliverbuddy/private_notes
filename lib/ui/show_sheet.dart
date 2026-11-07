@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'pressable.dart';
 
 /// 全站统一的底部弹层入口。
 ///
@@ -28,10 +29,10 @@ Future<T?> showXiaojiSheet<T>({
     useSafeArea: true,
     isScrollControlled: true,
     sheetAnimationStyle: const AnimationStyle(
-      duration: Duration(milliseconds: 320),
-      reverseDuration: Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      duration: AppMotion.normal,
+      reverseDuration: AppMotion.normal,
+      curve: AppMotion.decelerate,
+      reverseCurve: AppMotion.accelerate,
     ),
     builder: (BuildContext sheetContext) {
       final AppColors colors = AppColors.of(sheetContext);
@@ -50,14 +51,13 @@ Future<T?> showXiaojiSheet<T>({
         children: <Widget>[
           Center(
             child: Container(
-              width: 32,
-              height: 4,
-              margin: const EdgeInsets.only(top: 10, bottom: 4),
+              // iOS 抓手：36 × 5，圆角 2.5。
+              width: 36,
+              height: 5,
+              margin: const EdgeInsets.only(top: 6, bottom: 8),
               decoration: BoxDecoration(
-                // text 色 20% 透明度：浅色下是灰、深色下自动变浅灰。
-                // 之前 tertiary@0.45 在深色底上太淡，抓手像消失了一样。
-                color: colors.text.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(2),
+                color: colors.text.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(2.5),
               ),
             ),
           ),
@@ -86,7 +86,7 @@ Future<bool?> showXiaojiConfirmSheet({
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,7 +100,7 @@ Future<bool?> showXiaojiConfirmSheet({
                 message,
                 style: TextStyle(
                   fontSize: AppFontSize.labelLg,
-                  height: 1.6,
+                  height: 1.5,
                   color: colors.secondary,
                 ),
               ),
@@ -108,7 +108,7 @@ Future<bool?> showXiaojiConfirmSheet({
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: _SheetButton(
+                    child: AppSheetButton(
                       label: '取消',
                       background: colors.surface2,
                       foreground: colors.secondary,
@@ -117,13 +117,11 @@ Future<bool?> showXiaojiConfirmSheet({
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _SheetButton(
+                    child: AppSheetButton(
                       label: confirmLabel,
-                      background:
-                          destructive ? colors.danger : colors.surface2,
-                      foreground: destructive
-                          ? const Color(0xFFFFFFFF)
-                          : colors.accent,
+                      background: destructive ? colors.danger : colors.surface2,
+                      foreground:
+                          destructive ? colors.onDanger : colors.accent,
                       onTap: () => Navigator.of(sheetContext).pop(true),
                     ),
                   ),
@@ -137,9 +135,13 @@ Future<bool?> showXiaojiConfirmSheet({
   );
 }
 
-/// 确认弹层的并排按钮：52 高、圆角 10、实心底 + 单色文字。
-class _SheetButton extends StatelessWidget {
-  const _SheetButton({
+/// 弹层里的并排按钮：鸿蒙 40 高、20 连续圆角、16 Medium。
+///
+/// 确认、标签、链接、附件、重命名等所有弹层共用这一份，避免各写一套
+/// 高度/圆角/字号（以前出现过 48 高 + 8 圆角 + 14 字号的例外）。
+class AppSheetButton extends StatelessWidget {
+  const AppSheetButton({
+    super.key,
     required this.label,
     required this.background,
     required this.foreground,
@@ -153,23 +155,23 @@ class _SheetButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 52,
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppFontSize.body,
-              height: 1,
-              fontWeight: AppWeight.medium,
-              color: foreground,
-            ),
+    return AppPressable(
+      onTap: onTap,
+      pressedScale: 0.98,
+      child: Container(
+        height: AppSize.button,
+        alignment: Alignment.center,
+        decoration: ShapeDecoration(
+          color: background,
+          shape: AppShape.continuous(AppRadius.button),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: AppFontSize.body,
+            height: 1,
+            fontWeight: AppWeight.medium,
+            color: foreground,
           ),
         ),
       ),

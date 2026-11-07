@@ -164,6 +164,11 @@ void main() {
             body: '第一条',
           ),
         );
+        // 本用例只验证标签胶囊的 ×；关掉主页一次性备份提示，
+        // 否则它自带的关闭图标会干扰 find.byIcon(Icons.close)。
+        await repository.updateSettings(
+          repository.settings.copyWith(backupTipShown: true),
+        );
       });
 
       await tester.pumpWidget(

@@ -50,7 +50,7 @@ class FileBlockView extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: colors.page,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadius.thumb),
                 border: Border.all(color: colors.dividerStrong, width: 0.5),
               ),
               child: Text(
@@ -100,7 +100,7 @@ class FileBlockView extends StatelessWidget {
             ),
             Icon(
               Icons.chevron_right,
-              size: 18,
+              size: AppIcon.chevron,
               color: colors.tertiary,
             ),
           ],

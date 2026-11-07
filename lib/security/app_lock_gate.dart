@@ -24,8 +24,7 @@ class AppLockGate extends StatefulWidget {
   State<AppLockGate> createState() => _AppLockGateState();
 }
 
-class _AppLockGateState extends State<AppLockGate>
-    with WidgetsBindingObserver {
+class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   static const SecurityService _security = SecurityService();
 
   late bool _locked = widget.repository.settings.lockEnabled;
@@ -119,7 +118,8 @@ class _AppLockGateState extends State<AppLockGate>
   }
 
   void _applySecureFlag() {
-    final bool shouldSecure = _locked && widget.repository.settings.secureScreen;
+    final bool shouldSecure =
+        _locked && widget.repository.settings.secureScreen;
     // 失败不影响锁屏本身（部分 ROM 可能不支持）。
     _security
         .setSecureHolder(_secureKey, shouldSecure)
@@ -137,8 +137,7 @@ class _AppLockGateState extends State<AppLockGate>
         return;
       }
       if (deviceSecure) {
-        final bool ok =
-            await _security.authenticate(reason: '验证身份后查看小记');
+        final bool ok = await _security.authenticate(reason: '验证身份后查看小记');
         if (!mounted) {
           return;
         }
@@ -213,8 +212,7 @@ class _AppLockGateState extends State<AppLockGate>
       _pinError = null;
     });
     try {
-      final String input =
-          await _security.hashPin(pin: _pinDigits, salt: salt);
+      final String input = await _security.hashPin(pin: _pinDigits, salt: salt);
       if (!mounted) {
         return;
       }
@@ -298,7 +296,8 @@ class _AppLockGateState extends State<AppLockGate>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Icon(Icons.lock_outline, size: 44, color: colors.secondary),
+                      Icon(Icons.lock_outline,
+                          size: AppIcon.hero, color: colors.secondary),
                       const SizedBox(height: 18),
                       Text(
                         '小记已锁定',
@@ -340,7 +339,7 @@ class _AppLockGateState extends State<AppLockGate>
                       if (_pinMode) const SizedBox(height: 16),
                       SizedBox(
                         width: 200,
-                        height: 48,
+                        height: AppSize.button,
                         child: FilledButton(
                           onPressed: _authenticating
                               ? null
@@ -349,7 +348,8 @@ class _AppLockGateState extends State<AppLockGate>
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : Text(_pinSetup ? '设置并解锁' : '解锁'),
                         ),

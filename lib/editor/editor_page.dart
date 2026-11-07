@@ -11,6 +11,7 @@ import '../data/note_repository.dart';
 import '../data/note_store.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_field.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/date_format.dart';
@@ -84,11 +85,11 @@ class _TagInputFieldState extends State<_TagInputField> {
       controller: _controller,
       autofocus: true,
       onChanged: widget.onChanged,
-      style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
-      decoration: InputDecoration(
+      cursorColor: colors.accent,
+      style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
+      decoration: appFieldDecoration(
+        context,
         hintText: '逗号分隔，例如：旅行, 想法',
-        hintStyle: TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
-        border: InputBorder.none,
       ),
     );
   }
@@ -2020,18 +2021,14 @@ class _EditorPageState extends State<EditorPage> {
               child: SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
                         '标签',
-                        style: TextStyle(
-                          fontSize: AppFontSize.body,
-                          fontWeight: AppWeight.medium,
-                          color: colors.text,
-                        ),
+                        style: AppText.sheetTitle.copyWith(color: colors.text),
                       ),
                       const SizedBox(height: 12),
                       _TagInputField(
@@ -2080,51 +2077,22 @@ class _EditorPageState extends State<EditorPage> {
                       Row(
                         children: <Widget>[
                           Expanded(
-                            child: Material(
-                              color: colors.surface2,
-                              borderRadius: BorderRadius.circular(AppRadius.card),
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                onTap: () => Navigator.of(sheetContext).pop(),
-                                child: Container(
-                                  height: 52,
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    '取消',
-                                    style: TextStyle(
-                                      fontSize: AppFontSize.body,
-                                      height: 1,
-                                      fontWeight: AppWeight.medium,
-                                      color: colors.secondary,
-                                    ),
-                                  ),
-                                ),
-                              ),
+                            child: AppSheetButton(
+                              label: '取消',
+                              background: colors.surface2,
+                              foreground: colors.secondary,
+                              onTap: () =>
+                                  Navigator.of(sheetContext).pop(),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Material(
-                              color: colors.accent,
-                              borderRadius: BorderRadius.circular(AppRadius.card),
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                onTap: () => Navigator.of(sheetContext)
-                                    .pop(Note.parseTags(tagsText)),
-                                child: Container(
-                                  height: 52,
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    '保存',
-                                    style: TextStyle(
-                                      fontSize: AppFontSize.body,
-                                      height: 1,
-                                      fontWeight: AppWeight.medium,
-                                      color: colors.page,
-                                    ),
-                                  ),
-                                ),
-                              ),
+                            child: AppSheetButton(
+                              label: '保存',
+                              background: colors.accent,
+                              foreground: colors.page,
+                              onTap: () => Navigator.of(sheetContext)
+                                  .pop(Note.parseTags(tagsText)),
                             ),
                           ),
                         ],

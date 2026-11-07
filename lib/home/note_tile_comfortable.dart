@@ -6,6 +6,7 @@ import '../editor/block.dart';
 import '../editor/markdown_view.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/pressable.dart';
 import '../ui/quote_block.dart';
 import '../ui/tag_chip.dart';
 import '../util/date_format.dart';
@@ -63,118 +64,132 @@ class NoteTileComfortable extends StatelessWidget {
     // 锁定笔记：正文不在内存里，列表里只显示「已锁定」，不渲染摘要。
     final summary = note.locked ? '' : plainSummary(note.body);
 
-    // 与详情页完全同一套正文：15.5 / 1.7 / 字距 0.3。
+    // iOS 正文 17pt / 行高 1.5。
     final summaryStyle = TextStyle(
-      fontSize: AppFontSize.summary,
-      height: 1.7,
-      letterSpacing: 0.3,
+      fontSize: AppFontSize.body,
+      height: 1.5,
+      letterSpacing: 0,
       leadingDistribution: TextLeadingDistribution.even,
       color: colors.text,
     );
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.only(bottom: 0),
-      // 外层间距由列表负责（含卡间 10），这里只做卡片本体。
-      child: Material(
-        // 深色下卡片用 pageAlt（比底色亮一档），与设置页的白卡处理一致。
-        color: isDark ? colors.pageAlt : colors.page,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                if (note.locked)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(Icons.lock_outline, size: 14, color: colors.tertiary),
-                      const SizedBox(width: 6),
-                      Text(
-                        '已锁定',
-                        style: TextStyle(
-                          fontSize: AppFontSize.labelLg,
-                          height: 1.4,
-                          color: colors.tertiary,
+      // 外层间距由列表负责（含卡间 12），这里只做卡片本体。
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          color: colors.page,
+          shape: AppShape.continuous(AppRadius.card),
+          shadows: AppShadow.card,
+        ),
+        child: ClipPath(
+          clipper: ShapeBorderClipper(
+            shape: AppShape.continuous(AppRadius.card),
+          ),
+          child: AppPressable(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            // 大片内容不做缩放，只轻微变暗（鸿蒙卡片的按压手感）。
+            pressedScale: 1,
+            pressedOpacity: 0.88,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.lg,
+                14,
+                AppSpace.lg,
+                14,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (note.locked)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(Icons.lock_outline,
+                            size: AppIcon.badge, color: colors.tertiary),
+                        const SizedBox(width: 6),
+                        Text(
+                          '已锁定',
+                          style: TextStyle(
+                            fontSize: AppFontSize.labelLg,
+                            height: 1.4,
+                            color: colors.tertiary,
+                          ),
                         ),
+                      ],
+                    )
+                  else if (summary.isEmpty)
+                    // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
+                    // 多一行提示会让它看起来像空笔记。
+                    thumbnailPaths.isEmpty
+                        ? Text(
+                            '（无正文）',
+                            style:
+                                summaryStyle.copyWith(color: colors.tertiary),
+                          )
+                        : const SizedBox.shrink()
+                  // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
+                  // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
+                  // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
+                  // TextSpan 的逐行底色做不出这个形状，所以摘要也按行分组。
+                  // 只有搜索时退回纯文本，因为要按关键字高亮。
+                  else if (query.isEmpty)
+                    _SummaryMarkdown(
+                      source: excerptSource(
+                        note.body,
+                        maxLines: maxSummaryLines,
                       ),
-                    ],
-                  )
-                else if (summary.isEmpty)
-                  // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
-                  // 多一行提示会让它看起来像空笔记。
-                  thumbnailPaths.isEmpty
-                      ? Text(
-                          '（无正文）',
-                          style: summaryStyle.copyWith(color: colors.tertiary),
-                        )
-                      : const SizedBox.shrink()
-                else if (query.isEmpty)
-                // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
-                // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
-                // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
-                // TextSpan 的逐行底色做不出这个形状，所以摘要也按行分组。
-                // 只有搜索时退回纯文本，因为要按关键字高亮。
-                if (query.isEmpty)
-                  _SummaryMarkdown(
-                    source: excerptSource(
-                      note.body,
+                      style: summaryStyle,
+                      colors: colors,
+                      // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
+                      // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
+                      // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
+                      // 都是「同字号预览 + 标题收敛 + 行数截断」。
+                      headingBoost: 0.86,
                       maxLines: maxSummaryLines,
-                    ),
-                    style: summaryStyle,
-                    colors: colors,
-                    // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
-                    // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
-                    // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
-                    // 都是「同字号预览 + 标题收敛 + 行数截断」。
-                    headingBoost: 0.86,
-                    maxLines: maxSummaryLines,
-                  )
-                else
-                  Text.rich(
-                    TextSpan(
-                      children: highlightSpans(
-                        text: summary,
-                        query: query,
-                        style: summaryStyle,
-                        highlightColor: colors.searchHit,
-                      ),
-                    ),
-                    maxLines: maxSummaryLines,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                if (thumbnailPaths.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: <Widget>[
-                      for (var i = 0; i < thumbnailPaths.length; i++)
-                        Padding(
-                          padding: EdgeInsets.only(
-                            right: i == thumbnailPaths.length - 1 ? 0 : 6,
-                          ),
-                          child: _Thumbnail(
-                            path: thumbnailPaths[i],
-                            // 只有一张图时放大到 88：仍属「小图」，但单独一张
-                            // 56 的方块放在整行里会显得空。多图仍走 56 方格，
-                            // 三张刚好排满一行。
-                            size: thumbnailPaths.length == 1 ? 88 : 56,
-                            overlayCount: (i == thumbnailPaths.length - 1 &&
-                                    hiddenThumbnailCount > 0)
-                                ? hiddenThumbnailCount
-                                : 0,
-                          ),
+                    )
+                  else
+                    Text.rich(
+                      TextSpan(
+                        children: highlightSpans(
+                          text: summary,
+                          query: query,
+                          style: summaryStyle,
+                          highlightColor: colors.searchHit,
                         ),
-                    ],
-                  ),
+                      ),
+                      maxLines: maxSummaryLines,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  if (thumbnailPaths.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: <Widget>[
+                        for (var i = 0; i < thumbnailPaths.length; i++)
+                          Padding(
+                            padding: EdgeInsets.only(
+                              right: i == thumbnailPaths.length - 1 ? 0 : 6,
+                            ),
+                            child: _Thumbnail(
+                              path: thumbnailPaths[i],
+                              // 只有一张图时放大到 88：仍属「小图」，但单独一张
+                              // 56 的方块放在整行里会显得空。多图仍走 56 方格，
+                              // 三张刚好排满一行。
+                              size: thumbnailPaths.length == 1 ? 88 : 56,
+                              overlayCount: (i == thumbnailPaths.length - 1 &&
+                                      hiddenThumbnailCount > 0)
+                                  ? hiddenThumbnailCount
+                                  : 0,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  _MetaRow(note: note),
                 ],
-                const SizedBox(height: 10),
-                _MetaRow(note: note),
-              ],
+              ),
             ),
           ),
         ),
@@ -218,8 +233,7 @@ class _SummaryMarkdown extends StatelessWidget {
             // 用户有意留出的空行在摘要里也要看得见：渲染成一行空隙，
             // 高度与正文行盒一致（用户反复强调不要去掉空白行）。
             SizedBox(
-              height:
-                  (style.fontSize ?? 15.5) * (style.height ?? 1.2),
+              height: (style.fontSize ?? 17) * (style.height ?? 1.2),
             )
           else if (block.attachmentName != null)
             _buildAttachment(block.attachmentName!)
@@ -400,8 +414,7 @@ class _Thumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final double radius =
-        size >= 80 ? AppRadius.block : AppRadius.thumb;
+    final double radius = size >= 80 ? AppRadius.block : AppRadius.thumb;
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: Image.file(
@@ -496,5 +509,3 @@ class _MetaRow extends StatelessWidget {
     );
   }
 }
-
-

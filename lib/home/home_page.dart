@@ -12,6 +12,8 @@ import '../models/note_settings.dart';
 import '../settings/settings_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
+import '../ui/content_frame.dart';
+import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/share.dart';
@@ -89,8 +91,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         );
         body = body.isEmpty ? '![]($relative)' : '$body\n\n![]($relative)';
       }
-      final Note note =
-          Note(id: id, created: now, updated: now, body: body);
+      final Note note = Note(id: id, created: now, updated: now, body: body);
       await _repo.upsert(note);
       if (!mounted) {
         return;
@@ -446,13 +447,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     final density = _repo.settings.density;
-    // 舒适档「卡片与底色对调」：浅色米底白卡、深色黑底亮卡，
-    // 卡片永远比底色亮一档（与设置页同一逻辑）。
-    // 之前无脑用 pageAlt 当底色，深色下卡片(pageAlt)和底色同色，
-    // 卡片轮廓完全消失。
-    final comfortableBg = Theme.of(context).brightness == Brightness.dark
-        ? colors.page
-        : colors.pageAlt;
+    // 舒适档统一「卡片比底色亮一档」：浅色灰底白卡、深色黑底 #1A1A1A 卡。
+    // 之前深色下底色误用了 page（和卡片同色），卡片轮廓会完全消失；
+    // 现在固定用 pageAlt 当底色，与设置页同一套层次。
+    final comfortableBg = colors.pageAlt;
 
     return Scaffold(
       // 两档密度两种底色语义：紧凑 = 纯色列表（文字对比优先），
@@ -469,8 +467,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             return Column(
               children: <Widget>[
                 _searchMode ? _buildSearchBar(colors) : _buildTitleBar(colors),
-                if (!_searchMode)
-                  Container(height: 0.5, color: colors.dividerStrong),
                 if (_repo.isSearching && !_repo.isLoading)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
@@ -502,13 +498,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         )
                       : (notes.isEmpty
                           ? _EmptyState(searching: _repo.isSearching)
-                          // 宽屏（平板/折叠屏）时限宽居中，长列表拉满全宽没法看
-                          : Center(
-                              child: ConstrainedBox(
-                                constraints:
-                                    const BoxConstraints(maxWidth: 560),
-                                child: _buildList(colors, notes, density),
-                              ),
+                          // 平板/桌面：内容限宽居中，长列表不拉满整屏。
+                          : ContentFrame(
+                              child: _buildList(colors, notes, density),
                             )),
                 ),
               ],
@@ -520,15 +512,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
       floatingActionButton: _searchMode
           ? null
-          : FloatingActionButton(
-              onPressed: () => _openEditor(null),
-              tooltip: '新建小记',
-              backgroundColor: colors.fabBackground,
-              foregroundColor: colors.fabForeground,
-              elevation: 0,
-              highlightElevation: 0,
-              shape: const CircleBorder(),
-              child: const Icon(Icons.edit_outlined, size: 22),
+          // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
+          : Tooltip(
+              message: '新建小记',
+              child: AppPressable(
+                onTap: () => _openEditor(null),
+                pressedScale: 0.95,
+                pressedOpacity: 0.9,
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: colors.fabBackground,
+                    shape: BoxShape.circle,
+                    boxShadow: AppShadow.floating,
+                  ),
+                  child: Icon(
+                    Icons.edit_outlined,
+                    size: AppIcon.fab,
+                    color: colors.fabForeground,
+                  ),
+                ),
+              ),
             ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
@@ -537,11 +542,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildTitleBar(AppColors colors) {
     final activeTag = _repo.activeTag;
     return Padding(
+      // HarmonyOS 标题 24：上下各 9，栏高与 48 对齐。
       padding: const EdgeInsets.fromLTRB(
         AppSpace.page,
-        AppSpace.sm,
+        9,
         8,
-        AppSpace.sm,
+        9,
       ),
       child: Row(
         children: <Widget>[
@@ -632,39 +638,40 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return Padding(
       // 左边距与标题、列表卡片统一（AppSpace.page），否则搜索框会比其他
       // 内容往左凸出 4dp，进入搜索态时整页像被挪了一下。
-      padding: const EdgeInsets.fromLTRB(AppSpace.page, 6, 10, 8),
+      // 上下各 4：搜索栏总高 48，与 30pt 大标题栏切换时高度不跳。
+      padding: const EdgeInsets.fromLTRB(AppSpace.page, 4, 10, 4),
       child: Row(
         children: <Widget>[
           Expanded(
             child: Container(
-              height: 38,
+              height: AppSize.button,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                // 主页底色和 surface2 太接近（浅色 #F5F3EC vs #F7F5F0），
-                // 搜索框直接「隐身」。改成 page 底 + 描边：浅色 = 白胶囊浮
-                // 米底（微信搜索框同款），深色 = 深底 + 清晰描边。
+                // 鸿蒙搜索框：白面（深色为 #1A1A1A）+ 描边。
+                // 之前用 surface2，浅色下和页面底色同为浅灰，整个框「消失」了。
                 color: colors.page,
-                borderRadius: BorderRadius.circular(AppRadius.card),
+                borderRadius: BorderRadius.circular(AppRadius.search),
                 border: Border.all(color: colors.chipBorder, width: 0.5),
               ),
               child: Row(
                 children: <Widget>[
-                  Icon(Icons.search, size: 16, color: colors.tertiary),
+                  Icon(Icons.search, size: AppIcon.action, color: colors.tertiary),
                   const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
                       controller: _searchController,
                       focusNode: _searchFocus,
                       onChanged: _repo.setQuery,
-                      style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
+                      style: TextStyle(
+                          fontSize: AppFontSize.body, color: colors.text),
                       cursorColor: colors.accent,
                       decoration: InputDecoration(
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
                         border: InputBorder.none,
                         hintText: '搜索',
-                        hintStyle:
-                            TextStyle(fontSize: AppFontSize.body, color: colors.tertiary),
+                        hintStyle: TextStyle(
+                            fontSize: AppFontSize.body, color: colors.tertiary),
                       ),
                     ),
                   ),
@@ -675,8 +682,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         _repo.setQuery('');
                         setState(() {});
                       },
-                      child:
-                          Icon(Icons.close, size: 16, color: colors.tertiary),
+                      child: Icon(Icons.close,
+                          size: AppIcon.chevron, color: colors.tertiary),
                     ),
                 ],
               ),
@@ -689,11 +696,125 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Text(
                 '取消',
-                style: TextStyle(fontSize: AppFontSize.summary, color: colors.accent),
+                style: TextStyle(
+                    fontSize: AppFontSize.labelLg, color: colors.accent),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 一次性「数据只存在本机」提示。
+  ///
+  /// 不常驻、不弹窗：只在该用户已经写下内容、且从未开过外置备份时出现一次；
+  /// 关闭或点「去备份」后写入 settings，永不再现。
+  Widget _buildBackupTip(AppColors colors, ListDensity density) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.page,
+        density == ListDensity.compact ? 10 : 2,
+        AppSpace.page,
+        12,
+      ),
+      child: Material(
+        color: colors.page,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: colors.chipBorder, width: 0.5),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 8, 6, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(Icons.shield_outlined,
+                      size: AppIcon.inline, color: colors.secondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '数据只存在这台手机',
+                      style: TextStyle(
+                        fontSize: AppFontSize.labelLg,
+                        height: 1.4,
+                        fontWeight: AppWeight.medium,
+                        color: colors.text,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: _dismissBackupTip,
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: Icon(Icons.close,
+                          size: AppIcon.inline, color: colors.tertiary),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      '卸载会一起删除，建议先开启备份',
+                      style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        height: 1.4,
+                        color: colors.secondary,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _openBackupFromTip,
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.accent,
+                      minimumSize: const Size(0, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      '去备份',
+                      style: TextStyle(
+                        fontSize: AppFontSize.labelLg,
+                        fontWeight: AppWeight.medium,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _dismissBackupTip() async {
+    if (_repo.settings.backupTipShown) {
+      return;
+    }
+    await _repo.updateSettings(
+      _repo.settings.copyWith(backupTipShown: true),
+    );
+  }
+
+  Future<void> _openBackupFromTip() async {
+    await _dismissBackupTip();
+    if (!mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => SettingsPage(
+          repository: _repo,
+          openBackupOnStart: true,
+        ),
       ),
     );
   }
@@ -705,6 +826,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ? colors.dividerStrong
         : colors.separator;
     final query = _repo.query;
+    // 数据安全提示：只在有内容、没开外置备份、且从未提醒过时出现一次。
+    final bool showTip = !_repo.isSearching &&
+        notes.isNotEmpty &&
+        !_repo.settings.backupTipShown &&
+        _repo.settings.externalBackupUri == null;
+    final int tipCount = showTip ? 1 : 0;
 
     return ListView.builder(
       physics: const BouncingScrollPhysics(
@@ -715,11 +842,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         top: density == ListDensity.compact ? 4 : 8,
         bottom: 88,
       ),
-      itemCount: notes.length + 1,
+      itemCount: notes.length + 1 + tipCount,
       itemBuilder: (BuildContext context, int index) {
+        if (showTip && index == 0) {
+          return _buildBackupTip(colors, density);
+        }
+        final int noteIndex = index - tipCount;
         // 最后一项是「到底了」提示行，不是笔记。
         // 笔记为空时走的是上面的 _EmptyState，不会进到这里。
-        if (index == notes.length) {
+        if (noteIndex == notes.length) {
           return Padding(
             padding: const EdgeInsets.only(top: 28, bottom: 24),
             child: Center(
@@ -730,10 +861,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           );
         }
-        final note = notes[index];
+        final note = notes[noteIndex];
         // 锁定笔记：正文不在内存里，也不展示缩略图（附件未加密，
         // 但列表里露出图片等于绕过正文锁定）。
-        final images = note.locked ? const <ImageBlock>[] : imageBlocksOf(note.body);
+        final images =
+            note.locked ? const <ImageBlock>[] : imageBlocksOf(note.body);
         // URL 末尾可能带「小图」标记（`#xiaoji-small`）：缩略图必须按
         // 去标记后的真实文件路径取图，否则 Image.file 找不到文件，
         // 列表里只剩一个「破图」图标（详情页正常、首页全坏）。
@@ -751,8 +883,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             // 紧凑档同样带图：右侧 36dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
-            hasAttachment:
-                !note.locked && hasLocalAttachment(note.body),
+            hasAttachment: !note.locked && hasLocalAttachment(note.body),
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
           );
@@ -776,7 +907,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           return Column(
             children: <Widget>[
               tile,
-              if (index != notes.length - 1)
+              if (noteIndex != notes.length - 1)
                 Padding(
                   padding: const EdgeInsets.only(left: AppSpace.page),
                   child: Container(height: 0.5, color: separator),
@@ -808,13 +939,14 @@ class _IconAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    return InkWell(
+    return AppPressable(
       onTap: onTap,
+      pressedScale: 0.9,
       child: SizedBox(
-        // 44dp 是移动端最小可点面积；图标 21dp，三个入口并排也不会挤在一起。
+        // 40dp 是鸿蒙最小可点热区；图标 24，三个入口并排也不挤。
         width: 44,
         height: 44,
-        child: Icon(icon, size: 21, color: colors.text),
+        child: Icon(icon, size: AppIcon.action, color: colors.text),
       ),
     );
   }
@@ -911,7 +1043,7 @@ class _EmptyState extends StatelessWidget {
             width: 52,
             height: 66,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AppRadius.block),
               border: Border.all(color: colors.chipBorder, width: 1.2),
             ),
             child: Column(
@@ -942,7 +1074,7 @@ class _EmptyState extends StatelessWidget {
             '还没有小记',
             style: TextStyle(
               fontSize: AppFontSize.subtitle,
-              fontWeight: AppWeight.semibold,
+              fontWeight: AppWeight.medium,
               letterSpacing: 0.2,
               color: colors.text,
             ),

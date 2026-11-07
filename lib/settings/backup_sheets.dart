@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/note_store.dart';
 import '../theme/app_theme.dart';
+import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../util/date_format.dart';
 
@@ -90,14 +91,14 @@ Future<BackupAction?> showBackupMenu(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
+              padding: const EdgeInsets.fromLTRB(16, 6, 20, 2),
               child: Text(
                 '备份与恢复',
                 style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              padding: const EdgeInsets.fromLTRB(16, 4, 20, 8),
               child: Text(
                 lastBackupLabel,
                 style: TextStyle(
@@ -113,7 +114,9 @@ Future<BackupAction?> showBackupMenu(
               value: autoEnabled,
               enabled: !autoBusy,
               onChanged: () => Navigator.of(sheetContext).pop(
-                autoEnabled ? BackupAction.disableAuto : BackupAction.enableAuto,
+                autoEnabled
+                    ? BackupAction.disableAuto
+                    : BackupAction.enableAuto,
               ),
             ),
             if (autoEnabled)
@@ -168,14 +171,14 @@ Future<String?> showRestoreSourceMenu(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 2),
+              padding: const EdgeInsets.fromLTRB(16, 6, 20, 2),
               child: Text(
                 '从备份恢复',
                 style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              padding: const EdgeInsets.fromLTRB(16, 4, 20, 12),
               child: Text(
                 '恢复是合并覆盖：同一条笔记以备份为准，其它笔记保留。'
                 '恢复前会自动留一份当前数据的快照。',
@@ -188,7 +191,7 @@ Future<String?> showRestoreSourceMenu(
             ),
             if (backups.isEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: const EdgeInsets.fromLTRB(16, 0, 20, 12),
                 child: Text(
                   '还没有应用内备份，可以从文件选择一份 zip。',
                   style: TextStyle(
@@ -208,8 +211,8 @@ Future<String?> showRestoreSourceMenu(
             _ActionRow(
               icon: Icons.folder_open,
               label: '从 zip 文件选择…',
-              onTap: () => Navigator.of(sheetContext)
-                  .pop(pickBackupFileSentinel),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(pickBackupFileSentinel),
             ),
             const SizedBox(height: 8),
           ],
@@ -238,10 +241,11 @@ class _SwitchRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
-    return InkWell(
+    return AppPressable(
       onTap: enabled ? onChanged : null,
+      pressedScale: 1,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
         child: Row(
           children: <Widget>[
             Expanded(
@@ -296,14 +300,15 @@ class _ActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
-    return InkWell(
+    return AppPressable(
       onTap: onTap,
+      pressedScale: 1,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
+        padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
         child: Row(
           children: <Widget>[
             if (icon != null) ...<Widget>[
-              Icon(icon, size: 18, color: colors.secondary),
+              Icon(icon, size: AppIcon.nav, color: colors.secondary),
               const SizedBox(width: 12),
             ],
             Expanded(
@@ -312,10 +317,11 @@ class _ActionRow extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     label,
-                    style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
+                    style: TextStyle(
+                        fontSize: AppFontSize.summary, color: colors.text),
                   ),
                   if (subtitle != null) ...<Widget>[
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       subtitle!,
                       style: TextStyle(
@@ -328,7 +334,8 @@ class _ActionRow extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
+            Icon(Icons.chevron_right,
+                size: AppIcon.chevron, color: colors.tertiary),
           ],
         ),
       ),
@@ -346,13 +353,15 @@ class _BackupEntryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
-    return InkWell(
+    return AppPressable(
       onTap: onTap,
+      pressedScale: 1,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         child: Row(
           children: <Widget>[
-            Icon(_backupIcon(entry.kind), size: 18, color: colors.secondary),
+            Icon(_backupIcon(entry.kind),
+                size: AppIcon.nav, color: colors.secondary),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -360,17 +369,20 @@ class _BackupEntryRow extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     formatListTime(entry.time),
-                    style: TextStyle(fontSize: AppFontSize.summary, color: colors.text),
+                    style: TextStyle(
+                        fontSize: AppFontSize.summary, color: colors.text),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     entry.kind.label,
-                    style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption, color: colors.tertiary),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
+            Icon(Icons.chevron_right,
+                size: AppIcon.chevron, color: colors.tertiary),
           ],
         ),
       ),

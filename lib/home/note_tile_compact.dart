@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../editor/block.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/pressable.dart';
 import '../util/date_format.dart';
 import '../util/text_highlight.dart';
 
@@ -48,9 +49,8 @@ class NoteTileCompact extends StatelessWidget {
     // 只取**首行**：把后续段落压成一行再截断，会让每条看起来
     // 都以「第一句的后半截」开头，扫读时反而更慢。
     // 锁定笔记内存里没有正文，直接显示「已锁定」。
-    final summary = note.locked
-        ? '已锁定'
-        : plainSummary(note.body).split('\n').first.trim();
+    final summary =
+        note.locked ? '已锁定' : plainSummary(note.body).split('\n').first.trim();
     final style = TextStyle(
       fontSize: AppFontSize.summary,
       height: 1.4,
@@ -66,17 +66,19 @@ class NoteTileCompact extends StatelessWidget {
             hiddenCount: (imageCount - 1).clamp(0, 99),
           )
         : hasAttachment
-            ? Icon(Icons.attach_file, size: 15, color: colors.secondary)
+            ? Icon(Icons.attach_file,
+                size: AppIcon.inline, color: colors.secondary)
             : null;
     final bool leadMedia = media != null && summary.isEmpty;
 
-    return InkWell(
+    return AppPressable(
       onTap: onTap,
       onLongPress: onLongPress,
+      pressedScale: 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpace.page,
-          vertical: 14,
+          vertical: 12,
         ),
         child: Row(
           children: <Widget>[
@@ -88,7 +90,8 @@ class NoteTileCompact extends StatelessWidget {
             if (note.locked)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.lock_outline, size: 12, color: colors.secondary),
+                child:
+                    Icon(Icons.lock_outline, size: 12, color: colors.secondary),
               ),
             if (leadMedia) ...<Widget>[
               media,
@@ -132,7 +135,7 @@ class NoteTileCompact extends StatelessWidget {
   }
 }
 
-/// 紧凑档的单张缩略图：36dp 方格，多图时右下角盖 `+N`。
+/// 紧凑档的单张缩略图：44dp 方格，多图时右下角盖 `+N`。
 class _CompactThumbnail extends StatelessWidget {
   const _CompactThumbnail({required this.path, required this.hiddenCount});
 
@@ -142,7 +145,7 @@ class _CompactThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    const double size = 36;
+    const double size = 44;
     final Widget image = ClipRRect(
       borderRadius: BorderRadius.circular(AppRadius.thumb),
       child: Image.file(
@@ -157,7 +160,7 @@ class _CompactThumbnail extends StatelessWidget {
           alignment: Alignment.center,
           child: Icon(
             Icons.image_not_supported_outlined,
-            size: 13,
+            size: AppIcon.inline,
             color: colors.tertiary,
           ),
         ),

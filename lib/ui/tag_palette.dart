@@ -29,18 +29,17 @@ class TagTone {
 }
 
 abstract final class TagPalette {
-  /// 8 个色相：蓝、绿、琥珀、紫、青、玫红、靛、湖蓝。
-  ///
-  /// 低饱和、偏中性的色相，浅色/深色主题下都不会抢正文的视觉重心。
+  /// 8 个色相直接取自 iOS 系统色（蓝/绿/橙/紫/粉/青/靛/棕），
+  /// 再压一档饱和度，保证白卡上能区分、又不抢正文。
   static const List<Color> _hues = <Color>[
-    Color(0xFF3B82F6),
-    Color(0xFF16A34A),
-    Color(0xFFF59E0B),
-    Color(0xFF8B5CF6),
-    Color(0xFF0D9488),
-    Color(0xFFE11D48),
-    Color(0xFF6366F1),
-    Color(0xFF0891B2),
+    Color(0xFF0A84FF), // systemBlue
+    Color(0xFF34C759), // systemGreen
+    Color(0xFFFF9F0A), // systemOrange
+    Color(0xFFBF5AF2), // systemPurple
+    Color(0xFFFF375F), // systemPink
+    Color(0xFF30B0C7), // systemTeal
+    Color(0xFF5E5CE6), // systemIndigo
+    Color(0xFFA2845E), // systemBrown
   ];
 
   /// 为标签取一个稳定配色。
@@ -49,23 +48,23 @@ abstract final class TagPalette {
     final bool dark = colors.page.computeLuminance() < 0.3;
     if (dark) {
       return TagTone(
-        // 深色主题：底色压到页面暗底上，文字提亮一档。
+        // 深色主题：半透明色相叠在卡片底上，文字提亮一档。
         background: Color.alphaBlend(
-          hue.withValues(alpha: 0.26),
-          colors.pageAlt,
+          hue.withValues(alpha: 0.30),
+          colors.page,
         ),
-        foreground: Color.lerp(hue, Colors.white, 0.58)!,
-        border: hue.withValues(alpha: 0.42),
+        foreground: Color.lerp(hue, Colors.white, 0.62)!,
+        border: hue.withValues(alpha: 0.45),
       );
     }
     return TagTone(
-      // 浅色主题：12% 色相底，文字压深一档保证对比度。
+      // 浅色主题：16% 色相底 + 加深文字/描边，iOS 彩色标签的常见做法。
       background: Color.alphaBlend(
-        hue.withValues(alpha: 0.12),
+        hue.withValues(alpha: 0.16),
         colors.page,
       ),
-      foreground: Color.lerp(hue, Colors.black, 0.22)!,
-      border: hue.withValues(alpha: 0.22),
+      foreground: Color.lerp(hue, Colors.black, 0.30)!,
+      border: hue.withValues(alpha: 0.28),
     );
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../theme/app_theme.dart';
+import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
@@ -21,8 +22,7 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  static const String _repoUrl =
-      'https://github.com/oliverbuddy/private_notes';
+  static const String _repoUrl = 'https://github.com/oliverbuddy/private_notes';
   static const String _contactEmail = 'qiwei0727@gmail.com';
 
   /// 从已安装的 APK 读取版本；拿不到时页面其余内容照常显示。
@@ -44,11 +44,9 @@ class _AboutPageState extends State<AboutPage> {
   @override
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color cardColor = isDark ? colors.pageAlt : colors.page;
 
     return Scaffold(
-      backgroundColor: isDark ? colors.page : colors.pageAlt,
+      backgroundColor: colors.pageAlt,
       body: SafeArea(
         child: Column(
           children: <Widget>[
@@ -60,29 +58,34 @@ class _AboutPageState extends State<AboutPage> {
                   physics: const BouncingScrollPhysics(
                     parent: AlwaysScrollableScrollPhysics(),
                   ),
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpace.page,
+                    8,
+                    AppSpace.page,
+                    32,
+                  ),
                   children: <Widget>[
                     const SizedBox(height: 24),
                     _buildIdentity(colors),
                     const SizedBox(height: 32),
-                    _buildCard(
-                      cardColor: cardColor,
-                      rows: <Widget>[
-                        _AboutRow(
+                    AppListSection(
+                      children: <Widget>[
+                        AppListRow(
                           label: '开源许可',
                           value: 'PolyForm 非商业',
+                          chevron: true,
                           onTap: _showLicenseSheet,
                         ),
-                        _divider(colors),
-                        _AboutRow(
+                        AppListRow(
                           label: '联系作者',
                           value: _contactEmail,
+                          chevron: true,
                           onTap: _copyContactEmail,
                         ),
-                        _divider(colors),
-                        _AboutRow(
+                        AppListRow(
                           label: '项目主页',
                           value: 'GitHub',
+                          chevron: true,
                           onTap: () => openExternalLink(_repoUrl),
                         ),
                       ],
@@ -93,7 +96,9 @@ class _AboutPageState extends State<AboutPage> {
                         '${_appInfo?.packageName ?? 'com.xiaoji.xiaoji'}'
                         ' · 数据仅保存在本机',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
+                        style: TextStyle(
+                            fontSize: AppFontSize.caption,
+                            color: colors.tertiary),
                       ),
                     ),
                   ],
@@ -128,7 +133,7 @@ class _AboutPageState extends State<AboutPage> {
           style: TextStyle(
             fontSize: AppFontSize.title,
             height: 1.3,
-            fontWeight: AppWeight.semibold,
+            fontWeight: AppWeight.medium,
             letterSpacing: 0.3,
             color: colors.text,
           ),
@@ -154,7 +159,8 @@ class _AboutPageState extends State<AboutPage> {
           ),
           child: Text(
             _appInfo == null ? '版本 —' : '版本 ${_appInfo!.displayVersion}',
-            style: TextStyle(fontSize: AppFontSize.caption, color: colors.secondary),
+            style: TextStyle(
+                fontSize: AppFontSize.caption, color: colors.secondary),
           ),
         ),
       ],
@@ -163,16 +169,16 @@ class _AboutPageState extends State<AboutPage> {
 
   Widget _buildHeader(BuildContext context, AppColors colors) {
     return SizedBox(
-      height: 48,
+      height: AppSize.navBar,
       child: Row(
         children: <Widget>[
           SizedBox(
-            width: 48,
+            width: AppSize.navBar,
             child: InkWell(
               onTap: () => Navigator.of(context).maybePop(),
               child: Icon(
                 Icons.arrow_back_ios_new,
-                size: 18,
+                size: AppIcon.nav,
                 color: colors.secondary,
               ),
             ),
@@ -183,26 +189,6 @@ class _AboutPageState extends State<AboutPage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildCard({
-    required Color cardColor,
-    required List<Widget> rows,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Column(children: rows),
-    );
-  }
-
-  Widget _divider(AppColors colors) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 16),
-      child: Container(height: 0.5, color: colors.dividerStrong),
     );
   }
 
@@ -225,7 +211,7 @@ class _AboutPageState extends State<AboutPage> {
         return SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 22),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 18),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -248,64 +234,14 @@ class _AboutPageState extends State<AboutPage> {
                 const SizedBox(height: 12),
                 Text(
                   '授权咨询：$_contactEmail',
-                  style: TextStyle(fontSize: AppFontSize.meta, color: colors.tertiary),
+                  style: TextStyle(
+                      fontSize: AppFontSize.meta, color: colors.tertiary),
                 ),
               ],
             ),
           ),
         );
       },
-    );
-  }
-}
-
-/// 关于页的信息行：与设置页的行高、字号保持一致。
-class _AboutRow extends StatelessWidget {
-  const _AboutRow({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final AppColors colors = AppColors.of(context);
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        height: 54,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        alignment: Alignment.centerLeft,
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // 与设置页同一套：值占满剩余空间再右对齐，箭头才会贴齐行尾。
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.right,
-                style: TextStyle(fontSize: AppFontSize.value, color: colors.secondary),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
-          ],
-        ),
-      ),
     );
   }
 }

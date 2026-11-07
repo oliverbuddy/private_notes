@@ -27,7 +27,6 @@ import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
 import '../../util/date_format.dart' show formatEditorTime;
-import '../../ui/show_sheet.dart' show showXiaojiSheet, showXiaojiConfirmSheet;
 import 'selection_toolbar.dart';
 import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
@@ -118,8 +117,8 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 底部工具条高度（与 MarkdownToolbar 的 SizedBox 一致）。
   ///
   /// 编辑态要从正文视口里扣掉这一条：工具条是浮层，不参与 Column 布局，
-  /// 不预留的话它会盖住正文最后 52dp（用户反馈「工具栏和输入法遮挡内容」）。
-  static const double _toolbarHeight = 52;
+  /// 不预留的话它会盖住正文最后一条（用户反馈「工具栏和输入法遮挡内容」）。
+  static const double _toolbarHeight = AppSize.navBar;
 
   /// Android 选择控件接管：内建选择条文案写死英文，这里通过 controller
   /// 的 toolbarBuilder 注入中文胶囊工具条（OverlayManager 优先取它，
@@ -718,7 +717,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     _caretVisibilityPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _caretVisibilityPending = false;
-      if (_panelTransitioning || _caretFollowing || _imeCollapsing || _disposed) {
+      if (_panelTransitioning ||
+          _caretFollowing ||
+          _imeCollapsing ||
+          _disposed) {
         return;
       }
       // 滚动正在执行时也照常算一次：只更新目标，不重启动画
@@ -881,7 +883,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     try {
       final DocumentLayoutEditable layoutEditable =
           _editor.context.find<DocumentLayoutEditable>(Editor.layoutKey);
-      caret = layoutEditable.documentLayout.getRectForPosition(selection.extent);
+      caret =
+          layoutEditable.documentLayout.getRectForPosition(selection.extent);
     } catch (_) {
       // 布局尚未挂载 / 该位置不是文本（附件、图片）：无需也不该滚动。
       return;
@@ -1325,59 +1328,42 @@ class _NewEditorPageState extends State<NewEditorPage>
   // ---------------------------------------------------------------------------
 
   Future<void> _showEditorMenu() async {
-    final action = await showXiaojiSheet<String>(
+    // 与主页长按共用同一个动作菜单组件：标题、行高、图标、分隔线、
+    // 取消按钮全部走 HarmonyOS 规范，不再各页面手写一套。
+    final String? action = await showXiaojiActionSheet<String>(
       context: context,
-      builder: (BuildContext sheetContext) {
-        final sheetColors = AppColors.of(sheetContext);
-        Widget tile(IconData icon, String label, String value,
-            {Color? foreground}) {
-          return InkWell(
-            onTap: () => Navigator.of(sheetContext).pop(value),
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              alignment: Alignment.centerLeft,
-              child: Row(
-                children: <Widget>[
-                  Icon(icon, size: 20, color: foreground ?? sheetColors.text),
-                  const SizedBox(width: 14),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: AppFontSize.body,
-                      color: foreground ?? sheetColors.text,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              tile(
-                _currentNote.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                _currentNote.pinned ? '取消置顶' : '置顶',
-                'pin',
-              ),
-              tile(Icons.content_copy, '复制文本', 'copy'),
-              tile(Icons.label_outline, '编辑标签', 'tags'),
-              tile(
-                _currentNote.locked ? Icons.lock_open_outlined : Icons.lock_outline,
-                _currentNote.locked ? '取消锁定' : '锁定笔记',
-                'lock',
-              ),
-              tile(Icons.delete_outline, '删除', 'delete',
-                  foreground: sheetColors.danger),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
+      title: '',
+      actions: <SheetAction<String>>[
+        SheetAction<String>(
+          value: 'pin',
+          label: _currentNote.pinned ? '取消置顶' : '置顶',
+          icon: _currentNote.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          selected: _currentNote.pinned,
+        ),
+        const SheetAction<String>(
+          value: 'copy',
+          label: '复制文本',
+          icon: Icons.content_copy,
+        ),
+        const SheetAction<String>(
+          value: 'tags',
+          label: '编辑标签',
+          icon: Icons.label_outline,
+        ),
+        SheetAction<String>(
+          value: 'lock',
+          label: _currentNote.locked ? '取消锁定' : '锁定笔记',
+          icon: _currentNote.locked
+              ? Icons.lock_open_outlined
+              : Icons.lock_outline,
+        ),
+        const SheetAction<String>(
+          value: 'delete',
+          label: '删除',
+          icon: Icons.delete_outline,
+          destructive: true,
+        ),
+      ],
     );
     if (action == null || !mounted) {
       return;
@@ -1827,10 +1813,9 @@ class _NewEditorPageState extends State<NewEditorPage>
                       BuildContext context,
                       Widget? child,
                     ) {
-                      final double panelReserve =
-                          _toolbarAnchorIme == null
-                              ? 0
-                              : math.max(_toolbarAnchorIme! - imeInset, 0);
+                      final double panelReserve = _toolbarAnchorIme == null
+                          ? 0
+                          : math.max(_toolbarAnchorIme! - imeInset, 0);
                       // 预留必须在「工具栏真的会盖住正文」时才有意义：
                       //  - 键盘可见（工具条贴键盘上沿）；
                       //  - 面板/键盘交替（工具条被锚点钉住）；
@@ -1839,9 +1824,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                       // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
                       // 选区还在、工具条已经滑走，多预留的一条就会变成页面
                       // 底部一片「工具栏白底」的遮挡（用户反馈）。
-                      final bool reserve = imeInset > 0 ||
-                          _panelTransitioning ||
-                          _panelOpen;
+                      final bool reserve =
+                          imeInset > 0 || _panelTransitioning || _panelOpen;
                       // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
                       // 不含 safe area、也不随键盘高度变化：
                       //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
@@ -2105,7 +2089,7 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   Widget _buildHeader(AppColors colors) {
     return SizedBox(
-      height: 48,
+      height: AppSize.navBar,
       child: Stack(
         children: <Widget>[
           // 顶栏按旧编辑器逻辑：居中显示更新时间（编辑后实时刷新）。
@@ -2122,10 +2106,10 @@ class _NewEditorPageState extends State<NewEditorPage>
             child: InkWell(
               onTap: () => Navigator.of(context).maybePop(),
               child: SizedBox(
-                width: 48,
+                width: AppSize.navBar,
                 child: Icon(
                   Icons.arrow_back_ios_new,
-                  size: 22,
+                  size: AppIcon.nav,
                   color: colors.secondary,
                 ),
               ),
@@ -2146,7 +2130,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                     onTap: _showEditorMenu,
                     child: Icon(
                       Icons.more_horiz,
-                      size: 22,
+                      size: AppIcon.action,
                       color: colors.text,
                     ),
                   ),
@@ -2172,67 +2156,68 @@ class _NewEditorPageState extends State<NewEditorPage>
         return false;
       },
       child: SuperEditor(
-      editor: _editor,
-      // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
-      focusNode: _editorFocus,
-      // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
-      // _ensureCaretVisible），内部自建的控制器拿不到位置。
-      scrollController: _editorScroll,
-      // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
-      selectionStyle: SelectionStyles(
-        selectionColor: colors.accent.withValues(alpha: 0.25),
-      ),
-      androidHandleColor: colors.accent,
-      stylesheet: _buildStylesheet(colors),
-      // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
-      // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
-      contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
-        (SuperEditorContext context) => XiaojiLinkTapHandler(context.document),
-      ],
-      // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
-      // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
-      // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
-      documentOverlayBuilders: <SuperEditorLayerBuilder>[
-        const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
-        const SuperEditorIosHandlesDocumentLayerBuilder(),
-        const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
-        const SuperEditorAndroidHandlesDocumentLayerBuilder(caretWidth: 0),
-        const DefaultCaretOverlayBuilder(),
-        XiaojiCaretLayerBuilder(_composer),
-      ],
-      componentBuilders: <ComponentBuilder>[
-        // 相对路径图片解析（assets/… → 真实文件），必须排在默认构建器
-        // 之前才能接管 ImageNode；其余组件保持默认链（含 Task）。
-        _LabImageComponentBuilder(
-          repository: widget.repository,
-          editor: _editor,
-          onImageLongPress: _showImageActions,
+        editor: _editor,
+        // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
+        focusNode: _editorFocus,
+        // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
+        // _ensureCaretVisible），内部自建的控制器拿不到位置。
+        scrollController: _editorScroll,
+        // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
+        selectionStyle: SelectionStyles(
+          selectionColor: colors.accent.withValues(alpha: 0.25),
         ),
-        // 分隔线颜色接管：HorizontalRuleComponent 的线色写死 Colors.grey
-        // （源码实测，HorizontalRuleComponentViewModel 不透出 color 键，
-        // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
-        // 构建器前面，用主题 divider 色重建同一个组件。
-        const _LabHorizontalRuleComponentBuilder(),
-        // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
-        _LabBlockquoteComponentBuilder(
-          editor: _editor,
-          focusNode: _editorFocus,
-        ),
-        // 任务勾选框对齐修复：官方 Checkbox 视觉盒 40px 导致框比文字
-        // 低约 10px（真机用户反馈），换自绘 22px 勾选框与首行视觉居中。
-        XiaojiTaskComponentBuilder(_editor),
-        // 文件附件：整行只有 `[文件名](assets/…)` 的段落渲染成卡片，
-        // 点击查看/复制路径，不再是一条点了没反应的下划线链接。
-        AttachmentComponentBuilder(
-          repository: widget.repository,
-          editor: _editor,
-          onShowActions: _showAttachmentActions,
-        ),
-        // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
-        const _LabListItemComponentBuilder(),
-        ...defaultComponentBuilders,
-        const UnknownComponentBuilder(),
-      ],
+        androidHandleColor: colors.accent,
+        stylesheet: _buildStylesheet(colors),
+        // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
+        // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
+        contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
+          (SuperEditorContext context) =>
+              XiaojiLinkTapHandler(context.document),
+        ],
+        // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
+        // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
+        // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
+        documentOverlayBuilders: <SuperEditorLayerBuilder>[
+          const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+          const SuperEditorIosHandlesDocumentLayerBuilder(),
+          const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+          const SuperEditorAndroidHandlesDocumentLayerBuilder(caretWidth: 0),
+          const DefaultCaretOverlayBuilder(),
+          XiaojiCaretLayerBuilder(_composer),
+        ],
+        componentBuilders: <ComponentBuilder>[
+          // 相对路径图片解析（assets/… → 真实文件），必须排在默认构建器
+          // 之前才能接管 ImageNode；其余组件保持默认链（含 Task）。
+          _LabImageComponentBuilder(
+            repository: widget.repository,
+            editor: _editor,
+            onImageLongPress: _showImageActions,
+          ),
+          // 分隔线颜色接管：HorizontalRuleComponent 的线色写死 Colors.grey
+          // （源码实测，HorizontalRuleComponentViewModel 不透出 color 键，
+          // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
+          // 构建器前面，用主题 divider 色重建同一个组件。
+          const _LabHorizontalRuleComponentBuilder(),
+          // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
+          _LabBlockquoteComponentBuilder(
+            editor: _editor,
+            focusNode: _editorFocus,
+          ),
+          // 任务勾选框对齐修复：官方 Checkbox 视觉盒 40px 导致框比文字
+          // 低约 10px（真机用户反馈），换自绘 22px 勾选框与首行视觉居中。
+          XiaojiTaskComponentBuilder(_editor),
+          // 文件附件：整行只有 `[文件名](assets/…)` 的段落渲染成卡片，
+          // 点击查看/复制路径，不再是一条点了没反应的下划线链接。
+          AttachmentComponentBuilder(
+            repository: widget.repository,
+            editor: _editor,
+            onShowActions: _showAttachmentActions,
+          ),
+          // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
+          const _LabListItemComponentBuilder(),
+          ...defaultComponentBuilders,
+          const UnknownComponentBuilder(),
+        ],
       ),
     );
   }
@@ -2487,8 +2472,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 工具栏也必须跟着收起；否则底部会一直挂着一条按钮条。
           // 子菜单展开、或正在「面板 → 键盘」回弹时，键盘高度可能短暂为
           // 0，但工具栏必须留下（否则会先滑下去再被顶上来，用户反馈）。
-          final bool show =
-              editing && (imeInset > 0 || _panelTransitioning);
+          final bool show = editing && (imeInset > 0 || _panelTransitioning);
           return IgnorePointer(
             // 不可见时也别让它接住点击（否则会点和渲染态完全无关的东西）。
             ignoring: !show,
@@ -2785,12 +2769,13 @@ class _LabImageComponentBuilder implements ComponentBuilder {
           height: 120,
           decoration: BoxDecoration(
             color: colors.surface2,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadius.block),
           ),
           alignment: Alignment.center,
           child: Text(
             vm.altText.isEmpty ? '图片' : vm.altText,
-            style: TextStyle(fontSize: AppFontSize.label, color: colors.tertiary),
+            style:
+                TextStyle(fontSize: AppFontSize.label, color: colors.tertiary),
           ),
         );
       },

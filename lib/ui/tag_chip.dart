@@ -5,7 +5,7 @@ import 'tag_palette.dart';
 
 /// 标签胶囊（`#标签`）。
 ///
-/// 列表卡片、详情页底部标签栏共用这一个规格：5 圆角、0.5 描边、
+/// 列表卡片、详情页底部标签栏共用这一个规格：4 圆角、0.5 描边、
 /// 12 号中等字重。颜色由 [TagPalette] 按标签名稳定生成 —— 同一个标签
 /// 在列表和详情里颜色一致，不同标签颜色不同。
 class TagChip extends StatelessWidget {
@@ -21,11 +21,11 @@ class TagChip extends StatelessWidget {
     final colors = AppColors.of(context);
     final TagTone tone = TagPalette.toneFor(label, colors);
     return Container(
-      height: 22,
+      height: 24,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: isOverflow ? colors.accentBg : tone.background,
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         border: Border.all(
           color: isOverflow
               ? colors.chipBorder.withValues(alpha: 0.6)

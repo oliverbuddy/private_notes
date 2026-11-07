@@ -27,6 +27,8 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.fabBackground,
     required this.fabForeground,
     required this.danger,
+    required this.onDanger,
+    required this.inverseAccent,
   });
 
   /// 页面底色。
@@ -83,62 +85,77 @@ class AppColors extends ThemeExtension<AppColors> {
   /// 破坏性操作（删除）。国内规范：确认删除必须是红色，不能复用强调色。
   final Color danger;
 
+  /// 危险色之上的文字：浅色主题用白字，深色主题的红更亮、改用黑字，
+  /// 否则白字在 #FF6B5B 上只有 2.8:1。
+  final Color onDanger;
+
+  /// 反色容器（SnackBar）上的强调色。
+  ///
+  /// SnackBar 底色始终是「文字色」（浅色主题深底、深色主题浅底），
+  /// 普通 accent 在上面只有约 2:1，这里给一组专门的反色强调。
+  final Color inverseAccent;
+
   /// 悬浮按钮图标色。
   final Color fabForeground;
 
+  /// HarmonyOS 色板（浅色）。
+  ///
+  /// page 是页面/卡片底色，pageAlt 是分组页的灰底：
+  /// 页面 #FFFFFF、分组底 #F1F3F5、卡片 #FFFFFF；
+  /// 深色反过来：分组底 #000000、卡片 #1A1A1A。
+  /// 这样设置类页面是「灰底白卡」，编辑页是纯白/近黑，符合鸿蒙的层次。
   static const AppColors light = AppColors(
     page: Color(0xFFFFFFFF),
-    pageAlt: Color(0xFFF7F5F0),
-    text: Color(0xFF2C2C2A),
-    secondary: Color(0xFF74716A),
-    // 时间戳、辅助说明这类「弱文字」原为 #A9A69D，在米底上只有 2.2:1，
-    // 小字号几乎糊成背景。提到 12sp 下可读的一档（≈3:1），层级仍低于正文。
-    tertiary: Color(0xFF918E85),
-    divider: Color(0x0F000000), // rgba(0,0,0,0.06)
-    dividerStrong: Color(0xFFEFEDE6),
-    separator: Color(0xFFF2F0E9),
-    separatorCompact: Color(0xFFF7F5EE),
-    accent: Color(0xFF0A6CFF),
-    accentBg: Color(0xFFEDF3FF),
-    chipBorder: Color(0xFFE0DED6),
-    chipBorderSelected: Color(0xFFB9D3FF),
-    syntaxMarker: Color(0xFFD3D1C7),
-    searchHit: Color(0xFFD9E7FF),
-    surface2: Color(0xFFF5F3EC),
-    fabBackground: Color(0xFF2C2C2A),
+    pageAlt: Color(0xFFF1F3F5),
+    // 鸿蒙一级文字 #182431（不是纯黑，降低对比锐度）。
+    text: Color(0xFF182431),
+    secondary: Color(0xFF66707D),
+    tertiary: Color(0xFF99A1AD),
+    divider: Color(0x33182431),
+    dividerStrong: Color(0xFFE5E6EB),
+    separator: Color(0xFFE8EAED),
+    separatorCompact: Color(0xFFF1F3F5),
+    // 鸿蒙品牌蓝：链接、选中、主按钮共用。
+    accent: Color(0xFF0A59F7),
+    accentBg: Color(0xFFE8F0FF),
+    chipBorder: Color(0xFFDCE0E5),
+    chipBorderSelected: Color(0xFF99BCFF),
+    syntaxMarker: Color(0xFFC5CAD3),
+    searchHit: Color(0xFFCCE0FF),
+    surface2: Color(0xFFF1F3F5),
+    fabBackground: Color(0xFF0A59F7),
     fabForeground: Color(0xFFFFFFFF),
-    danger: Color(0xFFDD4B4B),
+    // 比品牌红略深一档：保证白字 4.8:1、红字在白底 4.8:1。
+    danger: Color(0xFFD6341F),
+    onDanger: Color(0xFFFFFFFF),
+    inverseAccent: Color(0xFF8AB4FF),
   );
 
   static const AppColors dark = AppColors(
-    page: Color(0xFF161514),
-    // 深色的卡片/分组表面：必须比 page 亮出可感知的一档。
-    // 旧值 #1A1917 与 page 只差一线，卡片浮在页面上完全看不出轮廓
-    // （用户实测反馈）。层级设计：page #161514 < pageAlt #201F1D
-    // < surface2 #232220，三档表面各自分明。
-    pageAlt: Color(0xFF201F1D),
-    text: Color(0xFFE9E7E2),
-    // 深色下弱文字同步提亮一档：原 secondary 4.9:1、tertiary 3.8:1，
-    // 后者在卡片底（pageAlt）上偏灰，时间戳看起来像禁用态。
-    secondary: Color(0xFF9C9991),
-    tertiary: Color(0xFF8A8780),
-    divider: Color(0x12FFFFFF), // rgba(255,255,255,0.07)
-    dividerStrong: Color(0xFF302F2C),
-    // 深色下分隔线必须比底色亮出可感知的一档：#232220 在 #161514 上
-    // 肉眼几乎不可见（用户报过「暗黑模式下有些效果看不到」）。
-    separator: Color(0xFF2E2D2A),
-    separatorCompact: Color(0xFF262523),
-    accent: Color(0xFF7DB2FF),
-    accentBg: Color(0xFF1C2637),
-    chipBorder: Color(0xFF3A3835),
-    chipBorderSelected: Color(0xFF35507A),
-    syntaxMarker: Color(0xFF4F4D47),
-    // 搜索命中底色同理：#1B2431 与底色几乎同亮度，高亮等于没高。
-    searchHit: Color(0xFF24334F),
-    surface2: Color(0xFF232220),
-    fabBackground: Color(0xFFE9E7E2),
-    fabForeground: Color(0xFF161514),
-    danger: Color(0xFFFF7076),
+    page: Color(0xFF1A1A1A),
+    pageAlt: Color(0xFF000000),
+    text: Color(0xFFE5E5E5),
+    secondary: Color(0xFF99A1AD),
+    // 比 page/surface2 都亮：12 号灰色说明文字在 #26282B 上仍有 5:1。
+    tertiary: Color(0xFF8E97A4),
+    divider: Color(0x33FFFFFF),
+    dividerStrong: Color(0xFF2E3135),
+    separator: Color(0xFF2E3135),
+    separatorCompact: Color(0xFF242424),
+    // 深色下提亮品牌蓝，保证 4.5:1 以上对比度。
+    accent: Color(0xFF5291FF),
+    // 14%：再高会让选中 chip 上的蓝字掉到 4.5:1 以下。
+    accentBg: Color(0x245291FF),
+    chipBorder: Color(0xFF3A3F45),
+    chipBorderSelected: Color(0xFF5291FF),
+    syntaxMarker: Color(0xFF6E7681),
+    searchHit: Color(0x405291FF),
+    surface2: Color(0xFF26282B),
+    fabBackground: Color(0xFF5291FF),
+    fabForeground: Color(0xFF000000),
+    danger: Color(0xFFFF6B5B),
+    onDanger: Color(0xFF000000),
+    inverseAccent: Color(0xFF0A4FD6),
   );
 
   /// 取当前主题的 token。拿不到扩展时退回浅色，保证 UI 永远不会崩。
@@ -167,6 +184,8 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? fabBackground,
     Color? fabForeground,
     Color? danger,
+    Color? onDanger,
+    Color? inverseAccent,
   }) {
     return AppColors(
       page: page ?? this.page,
@@ -188,6 +207,8 @@ class AppColors extends ThemeExtension<AppColors> {
       fabBackground: fabBackground ?? this.fabBackground,
       fabForeground: fabForeground ?? this.fabForeground,
       danger: danger ?? this.danger,
+      onDanger: onDanger ?? this.onDanger,
+      inverseAccent: inverseAccent ?? this.inverseAccent,
     );
   }
 
@@ -224,21 +245,55 @@ class AppColors extends ThemeExtension<AppColors> {
       fabForeground:
           Color.lerp(fabForeground, other.fabForeground, t) ?? fabForeground,
       danger: Color.lerp(danger, other.danger, t) ?? danger,
+      onDanger: Color.lerp(onDanger, other.onDanger, t) ?? onDanger,
+      inverseAccent:
+          Color.lerp(inverseAccent, other.inverseAccent, t) ?? inverseAccent,
     );
   }
 }
 
-/// 圆角 token。只有三档，避免「每个组件自己拍一个数」。
+/// 圆角 token（HarmonyOS Design）。
+///
+/// 官方圆角参数：标签/角标 4、图片/图标 8、内容卡片 16、
+/// 按钮与菜单 20、输入框 20、搜索框 18。业务代码只引这里的名字，
+/// 以后调圆角只改这一处。
 abstract final class AppRadius {
   static const double block = 8;
-  static const double card = 10;
-  static const double chip = 11;
 
-  /// 缩略图等 56dp 左右的小图：比 block 再收一档，图片角不会被「圆掉」。
-  static const double thumb = 6;
+  /// 内容卡片、分组列表：16。
+  static const double card = 16;
 
-  /// 胶囊：标签、版本号这类高度约 24dp 的圆角块。
+  /// 按钮、菜单、弹层操作：20。
+  static const double button = 20;
+
+  /// 标签胶囊：官方「标签」用小圆角 4。
+  static const double chip = 4;
+
+  /// 缩略图、文件图标这类小图：8。
+  static const double thumb = 8;
+
+  /// 底部弹层顶部两角：20。
+  static const double sheet = 20;
+
+  /// 输入框：20。
+  static const double field = 20;
+
+  /// 搜索框：18。
+  static const double search = 18;
+
+  /// 胶囊：版本号这类高度约 24dp 的圆角块。
   static const double pill = 999;
+}
+
+/// HarmonyOS 的连续圆角（与系统卡片一致）。
+///
+/// 卡片、按钮、浮层优先用它；`Container` 里改用 `ShapeDecoration` 承载。
+abstract final class AppShape {
+  static ShapeBorder continuous(double radius) {
+    return RoundedSuperellipseBorder(
+      borderRadius: BorderRadius.circular(radius),
+    );
+  }
 }
 
 /// 引用块（引文块）视觉规格。
@@ -265,107 +320,209 @@ abstract final class AppQuote {
   );
 
   /// 圆角。
-  static const double radius = 6;
+  static const double radius = 8;
 
   /// 引文字阶：比正文小一档，形成「引文」的层级差。
-  static const double fontSize = 14.5;
+  static const double fontSize = 15.5;
   static const double height = 1.65;
   static const double letterSpacing = 0.25;
 }
 
-/// 三档字重。
+/// 字重档位（HarmonyOS 只用 Regular / Medium / Bold 三档）。
 ///
-/// 中文只有 Regular / Medium 两个真实字面，w500 和 w600 在 Android 上会落到
-/// 不同字面（Medium 与 Bold 之间），这就是「标题看着不够精神」的原因 ——
-/// 之前全局只有 400/500，标题和正文的中文粗细差几乎看不出来。
-/// 所以标题类一律走 [semibold]，正文走 [regular]，弱强调才用 [medium]。
+/// 中文在 Android 上没有 600 字面，w600 会落到 Bold 附近；
+/// 标题用 [semibold] 保持「精神」，正文 [regular]，弱强调 [medium]。
 abstract final class AppWeight {
   static const FontWeight regular = FontWeight.w400;
   static const FontWeight medium = FontWeight.w500;
   static const FontWeight semibold = FontWeight.w600;
 }
 
-/// 字阶。
+/// 字阶（HarmonyOS Design 的字号阶梯）。
 ///
-/// 中文没有西文那样的 x-height 视觉补偿，字号偏小、行高偏紧时整页会显得
-/// 「挤」和「灰」。这里按国内主流资讯/工具类 App 的取值定档：
-/// 页面标题 22 / 区块标题 17 / 正文 16 / 辅助 13 / 最小 12。
-/// 中文标题额外加 0.2–0.3 的字距，横排才不觉得粘连。
+/// 大标题 30 Bold / 标题 24 Bold / 小标题 20 Medium / 正文 16 Regular /
+/// 辅助 14 / 说明 12。行高按官方 24→32、16→24、14→20、12→18 换算。
+/// 业务代码只用这里的语义样式，不再自己拍字号。
 abstract final class AppText {
-  /// 页面标题（主页「小记」、设置页标题）。
+  /// 主页标题（HarmonyOS 标题 24 Bold）。
   static const TextStyle pageTitle = TextStyle(
     fontSize: AppFontSize.pageTitle,
     height: 1.25,
-    fontWeight: AppWeight.semibold,
-    letterSpacing: 0.3,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0,
   );
 
-  /// 弹层/对话框标题。
+  /// 导航栏 / 弹层标题（HarmonyOS 小标题 20 Medium）。
   static const TextStyle sheetTitle = TextStyle(
     fontSize: AppFontSize.subtitle,
     height: 1.3,
-    fontWeight: AppWeight.semibold,
-    letterSpacing: 0.2,
+    fontWeight: AppWeight.medium,
+    letterSpacing: 0,
   );
 
-  /// 正文。列表摘要与阅读态共用。
+  /// 正文。列表摘要与阅读态共用（HarmonyOS 正文 16 / 行高 24）。
   static const TextStyle body = TextStyle(
     fontSize: AppFontSize.body,
-    height: 1.68,
+    height: 1.5,
+    letterSpacing: 0,
   );
 
-  /// 列表元信息（时间、字数）。
+  /// 列表元信息（时间、字数），HarmonyOS 说明文字 12 / 行高 18。
   static const TextStyle meta = TextStyle(
     fontSize: AppFontSize.meta,
-    height: 1.2,
-    letterSpacing: 0.1,
+    height: 1.5,
+    letterSpacing: 0,
   );
 
-  /// 分组小标题。
+  /// 分组小标题与说明文字（12 / 行高 18）。
   static const TextStyle caption = TextStyle(
     fontSize: AppFontSize.caption,
-    height: 1.2,
-    fontWeight: AppWeight.medium,
-    letterSpacing: 0.3,
+    height: 1.5,
+    fontWeight: AppWeight.regular,
+    letterSpacing: 0,
   );
 }
 
-/// 字号刻度。
+/// 字号刻度：映射 HarmonyOS 的 12 / 14 / 16 / 20 / 24 / 30 六档。
 ///
-/// 全项目只从这里取值：之前 27 个文件里散着 124 处 `fontSize: 13.5` 这类
-/// 硬编码，同一个层级在不同页面各写各的。集中后改一档只改一处。
+/// 保留旧名字是为了让 40 多个调用点零改动地升级到新字阶；
+/// 新增代码请优先用 [AppText] 里的语义样式。
 abstract final class AppFontSize {
-  static const double tiny = 9.5;
-  static const double micro = 10;
-  static const double badge = 11;
-  static const double badgeLg = 11.5;
+  static const double tiny = 12;
+  static const double micro = 12;
+  static const double badge = 12;
+  static const double badgeLg = 12;
   static const double caption = 12;
-  static const double meta = 12.5;
-  static const double label = 13;
-  static const double labelLg = 13.5;
+  static const double meta = 12;
+  static const double label = 14;
+  static const double labelLg = 14;
   static const double value = 14;
-  static const double hint = 15;
-  static const double summary = 15.5;
+  static const double hint = 16;
+  static const double summary = 16;
   static const double body = 16;
-  static const double bodyLg = 16.5;
-  static const double subtitle = 17;
-  static const double heading = 18.5;
+  static const double bodyLg = 16;
+  static const double subtitle = 20;
+  static const double heading = 20;
   static const double title = 20;
-  static const double titleLg = 21;
-  static const double pageTitle = 22;
+  static const double titleLg = 24;
+  static const double pageTitle = 24;
 }
 
-/// 间距只用 4 的倍数，避免出现 5、7、11 这种「看起来差一点」的值。
+/// 8vp 基线网格（HarmonyOS 的间距基准）。
 abstract final class AppSpace {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 20;
-  static const double xxl = 28;
+  static const double xxl = 32;
 
-  /// 页面左右边距。列表、编辑区、设置页统一用这一个值。
-  static const double page = 20;
+  /// 页面左右边距。鸿蒙内容页标准 16。
+  static const double page = 16;
+}
+
+/// 组件高度刻度（HarmonyOS Design）。
+///
+/// 导航栏 48、单行列表 48、双行列表 64、标准按钮 40、菜单行 56。
+/// 官方最小可点热区 40vp，这里的行高都不低于 48。
+abstract final class AppSize {
+  static const double navBar = 48;
+  static const double row = 48;
+  static const double rowLarge = 64;
+  static const double button = 40;
+  static const double actionRow = 56;
+}
+
+/// 图标尺寸刻度（HarmonyOS 系统图标 24vp，行内 16vp）。
+abstract final class AppIcon {
+  /// 返回箭头（系统导航图标 24）。
+  static const double nav = 24;
+
+  /// 行尾箭头、「⋯」这类弱操作图标。
+  static const double chevron = 16;
+
+  /// 顶部栏动作图标、弹层行动图标。
+  static const double action = 24;
+
+  /// 输入框、提示卡这类行内图标。
+  static const double inline = 16;
+
+  /// 置顶、锁定这类状态小标记。
+  static const double badge = 12;
+
+  /// 空态插图。
+  static const double hero = 48;
+
+  /// 悬浮按钮。
+  static const double fab = 24;
+}
+
+/// 阴影梯度（HarmonyOS 的「立体感」= 极浅大模糊 + 少量下偏移）。
+abstract final class AppShadow {
+  /// 悬浮按钮：16 blur / 6 offset / 15% 黑。
+  static const List<BoxShadow> floating = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x26000000),
+      blurRadius: 16,
+      offset: Offset(0, 6),
+    ),
+  ];
+
+  /// 底部弹层、气泡：24 blur / 上移 4。
+  static const List<BoxShadow> sheet = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x1F000000),
+      blurRadius: 24,
+      offset: Offset(0, -4),
+    ),
+  ];
+
+  /// 卡片：官方 card shadow（blur 8 / y 2 / 8% 黑），
+  /// 只用来和灰底分层，不制造重投影。
+  static const List<BoxShadow> card = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x14000000),
+      blurRadius: 8,
+      offset: Offset(0, 2),
+    ),
+  ];
+}
+
+/// 动效刻度（HarmonyOS 的时长与缓动）。
+///
+/// 官方推荐 300ms 的页面转场与弹性曲线；按压反馈要更快，取 fast。
+abstract final class AppMotion {
+  static const Duration fast = Duration(milliseconds: 120);
+  static const Duration normal = Duration(milliseconds: 300);
+  static const Duration slow = Duration(milliseconds: 400);
+
+  /// HarmonyOS 标准曲线 cubic-bezier(0.2, 0, 0.2, 1)。
+  static const Curve standard = Cubic(0.2, 0, 0.2, 1);
+
+  static const Curve decelerate = Cubic(0.0, 0, 0.2, 1);
+  static const Curve accelerate = Cubic(0.4, 0, 1, 1);
+
+  /// 弹性曲线：用于弹层出现、按钮回弹这类「有生命力」的小动效。
+  static const Curve spring = Cubic(0.34, 1.56, 0.64, 1);
+}
+
+/// 响应式断点：手机 / 平板 / 桌面。
+///
+/// 目前先统一「内容最大宽度 + 居中」，后续做 Pad 双栏、PC 侧栏时
+/// 只需要扩展这里，不用逐页改布局。
+abstract final class AppBreakpoints {
+  static const double compact = 600;
+  static const double medium = 1024;
+
+  static bool isCompact(double width) => width < compact;
+
+  /// 单列内容的最大宽度：手机全宽，平板/桌面不把一行拉得过长。
+  static double contentMaxWidth(double width) {
+    if (isCompact(width)) {
+      return width;
+    }
+    return width < medium ? 680 : 760;
+  }
 }
 
 abstract final class AppTheme {
@@ -382,18 +539,32 @@ abstract final class AppTheme {
         brightness: brightness,
       ).copyWith(
         primary: c.accent,
+        // 深色主题的亮蓝上必须用黑字（白字只有 3.4:1）。
+        onPrimary: c.fabForeground,
         secondary: c.accent,
+        onSecondary: c.fabForeground,
         surface: c.page,
         onSurface: c.text,
       ),
-      // 规范明确禁止阴影/渐变/模糊，所以把所有水波纹也关掉，只留 InkWell 的按压色。
+      // 鸿蒙的按压反馈由 AppPressable 统一提供，不用 Material 水波纹。
       splashFactory: NoSplash.splashFactory,
-      highlightColor: c.divider,
+      highlightColor: c.text.withValues(alpha: 0.05),
       hoverColor: Colors.transparent,
       dividerColor: c.divider,
       canvasColor: c.page,
       fontFamily: null,
       visualDensity: VisualDensity.standard,
+      // 全站统一鸿蒙转场：右侧滑入 20% + 淡入，300ms 标准曲线。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: <TargetPlatform, PageTransitionsBuilder>{
+          TargetPlatform.android: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.iOS: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.macOS: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.windows: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.linux: HarmonyPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: HarmonyPageTransitionsBuilder(),
+        },
+      ),
     );
 
     return base.copyWith(
@@ -408,58 +579,145 @@ abstract final class AppTheme {
         selectionHandleColor: c.accent,
       ),
       iconTheme: IconThemeData(color: c.secondary),
+      // 鸿蒙标准按钮：40 高、20 圆角、16 Medium。
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, AppSize.button),
+          textStyle: const TextStyle(
+            fontSize: AppFontSize.body,
+            fontWeight: AppWeight.medium,
+          ),
+          shape: RoundedSuperellipseBorder(
+            borderRadius: BorderRadius.circular(AppRadius.button),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: c.accent,
+          textStyle: const TextStyle(
+            fontSize: AppFontSize.body,
+            fontWeight: AppWeight.regular,
+          ),
+        ),
+      ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: c.text,
         contentTextStyle: TextStyle(
           color: c.page,
-          fontSize: 13,
+          fontSize: AppFontSize.label,
           fontWeight: AppWeight.regular,
         ),
         behavior: SnackBarBehavior.floating,
         elevation: 0,
+        // SnackBar 底色是「反色」，普通 accent 在上面只有约 2:1，
+        // 这里换成专门的反色强调（浅色深底用亮蓝、深色浅底用深蓝）。
+        actionTextColor: c.inverseAccent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(AppRadius.button)),
+        ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: c.page,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        modalBackgroundColor: c.page,
+        modalElevation: 0,
+        shape: const RoundedSuperellipseBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
+          ),
         ),
       ),
-      // 弹窗统一成纸白 + 无阴影：Material 3 默认用带色调的灰底，
-      // 和「纸」的基调完全冲突，且阴影在规范里是禁用的。
       dialogTheme: DialogThemeData(
         backgroundColor: c.page,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: c.dividerStrong, width: 0.5),
+        shape: RoundedSuperellipseBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sheet),
         ),
         titleTextStyle: TextStyle(
           color: c.text,
-          fontSize: 16,
+          fontSize: AppFontSize.subtitle,
           fontWeight: AppWeight.medium,
         ),
         contentTextStyle: TextStyle(
           color: c.secondary,
-          fontSize: 14,
-          height: 1.6,
+          fontSize: AppFontSize.labelLg,
+          height: 1.5,
         ),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: c.page,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.card),
-          side: BorderSide(color: c.dividerStrong, width: 0.5),
+        shape: RoundedSuperellipseBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button),
         ),
         textStyle: TextStyle(
           color: c.text,
-          fontSize: 14,
+          fontSize: AppFontSize.summary,
           fontWeight: AppWeight.regular,
         ),
       ),
     );
+  }
+}
+
+/// HarmonyOS 页面转场。
+///
+/// 新页从右侧 20% 处滑入并淡入（300ms 标准曲线），旧页轻微左移淡出，
+/// 形成前后层次，而不是整页硬推。挂在 ThemeData 上一次，全站生效，
+/// 后续新增页面不用各自写路由动画。
+class HarmonyPageTransitionsBuilder extends PageTransitionsBuilder {
+  const HarmonyPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final Animation<double> enter = CurvedAnimation(
+      parent: animation,
+      curve: AppMotion.standard,
+      reverseCurve: AppMotion.accelerate,
+    );
+    // 纯滑动，不加整页淡入：整页 FadeTransition 会让每一帧多一层全屏
+    // 透明合成，低端机/模拟器上肉眼就是「卡一下」。滑动距离收到 12%，
+    // 既有方向感，又不会把整页推出屏幕。
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0.12, 0),
+        end: Offset.zero,
+      ).animate(enter),
+      child: child,
+    );
+  }
+}
+
+/// 回弹滚动 + 去掉 Android 的拉伸/发光指示器。
+///
+/// 在 `MaterialApp.scrollBehavior` 挂一次，所有可滚动区域自动生效；
+/// 后续 Pad/PC 端要换成鼠标滚轮策略时，也只需要改这一个类。
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const BouncingScrollPhysics(
+      parent: AlwaysScrollableScrollPhysics(),
+    );
+  }
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
   }
 }

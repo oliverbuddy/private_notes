@@ -368,7 +368,7 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
           decoration: BoxDecoration(
             color: tone.background,
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(AppRadius.chip),
             border: Border.all(
               color: tone.border,
               width: 0.5,

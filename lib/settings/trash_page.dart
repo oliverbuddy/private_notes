@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../data/note_repository.dart';
 import '../data/note_store.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_list.dart';
+import '../ui/content_frame.dart';
+import '../ui/pressable.dart';
 import '../ui/action_sheet.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
@@ -115,12 +118,9 @@ class _TrashPageState extends State<TrashPage> {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color background = isDark ? colors.page : colors.pageAlt;
-    final Color cardColor = isDark ? colors.pageAlt : colors.page;
 
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: colors.pageAlt,
       body: SafeArea(
         child: Column(
           children: <Widget>[
@@ -130,33 +130,30 @@ class _TrashPageState extends State<TrashPage> {
                   ? const SizedBox.shrink()
                   : _entries.isEmpty
                       ? _buildEmpty(colors)
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-                          itemCount: _entries.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (BuildContext context, int index) {
-                            return _TrashTile(
-                              entry: _entries[index],
-                              color: cardColor,
-                              onTap: () => _showActions(_entries[index]),
-                              onRestore: () => _restore(_entries[index]),
-                            );
-                          },
+                      : ContentFrame(
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpace.page,
+                              8,
+                              AppSpace.page,
+                              24,
+                            ),
+                            children: <Widget>[
+                              AppListSection(
+                                footer: '删除的小记会保留 30 天，到期自动清理。',
+                                children: <Widget>[
+                                  for (final entry in _entries)
+                                    _TrashTile(
+                                      entry: entry,
+                                      onTap: () => _showActions(entry),
+                                      onRestore: () => _restore(entry),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
             ),
-            if (_entries.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                child: Text(
-                  '删除的小记会保留 30 天，到期自动清理。',
-                  style: TextStyle(
-                    fontSize: AppFontSize.caption,
-                    height: 1.6,
-                    color: colors.tertiary,
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -165,16 +162,16 @@ class _TrashPageState extends State<TrashPage> {
 
   Widget _buildHeader(AppColors colors) {
     return SizedBox(
-      height: 48,
+      height: AppSize.navBar,
       child: Row(
         children: <Widget>[
           SizedBox(
-            width: 48,
+            width: AppSize.navBar,
             child: InkWell(
               onTap: () => Navigator.of(context).maybePop(),
               child: Icon(
                 Icons.arrow_back_ios_new,
-                size: 18,
+                size: AppIcon.nav,
                 color: colors.secondary,
               ),
             ),
@@ -189,7 +186,8 @@ class _TrashPageState extends State<TrashPage> {
               onPressed: _clearAll,
               child: Text(
                 '清空',
-                style: TextStyle(fontSize: AppFontSize.value, color: colors.danger),
+                style: TextStyle(
+                    fontSize: AppFontSize.labelLg, color: colors.danger),
               ),
             ),
         ],
@@ -202,11 +200,13 @@ class _TrashPageState extends State<TrashPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(Icons.delete_outline, size: 40, color: colors.tertiary),
+          Icon(Icons.delete_outline,
+              size: AppIcon.hero, color: colors.tertiary),
           const SizedBox(height: 12),
           Text(
             '回收站是空的',
-            style: TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
+            style:
+                TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
           ),
         ],
       ),
@@ -217,91 +217,85 @@ class _TrashPageState extends State<TrashPage> {
 class _TrashTile extends StatelessWidget {
   const _TrashTile({
     required this.entry,
-    required this.color,
     required this.onTap,
     required this.onRestore,
   });
 
   final TrashedNote entry;
-  final Color color;
   final VoidCallback onTap;
   final VoidCallback onRestore;
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final title = entry.locked
-        ? '已锁定'
-        : (entry.title.isEmpty ? '（无内容）' : entry.title);
+    final title =
+        entry.locked ? '已锁定' : (entry.title.isEmpty ? '（无内容）' : entry.title);
     final detail = <String>[
       formatListTime(entry.deletedAt),
-      if (entry.legacyFile)
-        '附件已丢失'
-      else if (entry.hasAssets)
-        '含附件',
+      if (entry.legacyFile) '附件已丢失' else if (entry.hasAssets) '含附件',
     ].join(' · ');
 
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        if (entry.locked) ...<Widget>[
-                          Icon(Icons.lock_outline,
-                              size: 15, color: colors.tertiary),
-                          const SizedBox(width: 6),
-                        ],
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppFontSize.summary,
-                              height: 1.3,
-                              fontWeight: AppWeight.medium,
-                              color: entry.locked
-                                  ? colors.secondary
-                                  : colors.text,
-                            ),
+    return AppPressable(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          12,
+          AppSpace.sm,
+          12,
+        ),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      if (entry.locked) ...<Widget>[
+                        Icon(Icons.lock_outline,
+                            size: AppIcon.badge, color: colors.tertiary),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppFontSize.summary,
+                            height: 1.3,
+                            fontWeight: AppWeight.medium,
+                            color:
+                                entry.locked ? colors.secondary : colors.text,
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      detail,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppFontSize.caption,
-                        height: 1.3,
-                        color: colors.tertiary,
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    detail,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      height: 1.3,
+                      color: colors.tertiary,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              TextButton(
-                onPressed: onRestore,
-                child: Text(
-                  '恢复',
-                  style: TextStyle(fontSize: AppFontSize.value, color: colors.accent),
-                ),
+            ),
+            TextButton(
+              onPressed: onRestore,
+              child: Text(
+                '恢复',
+                style: TextStyle(
+                    fontSize: AppFontSize.value, color: colors.accent),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

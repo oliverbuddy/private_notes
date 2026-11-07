@@ -131,7 +131,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                   padding: const EdgeInsets.only(top: 1),
                   child: Icon(
                     exists ? Icons.insert_drive_file_outlined : Icons.error_outline,
-                    size: 22,
+                    size: AppIcon.action,
                     color: exists ? colors.accent : colors.danger,
                   ),
                 ),
@@ -179,7 +179,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                 const SizedBox(width: 8),
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Icon(Icons.chevron_right, size: 18, color: colors.tertiary),
+                  child: Icon(Icons.chevron_right, size: AppIcon.chevron, color: colors.tertiary),
                 ),
               ],
             ),
@@ -213,18 +213,14 @@ Future<void> showAttachmentActionsSheet({
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 name,
-                style: TextStyle(
-                  fontSize: AppFontSize.body,
-                  fontWeight: AppWeight.medium,
-                  color: colors.text,
-                ),
+                style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
               const SizedBox(height: 6),
               Text(
@@ -244,7 +240,7 @@ Future<void> showAttachmentActionsSheet({
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: _AttachmentButton(
+                    child: AppSheetButton(
                       label: '复制路径',
                       background: colors.surface2,
                       foreground: colors.accent,
@@ -253,7 +249,7 @@ Future<void> showAttachmentActionsSheet({
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _AttachmentButton(
+                    child: AppSheetButton(
                       label: '从正文移除',
                       background: colors.surface2,
                       foreground: colors.danger,
@@ -300,43 +296,4 @@ String _formatSize(int bytes) {
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-}
-
-class _AttachmentButton extends StatelessWidget {
-  const _AttachmentButton({
-    required this.label,
-    required this.background,
-    required this.foreground,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 48,
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppFontSize.value,
-              height: 1,
-              fontWeight: AppWeight.medium,
-              color: foreground,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

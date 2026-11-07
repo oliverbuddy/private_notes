@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'pressable.dart';
 import 'show_sheet.dart';
 
 /// 底部动作菜单里的一项。
@@ -26,10 +27,11 @@ class SheetAction<T> {
   final bool selected;
 }
 
-/// 统一的底部动作菜单（图片长按菜单等）。
+/// 统一的底部动作菜单（主页长按、详情「⋯」等）。
 ///
-/// 与确认弹层共用同一套弹层动画、grabber 和安全区；列表项 52dp 高，
-/// 末项「取消」用浅底圆角按钮，符合国内 App 的通行样式。
+/// HarmonyOS 菜单规格：标题 20 Medium 左对齐、行高 56、24 图标、
+/// 0.5 分隔线（左缩进 16）、底部独立的 40 高「取消」按钮。
+/// 与确认弹层、选项弹层共用同一套弹层动画与安全区。
 Future<T?> showXiaojiActionSheet<T>({
   required BuildContext context,
   required String title,
@@ -49,36 +51,42 @@ Future<T?> showXiaojiActionSheet<T>({
             children: <Widget>[
               if (title.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+                  padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                   child: Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppText.sheetTitle.copyWith(color: colors.text),
                   ),
                 ),
               for (var i = 0; i < actions.length; i++) ...<Widget>[
                 if (i > 0)
-                  Container(height: 0.5, color: colors.divider),
+                  Divider(
+                    height: 0.5,
+                    thickness: 0.5,
+                    indent: AppSpace.lg,
+                    color: colors.divider,
+                  ),
                 _ActionRow<T>(action: actions[i]),
               ],
-              const SizedBox(height: 12),
-              Material(
-                color: colors.surface2,
-                borderRadius: BorderRadius.circular(AppRadius.card),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => Navigator.of(sheetContext).pop(),
-                  child: SizedBox(
-                    height: 52,
-                    child: Center(
-                      child: Text(
-                        '取消',
-                        style: TextStyle(
-                          fontSize: AppFontSize.body,
-                          height: 1,
-                          fontWeight: AppWeight.medium,
-                          color: colors.secondary,
-                        ),
-                      ),
+              const SizedBox(height: 8),
+              AppPressable(
+                onTap: () => Navigator.of(sheetContext).pop(),
+                pressedScale: 1,
+                child: Container(
+                  height: AppSize.button,
+                  alignment: Alignment.center,
+                  decoration: ShapeDecoration(
+                    color: colors.surface2,
+                    shape: AppShape.continuous(AppRadius.button),
+                  ),
+                  child: Text(
+                    '取消',
+                    style: TextStyle(
+                      fontSize: AppFontSize.body,
+                      height: 1,
+                      fontWeight: AppWeight.medium,
+                      color: colors.accent,
                     ),
                   ),
                 ),
@@ -102,33 +110,34 @@ class _ActionRow<T> extends StatelessWidget {
     final Color foreground = action.destructive
         ? colors.danger
         : (action.selected ? colors.accent : colors.text);
-    return InkWell(
+    return AppPressable(
       onTap: () => Navigator.of(context).pop(action.value),
+      pressedScale: 1,
       child: SizedBox(
-        height: 52,
+        height: AppSize.actionRow,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
           child: Row(
             children: <Widget>[
               if (action.icon != null) ...<Widget>[
-                Icon(action.icon, size: 20, color: foreground),
-                const SizedBox(width: 10),
+                Icon(action.icon, size: AppIcon.action, color: foreground),
+                const SizedBox(width: AppSpace.md),
               ],
               Expanded(
                 child: Text(
                   action.label,
                   style: TextStyle(
-                    fontSize: AppFontSize.hint,
+                    fontSize: AppFontSize.body,
                     height: 1,
                     fontWeight: action.selected
-                        ? AppWeight.medium
+                        ? AppWeight.semibold
                         : AppWeight.regular,
                     color: foreground,
                   ),
                 ),
               ),
               if (action.selected)
-                Icon(Icons.check, size: 18, color: colors.accent),
+                Icon(Icons.check, size: AppIcon.chevron, color: colors.accent),
             ],
           ),
         ),

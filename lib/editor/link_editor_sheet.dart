@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../ui/app_field.dart';
 import '../ui/show_sheet.dart';
 
 /// 链接输入结果。
@@ -69,18 +70,14 @@ class _LinkEditorSheetState extends State<_LinkEditorSheet> {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 '插入链接',
-                style: TextStyle(
-                  fontSize: AppFontSize.body,
-                  fontWeight: AppWeight.medium,
-                  color: colors.text,
-                ),
+                style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
               const SizedBox(height: 12),
               _LinkField(
@@ -98,7 +95,7 @@ class _LinkEditorSheetState extends State<_LinkEditorSheet> {
               Row(
                 children: <Widget>[
                   Expanded(
-                    child: _LinkSheetButton(
+                    child: AppSheetButton(
                       label: '取消',
                       background: colors.surface2,
                       foreground: colors.secondary,
@@ -107,7 +104,7 @@ class _LinkEditorSheetState extends State<_LinkEditorSheet> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _LinkSheetButton(
+                    child: AppSheetButton(
                       label: '插入',
                       background: colors.accent,
                       foreground: colors.page,
@@ -139,64 +136,11 @@ class _LinkField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: colors.surface2,
-        borderRadius: BorderRadius.circular(AppRadius.block),
-      ),
-      child: TextField(
-        controller: controller,
-        autofocus: autofocus,
-        keyboardType: keyboardType,
-        style: TextStyle(fontSize: AppFontSize.hint, color: colors.text),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(fontSize: AppFontSize.labelLg, color: colors.tertiary),
-          border: InputBorder.none,
-          isDense: true,
-        ),
-      ),
-    );
-  }
-}
-
-class _LinkSheetButton extends StatelessWidget {
-  const _LinkSheetButton({
-    required this.label,
-    required this.background,
-    required this.foreground,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 52,
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppFontSize.body,
-              height: 1,
-              fontWeight: AppWeight.medium,
-              color: foreground,
-            ),
-          ),
-        ),
-      ),
+    return AppTextField(
+      controller: controller,
+      hintText: hint,
+      autofocus: autofocus,
+      keyboardType: keyboardType,
     );
   }
 }

@@ -4,6 +4,9 @@ import '../data/note_repository.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
+import '../ui/app_field.dart';
+import '../ui/app_list.dart';
+import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 
@@ -78,9 +81,7 @@ class TagsPage extends StatelessWidget {
     if (context.mounted) {
       showSnack(
         context,
-        message: affected == 0
-            ? '标签名没有变化'
-            : '已重命名为「$target」，共 $affected 条',
+        message: affected == 0 ? '标签名没有变化' : '已重命名为「$target」，共 $affected 条',
       );
     }
   }
@@ -88,9 +89,8 @@ class TagsPage extends StatelessWidget {
   /// 合并到另一个标签：复用 [NoteRepository.renameTag] 的去重逻辑，
   /// 两条标签都存在的笔记不会出现重复标签。
   Future<void> _merge(BuildContext context, String tag, int count) async {
-    final List<String> others = repository.tagCounts.keys
-        .where((String item) => item != tag)
-        .toList();
+    final List<String> others =
+        repository.tagCounts.keys.where((String item) => item != tag).toList();
     if (others.isEmpty) {
       showSnack(context, message: '还没有其他标签可以合并');
       return;
@@ -111,10 +111,8 @@ class TagsPage extends StatelessWidget {
     int count,
   ) {
     final Map<String, int> counts = repository.tagCounts;
-    final List<String> names = counts.keys
-        .where((String item) => item != tag)
-        .toList()
-      ..sort();
+    final List<String> names =
+        counts.keys.where((String item) => item != tag).toList()..sort();
     return showXiaojiSheet<String>(
       context: context,
       builder: (BuildContext sheetContext) {
@@ -122,7 +120,7 @@ class TagsPage extends StatelessWidget {
         return SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,10 +150,9 @@ class TagsPage extends StatelessWidget {
                     itemBuilder: (BuildContext context, int index) {
                       final String name = names[index];
                       return InkWell(
-                        onTap: () =>
-                            Navigator.of(sheetContext).pop(name),
+                        onTap: () => Navigator.of(sheetContext).pop(name),
                         child: SizedBox(
-                          height: 52,
+                          height: AppSize.row,
                           child: Row(
                             children: <Widget>[
                               Expanded(
@@ -164,7 +161,7 @@ class TagsPage extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: AppFontSize.body,
+                                    fontSize: AppFontSize.summary,
                                     color: colors.text,
                                   ),
                                 ),
@@ -172,7 +169,7 @@ class TagsPage extends StatelessWidget {
                               Text(
                                 '${counts[name] ?? 0} 条',
                                 style: TextStyle(
-                                  fontSize: AppFontSize.value,
+                                  fontSize: AppFontSize.labelLg,
                                   color: colors.secondary,
                                 ),
                               ),
@@ -224,45 +221,21 @@ class TagsPage extends StatelessWidget {
           child: SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
                     '重命名标签',
-                    style:
-                        AppText.sheetTitle.copyWith(color: colors.text),
+                    style: AppText.sheetTitle.copyWith(color: colors.text),
                   ),
-                  const SizedBox(height: 14),
-                  TextField(
+                  const SizedBox(height: 12),
+                  AppTextField(
                     controller: controller,
                     autofocus: true,
                     maxLength: 20,
-                    style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
-                    decoration: InputDecoration(
-                      counterText: '',
-                      hintText: '标签名',
-                      hintStyle: TextStyle(color: colors.tertiary),
-                      filled: true,
-                      fillColor: colors.surface2,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.card),
-                        borderSide:
-                            BorderSide(color: colors.chipBorder, width: 0.5),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.card),
-                        borderSide:
-                            BorderSide(color: colors.accent, width: 1),
-                      ),
-                    ),
+                    hintText: '标签名',
                     onSubmitted: (String value) =>
                         Navigator.of(sheetContext).pop(value.trim()),
                   ),
@@ -270,29 +243,21 @@ class TagsPage extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.of(sheetContext).pop(),
-                          child: Text(
-                            '取消',
-                            style: TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
-                          ),
+                        child: AppSheetButton(
+                          label: '取消',
+                          background: colors.surface2,
+                          foreground: colors.secondary,
+                          onTap: () => Navigator.of(sheetContext).pop(),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.of(sheetContext)
+                        child: AppSheetButton(
+                          label: '保存',
+                          background: colors.accent,
+                          foreground: colors.page,
+                          onTap: () => Navigator.of(sheetContext)
                               .pop(controller.text.trim()),
-                          style: TextButton.styleFrom(
-                            backgroundColor: colors.accent,
-                            foregroundColor: colors.page,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.card),
-                            ),
-                          ),
-                          child: const Text('保存'),
                         ),
                       ),
                     ],
@@ -309,12 +274,9 @@ class TagsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color background = isDark ? colors.page : colors.pageAlt;
-    final Color cardColor = isDark ? colors.pageAlt : colors.page;
 
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: colors.pageAlt,
       body: SafeArea(
         child: ListenableBuilder(
           listenable: repository,
@@ -330,57 +292,65 @@ class TagsPage extends StatelessWidget {
               children: <Widget>[
                 _buildHeader(context, colors),
                 Expanded(
-                  child: names.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                  child: ContentFrame(
+                    child: names.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Text(
+                                  '还没有标签',
+                                  style: TextStyle(
+                                    fontSize: AppFontSize.value,
+                                    color: colors.tertiary,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '在编辑页底部的「标签」按钮里添加',
+                                  style: TextStyle(
+                                    fontSize: AppFontSize.caption,
+                                    color: colors.tertiary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpace.page,
+                              8,
+                              AppSpace.page,
+                              24,
+                            ),
                             children: <Widget>[
-                              Text(
-                                '还没有标签',
-                                style: TextStyle(
-                                  fontSize: AppFontSize.value,
-                                  color: colors.tertiary,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '在编辑页底部的「标签」按钮里添加',
-                                style: TextStyle(
-                                  fontSize: AppFontSize.caption,
-                                  color: colors.tertiary,
-                                ),
+                              AppListSection(
+                                footer: '改名、合并、删除都只影响标签本身，不会删除笔记。',
+                                children: <Widget>[
+                                  for (final String tag in names)
+                                    AppListRow(
+                                      label: '#$tag',
+                                      value: '${counts[tag] ?? 0} 条',
+                                      trailing: IconButton(
+                                        onPressed: () => _showActions(
+                                          context,
+                                          tag,
+                                          counts[tag] ?? 0,
+                                        ),
+                                        tooltip: '管理标签',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: Icon(
+                                          Icons.more_horiz,
+                                          size: AppIcon.nav,
+                                          color: colors.tertiary,
+                                        ),
+                                      ),
+                                      onTap: () => _openTag(context, tag),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-                          itemCount: names.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (BuildContext context, int index) {
-                            final String tag = names[index];
-                            final int count = counts[tag] ?? 0;
-                            return _TagRow(
-                              tag: tag,
-                              count: count,
-                              color: cardColor,
-                              onTap: () => _openTag(context, tag),
-                              onManage: () =>
-                                  _showActions(context, tag, count),
-                            );
-                          },
-                        ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                  child: Text(
-                    '改名、合并、删除都只影响标签本身，不会删除笔记。',
-                    style: TextStyle(
-                      fontSize: AppFontSize.caption,
-                      height: 1.6,
-                      color: colors.tertiary,
-                    ),
                   ),
                 ),
               ],
@@ -393,16 +363,16 @@ class TagsPage extends StatelessWidget {
 
   Widget _buildHeader(BuildContext context, AppColors colors) {
     return SizedBox(
-      height: 48,
+      height: AppSize.navBar,
       child: Row(
         children: <Widget>[
           SizedBox(
-            width: 48,
+            width: AppSize.navBar,
             child: InkWell(
               onTap: () => Navigator.of(context).maybePop(),
               child: Icon(
                 Icons.arrow_back_ios_new,
-                size: 18,
+                size: AppIcon.nav,
                 color: colors.secondary,
               ),
             ),
@@ -412,70 +382,6 @@ class TagsPage extends StatelessWidget {
             style: AppText.sheetTitle.copyWith(color: colors.text),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _TagRow extends StatelessWidget {
-  const _TagRow({
-    required this.tag,
-    required this.count,
-    required this.color,
-    required this.onTap,
-    required this.onManage,
-  });
-
-  final String tag;
-  final int count;
-  final Color color;
-
-  /// 点行：回首页按该标签筛选。
-  final VoidCallback onTap;
-
-  /// 行尾「…」：重命名 / 合并 / 删除。
-  final VoidCallback onManage;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 54,
-          padding: const EdgeInsets.only(left: 16, right: 4),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  '#$tag',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
-                ),
-              ),
-              Text(
-                '$count 条',
-                style: TextStyle(fontSize: AppFontSize.value, color: colors.secondary),
-              ),
-              const SizedBox(width: 6),
-              IconButton(
-                onPressed: onManage,
-                tooltip: '管理标签',
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  Icons.more_horiz,
-                  size: 20,
-                  color: colors.tertiary,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

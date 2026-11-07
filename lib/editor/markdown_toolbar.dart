@@ -215,9 +215,9 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
     return Expanded(
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          // 5 个 40dp 按钮 + 两侧最小呼吸边距。低于这个宽度（罕见的老设备）
+          // 5 个 48dp 按钮 + 两侧最小呼吸边距。低于这个宽度（罕见的老设备）
           // 才启用横滑；正常机型 spaceEvenly 铺满，与语雀一致。
-          const minWidth = 5 * 40 + 8;
+          const minWidth = 5 * 48 + 8;
           if (constraints.maxWidth >= minWidth) {
             return Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -308,7 +308,7 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 52,
+          height: AppSize.navBar,
           // 受控模式按语义分三组（见 [_controlledToolbarRow]）；
           // 非受控模式保持旧陈列（格式区均匀分布 + 收键盘）。
           child: _controlled
@@ -609,7 +609,7 @@ class _PanelGroupRow extends StatelessWidget {
   });
 
   /// 分组名栏宽：两个字（12px）加一点余量，全部左缘对齐。
-  static const double labelWidth = 36;
+  static const double labelWidth = 32;
 
   final String label;
   final Widget child;
@@ -625,7 +625,7 @@ class _PanelGroupRow extends StatelessWidget {
       child: Row(
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.only(left: 20, right: 10),
+            padding: const EdgeInsets.only(left: AppSpace.lg, right: 8),
             child: SizedBox(
               width: labelWidth,
               child: Text(
@@ -888,7 +888,7 @@ class _ActionCell extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(icon, size: 20, color: foreground),
+            Icon(icon, size: AppIcon.action, color: foreground),
             const SizedBox(height: 4),
             Text(
               label,
@@ -924,23 +924,23 @@ class _TextToolButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.card),
+      borderRadius: BorderRadius.circular(AppRadius.button),
       child: Container(
-        width: 40,
-        height: 40,
+        width: 48,
+        height: 48,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.card),
+          borderRadius: BorderRadius.circular(AppRadius.button),
         ),
         child: showClose
-            ? Icon(Icons.close, size: 20, color: colors.accent)
+            ? Icon(Icons.close, size: AppIcon.action, color: colors.accent)
             : Text(
                 'Aa',
                 style: TextStyle(
                   fontSize: AppFontSize.hint,
                   height: 1,
-                  fontWeight: AppWeight.semibold,
+                  fontWeight: AppWeight.medium,
                   color: selected
                       ? colors.accent
                       : colors.text.withValues(alpha: 0.78),
@@ -967,17 +967,17 @@ class _ToolButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.card),
+      borderRadius: BorderRadius.circular(AppRadius.button),
       child: Container(
-        width: 40,
-        height: 40,
+        width: 48,
+        height: 48,
         decoration: BoxDecoration(
           color: selected ? colors.accentBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.card),
+          borderRadius: BorderRadius.circular(AppRadius.button),
         ),
         child: Icon(
           icon,
-          size: 20,
+          size: AppIcon.action,
           // 未选中用弱化正文色：纯黑太重，secondary 又像禁用，
           // 主色只留给「当前生效」的状态。
           color: selected
@@ -999,7 +999,7 @@ class _GroupDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Container(width: 0.5, height: 22, color: color),
+      child: Container(width: 0.5, height: 24, color: color),
     );
   }
 }
@@ -1024,14 +1024,14 @@ class _FixedButton extends StatelessWidget {
     final colors = AppColors.of(context);
     return InkWell(
       onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(AppRadius.card),
+      borderRadius: BorderRadius.circular(AppRadius.button),
       child: Container(
-        width: 40,
-        height: 40,
+        width: 48,
+        height: 48,
         alignment: Alignment.center,
         child: Icon(
           icon,
-          size: 20,
+          size: AppIcon.action,
           color: enabled ? colors.text.withValues(alpha: 0.72) : colors.tertiary,
         ),
       ),

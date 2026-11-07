@@ -76,8 +76,7 @@ class XiaojiApp extends StatefulWidget {
   State<XiaojiApp> createState() => _XiaojiAppState();
 }
 
-class _XiaojiAppState extends State<XiaojiApp>
-    with WidgetsBindingObserver {
+class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   NoteSettings? _cachedSettings;
   ThemeData? _lightTheme;
   ThemeData? _darkTheme;
@@ -141,32 +140,34 @@ class _XiaojiAppState extends State<XiaojiApp>
                 darkNow ? Brightness.light : Brightness.dark,
           ),
           child: MaterialApp(
-          title: '小记',
-          debugShowCheckedModeBanner: false,
-          theme: _lightTheme,
-          darkTheme: _darkTheme,
-          themeMode: settings.themeMode,
-          // 中文本地化：系统组件（长按选择菜单的剪切/复制/粘贴、日期选择器、
-          // 文本选择手柄气泡等）跟随中文，不再回落英文。
-          localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          supportedLocales: const <Locale>[Locale('zh'), Locale('en')],
-          locale: const Locale('zh'),
-          // 锁屏挂在 builder 上（而不是 home）：home 只是 Navigator 的首个
-          // 路由，编辑页/设置页这些 push 出来的页面会盖在锁屏之上 ——
-          // 退后台自动锁定后回来，用户仍能看到当前页面的内容。
-          // builder 包住整个 Navigator，锁屏才能盖住所有路由。
-          builder: (BuildContext context, Widget? child) => AppLockGate(
-            repository: widget.repository,
-            child: child ?? const SizedBox.shrink(),
-          ),
-          home: HomePage(
-            repository: widget.repository,
-            startWithNewNote: widget.startWithNewNote,
-          ),
+            title: '小记',
+            debugShowCheckedModeBanner: false,
+            theme: _lightTheme,
+            darkTheme: _darkTheme,
+            themeMode: settings.themeMode,
+            // iOS 手感：回弹滚动 + 无 Android 拉伸光晕；一处配置全站生效。
+            scrollBehavior: const AppScrollBehavior(),
+            // 中文本地化：系统组件（长按选择菜单的剪切/复制/粘贴、日期选择器、
+            // 文本选择手柄气泡等）跟随中文，不再回落英文。
+            localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: const <Locale>[Locale('zh'), Locale('en')],
+            locale: const Locale('zh'),
+            // 锁屏挂在 builder 上（而不是 home）：home 只是 Navigator 的首个
+            // 路由，编辑页/设置页这些 push 出来的页面会盖在锁屏之上 ——
+            // 退后台自动锁定后回来，用户仍能看到当前页面的内容。
+            // builder 包住整个 Navigator，锁屏才能盖住所有路由。
+            builder: (BuildContext context, Widget? child) => AppLockGate(
+              repository: widget.repository,
+              child: child ?? const SizedBox.shrink(),
+            ),
+            home: HomePage(
+              repository: widget.repository,
+              startWithNewNote: widget.startWithNewNote,
+            ),
           ),
         );
       },

@@ -92,6 +92,7 @@ class NoteSettings {
     this.secureScreen = true,
     this.externalBackupUri,
     this.lastExternalBackupAt,
+    this.backupTipShown = false,
   });
 
   final AppThemeMode theme;
@@ -122,6 +123,9 @@ class NoteSettings {
   /// 上一次外置备份的时间（ISO 字符串，24 小时节奏用）。
   final String? lastExternalBackupAt;
 
+  /// 主页的「数据只存在本机」提示是否已经展示/关闭过（只提醒一次）。
+  final bool backupTipShown;
+
   ThemeMode get themeMode => theme.themeMode;
 
   NoteSettings copyWith({
@@ -135,6 +139,7 @@ class NoteSettings {
     bool? secureScreen,
     String? externalBackupUri,
     String? lastExternalBackupAt,
+    bool? backupTipShown,
     bool clearExternalBackup = false,
   }) {
     return NoteSettings(
@@ -152,6 +157,7 @@ class NoteSettings {
           : (externalBackupUri ?? this.externalBackupUri),
       lastExternalBackupAt:
           lastExternalBackupAt ?? this.lastExternalBackupAt,
+      backupTipShown: backupTipShown ?? this.backupTipShown,
     );
   }
 
@@ -167,6 +173,7 @@ class NoteSettings {
         if (externalBackupUri != null) 'externalBackupUri': externalBackupUri,
         if (lastExternalBackupAt != null)
           'lastExternalBackupAt': lastExternalBackupAt,
+        'backupTipShown': backupTipShown,
       };
 
   /// 容错解析：字段缺失或类型不对都回落到默认值，配置文件坏掉不能让 app 起不来。
@@ -185,6 +192,7 @@ class NoteSettings {
     final secureScreen = json['secureScreen'];
     final externalBackupUri = json['externalBackupUri'];
     final lastExternalBackupAt = json['lastExternalBackupAt'];
+    final backupTipShown = json['backupTipShown'];
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
       density: ListDensity.fromWire(density is String ? density : null),
@@ -201,6 +209,7 @@ class NoteSettings {
           lastExternalBackupAt is String && lastExternalBackupAt.isNotEmpty
               ? lastExternalBackupAt
               : null,
+      backupTipShown: backupTipShown is bool ? backupTipShown : false,
     );
   }
 
@@ -216,7 +225,8 @@ class NoteSettings {
       other.pinSalt == pinSalt &&
       other.secureScreen == secureScreen &&
       other.externalBackupUri == externalBackupUri &&
-      other.lastExternalBackupAt == lastExternalBackupAt;
+      other.lastExternalBackupAt == lastExternalBackupAt &&
+      other.backupTipShown == backupTipShown;
 
   @override
   int get hashCode => Object.hash(
@@ -230,5 +240,6 @@ class NoteSettings {
         secureScreen,
         externalBackupUri,
         lastExternalBackupAt,
+        backupTipShown,
       );
 }

@@ -61,7 +61,7 @@ Future<String?> promptPinSheet(
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: StatefulBuilder(
             builder: (BuildContext context, StateSetter setSheetState) {
               return Column(
@@ -82,7 +82,7 @@ Future<String?> promptPinSheet(
                   ),
                   const SizedBox(height: 18),
                   SizedBox(
-                    height: 48,
+                    height: AppSize.button,
                     child: FilledButton(
                       onPressed: pin.length >= 4
                           ? () => Navigator.of(sheetContext).pop(pin)
