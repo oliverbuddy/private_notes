@@ -97,7 +97,32 @@ String? markdownFromClipboard({required String text, String? html}) {
   if (plain.isEmpty) {
     return null;
   }
-  return looksLikeMarkdown(plain) ? plain : null;
+  if (looksLikeMarkdown(plain)) {
+    return plain;
+  }
+  // 从微信 / 备忘录复制出来的纯文本，项目符号常是「•」「·」而不是
+  // Markdown 的「-」。这种结构明确，直接归一化成列表再解析。
+  return normalizePlainBullets(plain);
+}
+
+/// 把纯文本里的富文本项目符号（`• 项`、`· 项`）转成 Markdown 列表。
+///
+/// 至少两行才转换，避免把一句「• 重点」误判成列表。
+String? normalizePlainBullets(String text) {
+  final List<String> lines = text.split('\n');
+  var bullets = 0;
+  final List<String> converted = lines.map((String line) {
+    final Match? match = RegExp(r'^([ \t]*)[•·‣◦]\s+').firstMatch(line);
+    if (match == null) {
+      return line;
+    }
+    bullets++;
+    return '${match.group(1)}- ${line.substring(match.end)}';
+  }).toList();
+  if (bullets < 2) {
+    return null;
+  }
+  return converted.join('\n');
 }
 
 /// 智能粘贴：把剪贴板里的 Markdown / HTML 解析成文档块后插入光标处。
@@ -119,6 +144,16 @@ class MarkdownPaster {
   final ClipboardReader reader;
 
   Future<bool> paste() async {
+    final ClipboardContent content = await reader.read();
+    return pasteContent(content);
+  }
+
+  /// 用已经读到的剪贴板内容同步粘贴。
+  ///
+  /// 键盘（IME）粘贴必须在同一次 delta 回调里同步完成：如果先 return、
+  /// 稍后再异步落库，系统输入法仍按「已经粘贴成功」的文本继续上报位置，
+  /// 会和文档结构错位（实测报 No such document position）。
+  bool pasteContent(ClipboardContent content) {
     final DocumentSelection? selection = composer.selection;
     if (selection == null) {
       return false;
@@ -132,7 +167,6 @@ class MarkdownPaster {
       return false;
     }
 
-    final ClipboardContent content = await reader.read();
     final String? markdown = markdownFromClipboard(
       text: content.text,
       html: content.html,
@@ -201,6 +235,12 @@ class MarkdownPaster {
     required AttributedText after,
     required List<DocumentNode> pasted,
   }) {
+    // 输入法可能还留着旧的组合区（拼音 / 联想），并指向粘贴前的段落。
+    // 粘贴后选区落到新块，组合区和选区不在同一节点，super_editor 序列化
+    // IME 内容时会抛 “No such document position in the IME content”，
+    // 之后打字整体失效。粘贴前先清掉组合区。
+    composer.setComposingRegion(null);
+
     final DocumentNode first = pasted.first;
     // 单个普通段落：并入当前段落，保留前后文与行内样式。
     // 解析器可能给段落带上 `blockType: paragraph`，按 blockType 判断而不是

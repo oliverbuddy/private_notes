@@ -37,6 +37,7 @@ import 'image_display_size.dart';
 import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'markdown_paste.dart';
+import 'paste_ime_decorator.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
 
@@ -114,6 +115,16 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// SuperEditor 自己的焦点节点。面板关闭后（选区可能被清空）用
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
   final FocusNode _editorFocus = FocusNode(debugLabel: 'xiaoji-editor');
+
+  /// 输入法层粘贴拦截器：覆盖 Gboard 剪贴板建议这条路径。
+  late final PasteImeDecorator _pasteImeDecorator;
+
+  /// 当前剪贴板快照：用于识别「这次 IME 插入其实就是粘贴」。
+  String? _clipboardText;
+  String? _clipboardHtml;
+
+  /// 防止一次粘贴触发多轮解析。
+  bool _handlingImePaste = false;
 
   /// 底部工具条高度（与 MarkdownToolbar 的 SizedBox 一致）。
   ///
@@ -228,6 +239,13 @@ class _NewEditorPageState extends State<NewEditorPage>
       composer: _composer,
       documentLayoutResolver: () => throw UnimplementedError('M1 不依赖布局解析器'),
     );
+    // 键盘剪贴板粘贴拦截：Gboard 的粘贴走 IME，不经过工具条。
+    _pasteImeDecorator = PasteImeDecorator(
+      shouldIntercept: _shouldInterceptImePaste,
+      onPaste: _handleImePaste,
+    );
+    _editorFocus.addListener(_onEditorFocusChanged);
+    _refreshClipboardSnapshot();
     _commands = KernelCommands(
       editor: _editor,
       document: _document,
@@ -379,6 +397,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     _canUndo.dispose();
     _canRedo.dispose();
     _documentEmpty.dispose();
+    _editorFocus.removeListener(_onEditorFocusChanged);
     _editorFocus.dispose();
     _editorScroll.dispose();
     _editor.dispose();
@@ -449,6 +468,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (ime > previous) {
       _endImeCollapse();
       _scheduleCaretFollow();
+      // 键盘弹出说明用户要输入了：快照还空着就再读一次（切应用复制后
+      // 立刻回来粘贴时，resumed 那次读可能还没拿到焦点）。
+      if (_clipboardText == null || _clipboardText!.isEmpty) {
+        _refreshClipboardSnapshot();
+      }
       return;
     }
     _beginImeCollapse();
@@ -604,6 +628,9 @@ class _NewEditorPageState extends State<NewEditorPage>
         state == AppLifecycleState.hidden) {
       _saveDebounce?.cancel();
       _flushSave();
+    } else if (state == AppLifecycleState.resumed) {
+      // 从浏览器/微信切回来，剪贴板已经变了：刷新快照，键盘粘贴才能识别。
+      _refreshClipboardSnapshot();
     }
   }
 
@@ -1339,18 +1366,18 @@ class _NewEditorPageState extends State<NewEditorPage>
         SheetAction<String>(
           value: 'pin',
           label: _currentNote.pinned ? '取消置顶' : '置顶',
-          icon: _currentNote.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          icon: Icons.push_pin_outlined,
           selected: _currentNote.pinned,
         ),
         const SheetAction<String>(
           value: 'copy',
           label: '复制文本',
-          icon: Icons.content_copy,
+          icon: Icons.content_copy_outlined,
         ),
         const SheetAction<String>(
           value: 'tags',
           label: '编辑标签',
-          icon: Icons.label_outline,
+          icon: Icons.label_outline_rounded,
         ),
         SheetAction<String>(
           value: 'lock',
@@ -1534,6 +1561,108 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  void _onEditorFocusChanged() {
+    if (_editorFocus.hasFocus) {
+      _refreshClipboardSnapshot();
+    }
+  }
+
+  /// 缓存剪贴板内容（纯文本 + HTML），供 IME 粘贴识别使用。
+  ///
+  /// Android 10+ 只有持有窗口焦点的应用才能读剪贴板：`resumed` 回调触发时
+  /// 焦点往往还没回来，第一次读会拿到空字符串。空了就短延迟重试，
+  /// 否则快照一直是空的，键盘粘贴永远识别不了。
+  Future<void> _refreshClipboardSnapshot({int attempt = 0}) async {
+    try {
+      final ClipboardContent content = await const ClipboardReader().read();
+      if (!mounted) {
+        return;
+      }
+      if (content.text.isEmpty && attempt < 3) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        if (!mounted) {
+          return;
+        }
+        await _refreshClipboardSnapshot(attempt: attempt + 1);
+        return;
+      }
+      _clipboardText = content.text;
+      _clipboardHtml = content.html;
+    } catch (error) {
+      debugPrint('读取剪贴板快照失败: $error');
+    }
+  }
+
+  /// 一次 IME 插入是否等价于「粘贴当前剪贴板」。
+  ///
+  /// 只有内容完全对得上、长度足够，并且确实能转成 Markdown（HTML 或纯文本
+  /// 带 Markdown 结构）时才拦截；普通打字、短文本不会被误判。
+  bool _shouldInterceptImePaste(String inserted) {
+    if (_handlingImePaste) {
+      return false;
+    }
+    final String? snapshot = _clipboardText;
+    if (snapshot == null) {
+      return false;
+    }
+    final String incoming = inserted.trim();
+    final String clip = snapshot.trim();
+    if (incoming.length < 20 || clip.length < 20) {
+      return false;
+    }
+    // 输入法可能重排换行/空白（Gboard 的剪贴板会把多行压成一行展示），
+    // 先按原样比，再按「去掉所有空白」比一次，避免格式差异导致漏判。
+    final String incomingFlat = _withoutWhitespace(incoming);
+    final String clipFlat = _withoutWhitespace(clip);
+    final bool same = incoming == clip ||
+        incoming.contains(clip) ||
+        clip.contains(incoming) ||
+        (incomingFlat.isNotEmpty &&
+            clipFlat.isNotEmpty &&
+            (incomingFlat == clipFlat ||
+                incomingFlat.contains(clipFlat) ||
+                clipFlat.contains(incomingFlat)));
+    if (!same) {
+      return false;
+    }
+    return (_clipboardHtml?.trim().isNotEmpty ?? false) ||
+        looksLikeMarkdown(incoming);
+  }
+
+  String _withoutWhitespace(String value) =>
+      value.replaceAll(RegExp(r'\s+'), '');
+
+  /// 键盘粘贴：必须同步完成。
+  ///
+  /// 输入法上报「插入 = 剪贴板内容」后，如果这里只 return、稍后再异步改文档，
+  /// 系统输入法会继续按「已粘贴」的文本上报位置，与文档结构错位
+  /// （实测抛 `No such document position in the IME content`）。
+  /// 所以直接拿页面缓存的剪贴板快照同步解析；解析不了返回 false，
+  /// 交回输入法默认粘贴。
+  bool _handleImePaste() {
+    if (_handlingImePaste) {
+      return false;
+    }
+    final String? text = _clipboardText;
+    if (text == null) {
+      return false;
+    }
+    _handlingImePaste = true;
+    try {
+      return MarkdownPaster(
+        editor: _editor,
+        document: _document,
+        composer: _composer,
+        ops: _ops,
+      ).pasteContent(ClipboardContent(text: text, html: _clipboardHtml));
+    } catch (error, stack) {
+      debugPrint('键盘粘贴解析失败，交给输入法: $error\n$stack');
+      return false;
+    } finally {
+      _handlingImePaste = false;
+    }
+  }
+
   /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
   Future<bool> _pasteFromClipboard() async {
     try {
@@ -1594,7 +1723,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         SheetAction(
           value: _ImageAction.large,
           label: '大图显示',
-          icon: Icons.fullscreen,
+          icon: Icons.fullscreen_rounded,
           selected: current == ImageDisplaySize.large,
         ),
         const SheetAction(
@@ -2167,6 +2296,8 @@ class _NewEditorPageState extends State<NewEditorPage>
         editor: _editor,
         // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
         focusNode: _editorFocus,
+        // 粘贴拦截：键盘粘贴与工具条粘贴走同一套 Markdown 解析。
+        imeOverrides: _pasteImeDecorator,
         // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
         // _ensureCaretVisible），内部自建的控制器拿不到位置。
         scrollController: _editorScroll,

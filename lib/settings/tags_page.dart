@@ -33,12 +33,12 @@ class TagsPage extends StatelessWidget {
         const SheetAction<String>(
           value: 'rename',
           label: '重命名',
-          icon: Icons.drive_file_rename_outline,
+          icon: Icons.drive_file_rename_outline_rounded,
         ),
         const SheetAction<String>(
           value: 'merge',
           label: '合并到其他标签',
-          icon: Icons.merge_type,
+          icon: Icons.merge_type_rounded,
         ),
         const SheetAction<String>(
           value: 'delete',

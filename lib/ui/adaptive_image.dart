@@ -215,7 +215,7 @@ class _LongImageBadge extends StatelessWidget {
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(Icons.open_in_full, size: AppIcon.badge, color: Colors.white),
+          Icon(Icons.open_in_full_rounded, size: AppIcon.badge, color: Colors.white),
           SizedBox(width: 3),
           Text(
             '长图',

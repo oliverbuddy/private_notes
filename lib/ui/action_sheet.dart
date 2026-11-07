@@ -137,7 +137,7 @@ class _ActionRow<T> extends StatelessWidget {
                 ),
               ),
               if (action.selected)
-                Icon(Icons.check, size: AppIcon.chevron, color: colors.accent),
+                Icon(Icons.check_rounded, size: AppIcon.chevron, color: colors.accent),
             ],
           ),
         ),

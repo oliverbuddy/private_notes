@@ -214,10 +214,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       context: context,
       title: menuTitle,
       actions: <SheetAction<String>>[
+        // 菜单统一用线性图标；「已置顶」靠 selected 的主色 + 勾选表达，
+        // 不再混用实心图钉，否则同一张菜单里深浅轻重不一致。
         SheetAction<String>(
           value: 'pin',
           label: note.pinned ? '取消置顶' : '置顶',
-          icon: note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          icon: Icons.push_pin_outlined,
+          selected: note.pinned,
         ),
         // 锁定笔记的正文不在内存里，这里只做加密状态切换。
         if (note.locked)
@@ -529,7 +532,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     boxShadow: AppShadow.floating,
                   ),
                   child: Icon(
-                    Icons.edit_outlined,
+                    // 实色圆底上用实心笔（与 Gmail 新建按钮同一处理）：
+                    // 描边笔在饱和蓝上笔画偏细，远看容易糊成一团。
+                    Icons.edit_rounded,
                     size: AppIcon.fab,
                     color: colors.fabForeground,
                   ),
@@ -571,7 +576,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             icon: Icons.search_rounded,
             onTap: _enterSearch,
           ),
-          _IconAction(icon: Icons.settings_outlined, onTap: _openSettings),
+          // 齿轮齿多、笔画密，24vp 会和左边的「标签 / 搜索」比起来偏重，
+          // 按光学尺寸缩到 22vp 做视觉平衡。
+          _IconAction(
+            icon: Icons.settings_outlined,
+            iconSize: AppIcon.dense,
+            onTap: _openSettings,
+          ),
         ],
       ),
     );
@@ -935,16 +946,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 }
 
 class _IconAction extends StatelessWidget {
-  const _IconAction({required this.icon, required this.onTap});
+  const _IconAction({
+    required this.icon,
+    required this.onTap,
+    this.iconSize = AppIcon.action,
+  });
 
   final IconData icon;
   final VoidCallback onTap;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
     // 44dp 热区（鸿蒙最小可点 40）：三个入口并排也不挤。
     return AppIconButton(
       icon: icon,
+      iconSize: iconSize,
       onTap: onTap,
       hitSize: 44,
     );

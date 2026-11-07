@@ -52,7 +52,7 @@ void main() {
       // 标签筛选收进标题栏：未选中标签时不再渲染常驻 chips（第 7 轮改版）。
       expect(find.text('全部'), findsNothing);
 
-      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.tap(find.byIcon(Icons.edit_rounded));
       await _pumpFrames(tester, frames: 12);
       // 内核迁移：编辑入口已全量切换到新内核编辑页。
       expect(find.byType(NewEditorPage), findsOneWidget);

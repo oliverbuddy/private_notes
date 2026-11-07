@@ -230,7 +230,7 @@ class MarkdownAttachPanel extends StatelessWidget {
       <(MarkdownAttachAction, IconData, String)>[
     (MarkdownAttachAction.gallery, Icons.photo_library_outlined, '相册'),
     (MarkdownAttachAction.camera, Icons.photo_camera_outlined, '拍照'),
-    (MarkdownAttachAction.file, Icons.attach_file, '文件'),
+    (MarkdownAttachAction.file, Icons.attach_file_rounded, '文件'),
   ];
 
   @override
@@ -352,7 +352,7 @@ class MarkdownTextStylePanel extends StatelessWidget {
   /// 段落格式：待办 / 无序 / 有序 / 引用。
   static const List<(MarkdownCommand, IconData, String)> _blockItems =
       <(MarkdownCommand, IconData, String)>[
-    (MarkdownCommand.todo, Icons.check_box_outlined, '待办'),
+    (MarkdownCommand.todo, Icons.check_box_rounded, '待办'),
     (MarkdownCommand.bullet, Icons.format_list_bulleted_rounded, '无序'),
     (MarkdownCommand.ordered, Icons.format_list_numbered_rounded, '有序'),
     (MarkdownCommand.quote, Icons.format_quote_rounded, '引用'),

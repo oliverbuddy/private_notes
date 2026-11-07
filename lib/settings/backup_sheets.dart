@@ -209,7 +209,7 @@ Future<String?> showRestoreSourceMenu(
                 ),
             _Hairline(colors: colors),
             _ActionRow(
-              icon: Icons.folder_open,
+              icon: Icons.folder_open_rounded,
               label: '从 zip 文件选择…',
               onTap: () =>
                   Navigator.of(sheetContext).pop(pickBackupFileSentinel),
@@ -392,11 +392,11 @@ class _BackupEntryRow extends StatelessWidget {
   IconData _backupIcon(BackupKind kind) {
     switch (kind) {
       case BackupKind.auto:
-        return Icons.schedule;
+        return Icons.schedule_outlined;
       case BackupKind.manual:
-        return Icons.save_alt;
+        return Icons.save_alt_outlined;
       case BackupKind.preRestore:
-        return Icons.history;
+        return Icons.history_outlined;
     }
   }
 }

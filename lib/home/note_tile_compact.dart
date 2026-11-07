@@ -66,7 +66,7 @@ class NoteTileCompact extends StatelessWidget {
             hiddenCount: (imageCount - 1).clamp(0, 99),
           )
         : hasAttachment
-            ? Icon(Icons.attach_file,
+            ? Icon(Icons.attach_file_rounded,
                 size: AppIcon.inline, color: colors.secondary)
             : null;
     final bool leadMedia = media != null && summary.isEmpty;

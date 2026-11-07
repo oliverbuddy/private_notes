@@ -53,6 +53,22 @@ void main() {
     test('无 HTML 且不像 Markdown 时返回 null', () {
       expect(markdownFromClipboard(text: '普通一句话'), isNull);
     });
+
+    test('富文本项目符号归一化成列表', () {
+      final String? md = markdownFromClipboard(
+        text: '购物清单\n• 苹果\n• 香蕉',
+      );
+      expect(md, isNotNull);
+      expect(md, contains('- 苹果'));
+      expect(md, contains('- 香蕉'));
+    });
+  });
+
+  group('normalizePlainBullets', () {
+    test('两行以上才转换', () {
+      expect(normalizePlainBullets('• 一\n· 二'), '- 一\n- 二');
+      expect(normalizePlainBullets('• 只有一行'), isNull);
+    });
   });
 
   group('MarkdownPaster', () {

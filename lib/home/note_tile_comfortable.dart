@@ -270,7 +270,7 @@ class _SummaryMarkdown extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(
-            Icons.insert_drive_file_outlined,
+            Icons.insert_drive_file_rounded,
             size: AppIcon.inline,
             color: colors.accent,
           ),

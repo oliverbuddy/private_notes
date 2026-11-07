@@ -130,7 +130,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
                 Padding(
                   padding: const EdgeInsets.only(top: 1),
                   child: Icon(
-                    exists ? Icons.insert_drive_file_outlined : Icons.error_outline,
+                    exists ? Icons.insert_drive_file_rounded : Icons.error_outline_rounded,
                     size: AppIcon.action,
                     color: exists ? colors.accent : colors.danger,
                   ),

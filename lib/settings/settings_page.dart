@@ -360,12 +360,12 @@ class _SettingsPageState extends State<SettingsPage> {
                           '应用私有目录，系统「文件」管理器看不到，也不随系统云备份上传。',
                         ),
                         item(
-                          Icons.warning_amber_rounded,
+                          Icons.warning_amber_outlined,
                           '卸载风险',
                           '卸载 App 会一并删除，换机前请先在「备份与恢复」里导出 zip。',
                         ),
                         item(
-                          Icons.schedule,
+                          Icons.schedule_outlined,
                           '自动备份',
                           '本机每天 1 份；开启文件夹后每 24 小时 1 份，各保留最近 3 份。',
                         ),
@@ -581,7 +581,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                           ),
                           if (options[i] == current)
-                            Icon(Icons.check,
+                            Icon(Icons.check_rounded,
                                 size: AppIcon.chevron, color: colors.accent),
                         ],
                       ),

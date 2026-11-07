@@ -444,6 +444,12 @@ abstract final class AppIcon {
   /// 顶部栏动作图标、弹层行动图标。
   static const double action = 24;
 
+  /// 笔画密度高的图标（齿轮等）的光学尺寸。
+  ///
+  /// 齿轮的齿多、留白少，同样 24vp 会比返回箭头、放大镜重一圈；
+  /// 鸿蒙图标规范也允许按视觉重量做 ±2vp 的光学补偿。
+  static const double dense = 22;
+
   /// 次要动作 / 工具条图标（20）。
   static const double compact = 20;
 
@@ -459,8 +465,8 @@ abstract final class AppIcon {
   /// 空态插图。
   static const double hero = 48;
 
-  /// 悬浮按钮。
-  static const double fab = 24;
+  /// 悬浮按钮。圆形底是实色蓝，图标用实心笔，26 比 24 更压得住底色。
+  static const double fab = 26;
 }
 
 /// 阴影梯度（HarmonyOS 的「立体感」= 极浅大模糊 + 少量下偏移）。
