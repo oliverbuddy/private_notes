@@ -310,15 +310,14 @@ class _SummaryMarkdown extends StatelessWidget {
     if (maxWidth <= 0) {
       return 1;
     }
+    final List<InlineSpan> spans = markdownSpans(
+      text,
+      textStyle,
+      colors,
+      headingBoost: headingBoost,
+    ).map(_measurableSpan).toList(growable: false);
     final TextPainter painter = TextPainter(
-      text: TextSpan(
-        children: markdownSpans(
-          text,
-          textStyle,
-          colors,
-          headingBoost: headingBoost,
-        ),
-      ),
+      text: TextSpan(children: spans),
       textDirection: Directionality.of(context),
       textScaler: textScaler,
       maxLines: cap,
@@ -326,6 +325,26 @@ class _SummaryMarkdown extends StatelessWidget {
     final int lines = painter.computeLineMetrics().length;
     painter.dispose();
     return math.max(1, lines);
+  }
+
+  /// 测量专用：把 [WidgetSpan]（标签胶囊、待办勾选框）换成文本占位。
+  ///
+  /// `TextPainter` 不会为 `WidgetSpan` 计算占位尺寸，直接 layout 会抛
+  /// 「dimensions != null」异常 —— release 下整张卡片会变成灰色错误块，
+  /// 且错误块高度无穷大。这些小组件高度与一个空格相近，用于估算行数足够。
+  InlineSpan _measurableSpan(InlineSpan span) {
+    if (span is PlaceholderSpan) {
+      return const TextSpan(text: ' ');
+    }
+    if (span is TextSpan && span.children != null) {
+      return TextSpan(
+        text: span.text,
+        style: span.style,
+        children:
+            span.children!.map(_measurableSpan).toList(growable: false),
+      );
+    }
+    return span;
   }
 
   /// 附件行：与详情页的附件卡片同一套语言（浅底圆角 + 文件图标 + 文件名），

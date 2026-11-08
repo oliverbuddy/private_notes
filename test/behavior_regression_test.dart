@@ -181,6 +181,39 @@ void main() {
     expect(tileHeight, lessThan(300));
   });
 
+  testWidgets('摘要含标签/待办/引用时不抛异常且高度有限', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: NoteTileComfortable(
+              note: Note(
+                id: 'mixed',
+                created: DateTime(2026, 11, 6, 9, 0),
+                updated: DateTime(2026, 11, 6, 9, 0),
+                body: '# 标题\n#标签 #测试\n- [ ] 待办一条\n> 引用内容\n'
+                    '普通正文一行，长度足够触发折行判断的内容。',
+              ),
+              thumbnailPaths: const <String>[],
+              onTap: () {},
+              onLongPress: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpFrames(tester, frames: 4);
+
+    // 标签胶囊、待办勾选框是 WidgetSpan：TextPainter 直接 layout 会抛异常，
+    // release 下整张卡片变灰色错误块且高度无穷大（1.6.2 的线上问题）。
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSize(find.byType(NoteTileComfortable)).height,
+      lessThan(400),
+    );
+  });
+
   testWidgets('标签管理页点「…」可以删除标签', (WidgetTester tester) async {
     final root = _tempRoot('xiaoji_tag_manage_');
     late NoteRepository repository;
