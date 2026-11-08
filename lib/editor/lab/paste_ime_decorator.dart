@@ -20,7 +20,10 @@ class PasteImeDecorator extends DeltaTextInputClientDecorator {
   final bool Function(String insertedText) shouldIntercept;
 
   /// 同步执行解析粘贴；返回 false 表示没处理，继续走输入法默认粘贴。
-  final bool Function() onPaste;
+  ///
+  /// 入参是本次插入的原始文本：剪贴板快照过期（应用内复制、输入法剪贴板）
+  /// 时，调用方仍能直接用它做 Markdown 解析。
+  final bool Function(String insertedText) onPaste;
 
   @override
   void updateEditingValueWithDeltas(List<TextEditingDelta> textEditingDeltas) {
@@ -39,7 +42,7 @@ class PasteImeDecorator extends DeltaTextInputClientDecorator {
       }
       if (inserted.isNotEmpty &&
           shouldIntercept(inserted.toString()) &&
-          onPaste()) {
+          onPaste(inserted.toString())) {
         debugPrint('[paste] 拦截 IME 粘贴（${inserted.length} 字），已转为 Markdown');
         return;
       }

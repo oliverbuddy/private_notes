@@ -269,4 +269,22 @@ void main() {
       expect(caret.width, closeTo(1.0, 0.01));
     });
   });
+
+  group('表格渲染', () {
+    testWidgets('表格节点渲染成网格，不落到未知块', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_table_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('table', '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      expect(find.byType(MarkdownTableComponent), findsOneWidget);
+      expect(find.byType(UnknownComponent), findsNothing);
+    });
+  });
 }

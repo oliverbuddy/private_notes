@@ -467,11 +467,16 @@ String excerptSource(String markdown, {int maxLines = 6}) {
     if (RegExp(r'^\s*!\[[^\]]*\]\([^)\s]+\)[ \t\r]*$').hasMatch(line)) {
       continue;
     }
+    // 表格：摘要不画网格。分隔行（`| --- |`）直接丢，数据行压成
+    // 「名称 · 数量」这样可扫读的一行 —— 否则列表里全是竖线和减号。
+    if (_tableSeparatorLine.hasMatch(line.trim())) {
+      continue;
+    }
     // 首个内容出现之前的空行没有意义，丢掉；内容之间的空行原样保留。
     if (line.trim().isEmpty && out.isEmpty) {
       continue;
     }
-    out.add(line);
+    out.add(_flattenTableRow(line));
     if (out.length >= maxLines) {
       break;
     }
@@ -480,4 +485,28 @@ String excerptSource(String markdown, {int maxLines = 6}) {
     out.removeLast();
   }
   return out.join('\n');
+}
+
+/// GFM 表格分隔行：`| --- | :---: |` 这类全部由 `| - :` 与空白组成。
+final RegExp _tableSeparatorLine = RegExp(r'^[|\s:-]+$');
+
+/// 摘要里把表格数据行压成单行：`| 名称 | 数量 |` → `名称 · 数量`。
+///
+/// 只处理「以竖线开头或结尾、且至少两列」的行，普通文本里的 `a | b`
+/// 原样返回，不误伤正文。
+String _flattenTableRow(String line) {
+  final String trimmed = line.trim();
+  if (!trimmed.startsWith('|') && !trimmed.endsWith('|')) {
+    return line;
+  }
+  final List<String> cells = trimmed
+      .replaceAll(RegExp(r'^\||\|$'), '')
+      .split('|')
+      .map((String cell) => cell.trim())
+      .where((String cell) => cell.isNotEmpty)
+      .toList();
+  if (cells.length < 2) {
+    return line;
+  }
+  return cells.join(' · ');
 }

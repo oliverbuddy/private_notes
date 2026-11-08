@@ -151,19 +151,20 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
           ),
           const SizedBox(width: 8),
           _ToolButton(
-            icon: Icons.tag_rounded,
+            icon: Icons.sell_outlined,
             onTap: widget.onEditTags ?? () {},
           ),
           // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
           // 两侧各占一块，不再把五个按钮均匀撒满整条。
           const Spacer(),
+          // 撤销/还原用「掉头箭头」：方向感最直观，也不会和返回/前进混淆。
           _FixedButton(
-            icon: Icons.undo_rounded,
+            icon: Icons.u_turn_left_rounded,
             enabled: widget.canUndo,
             onTap: widget.onUndo,
           ),
           _FixedButton(
-            icon: Icons.redo_rounded,
+            icon: Icons.u_turn_right_rounded,
             enabled: widget.canRedo,
             onTap: widget.onRedo,
           ),

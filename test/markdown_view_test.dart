@@ -114,4 +114,17 @@ void main() {
       expect(render('就一句话'), '就一句话');
     });
   });
+
+  group('excerptSource', () {
+    test('表格行压成单行，分隔行不出现', () {
+      final String source = excerptSource(
+        '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+      );
+      expect(source, '名称 · 数量\n苹果 · 3');
+    });
+
+    test('普通文本中的竖线不误伤', () {
+      expect(excerptSource('a | b'), 'a | b');
+    });
+  });
 }

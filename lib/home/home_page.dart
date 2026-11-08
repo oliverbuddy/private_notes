@@ -567,7 +567,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           // 一眼可见，也不再用一整行筛选条占掉列表高度。
           if (activeTag == null)
             _IconAction(
-              icon: Icons.label_outline_rounded,
+              icon: Icons.sell_outlined,
               onTap: _showTagFilterSheet,
             )
           else
@@ -608,7 +608,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.label_rounded,
+            Icon(Icons.sell_rounded,
                 size: AppIcon.chip, color: colors.accent),
             const SizedBox(width: 4),
             ConstrainedBox(

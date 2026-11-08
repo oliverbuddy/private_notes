@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -224,36 +225,107 @@ class _SummaryMarkdown extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final List<_SummaryBlock> blocks = _split(source);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        for (final block in blocks)
-          if (block.isBlank)
-            // 用户有意留出的空行在摘要里也要看得见：渲染成一行空隙，
-            // 高度与正文行盒一致（用户反复强调不要去掉空白行）。
-            SizedBox(
-              height: (style.fontSize ?? 17) * (style.height ?? 1.2),
-            )
-          else if (block.attachmentName != null)
-            _buildAttachment(block.attachmentName!)
-          else if (block.isQuote)
-            _buildQuote(block.text)
-          else
-            Text.rich(
-              TextSpan(
-                children: markdownSpans(
-                  block.text,
-                  style,
-                  colors,
-                  headingBoost: headingBoost,
-                ),
+    final double lineHeight = (style.fontSize ?? 17) * (style.height ?? 1.2);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        // 跨块统计「实际视觉行数」：以前每个块各自 maxLines，长行折行后
+        // 总量会远超上限（用户看到 8 行）。这里用 TextPainter 量出每块
+        // 真实占几行，留给后面的块，最后一块用剩余行数省略号收尾。
+        final TextScaler textScaler = MediaQuery.textScalerOf(context);
+        int remaining = math.max(1, maxLines);
+        final List<Widget> children = <Widget>[];
+        for (final _SummaryBlock block in blocks) {
+          if (remaining <= 0) {
+            break;
+          }
+          if (block.isBlank) {
+            children.add(SizedBox(height: lineHeight));
+            remaining -= 1;
+            continue;
+          }
+          if (block.attachmentName != null) {
+            children.add(_buildAttachment(block.attachmentName!));
+            remaining -= 1;
+            continue;
+          }
+          if (block.isQuote) {
+            children.add(_buildQuote(block.text, remaining));
+            remaining -= _measureLines(
+              context,
+              block.text,
+              style.copyWith(
+                fontSize: AppQuote.fontSize,
+                height: AppQuote.height,
+                letterSpacing: AppQuote.letterSpacing,
+                leadingDistribution: TextLeadingDistribution.even,
               ),
-              maxLines: maxLines,
+              constraints.maxWidth,
+              remaining,
+              textScaler,
+            );
+            continue;
+          }
+          final List<InlineSpan> spans = markdownSpans(
+            block.text,
+            style,
+            colors,
+            headingBoost: headingBoost,
+          );
+          children.add(
+            Text.rich(
+              TextSpan(children: spans),
+              maxLines: remaining,
               overflow: TextOverflow.ellipsis,
             ),
-      ],
+          );
+          remaining -= _measureLines(
+            context,
+            block.text,
+            style,
+            constraints.maxWidth,
+            remaining,
+            textScaler,
+            headingBoost: headingBoost,
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        );
+      },
     );
+  }
+
+  /// 量出这一块在 [maxWidth] 下占多少视觉行（不超过 [cap]）。
+  int _measureLines(
+    BuildContext context,
+    String text,
+    TextStyle textStyle,
+    double maxWidth,
+    int cap,
+    TextScaler textScaler, {
+    double headingBoost = 0,
+  }) {
+    if (maxWidth <= 0) {
+      return 1;
+    }
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        children: markdownSpans(
+          text,
+          textStyle,
+          colors,
+          headingBoost: headingBoost,
+        ),
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: textScaler,
+      maxLines: cap,
+    )..layout(maxWidth: maxWidth);
+    final int lines = painter.computeLineMetrics().length;
+    painter.dispose();
+    return math.max(1, lines);
   }
 
   /// 附件行：与详情页的附件卡片同一套语言（浅底圆角 + 文件图标 + 文件名），
@@ -294,7 +366,7 @@ class _SummaryMarkdown extends StatelessWidget {
   }
 
   /// 引用块：外壳与详情编辑器共用 [QuoteBlock]（连竖条圆角都一致）。
-  Widget _buildQuote(String text) {
+  Widget _buildQuote(String text, int lineBudget) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: QuoteBlock(
@@ -312,7 +384,7 @@ class _SummaryMarkdown extends StatelessWidget {
               colors,
             ),
           ),
-          maxLines: maxLines,
+          maxLines: lineBudget,
           overflow: TextOverflow.ellipsis,
         ),
       ),

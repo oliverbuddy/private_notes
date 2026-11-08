@@ -8,6 +8,7 @@ import 'package:xiaoji/data/note_store.dart';
 import 'package:xiaoji/editor/block.dart';
 import 'package:xiaoji/editor/widgets/image_block_view.dart';
 import 'package:xiaoji/home/home_page.dart';
+import 'package:xiaoji/home/note_tile_comfortable.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/settings/tags_page.dart';
 import 'package:xiaoji/theme/app_theme.dart';
@@ -134,7 +135,7 @@ void main() {
     await _pumpFrames(tester, frames: 8);
 
     // 打开标签筛选弹层，点标签即筛选并收起。
-    await tester.tap(find.byIcon(Icons.label_outline_rounded));
+    await tester.tap(find.byIcon(Icons.sell_outlined));
     await _pumpFrames(tester, frames: 8);
     // 列表卡片上也有一个 #读书 chip，弹层里的那个在树里更靠后。
     expect(find.text('#读书'), findsWidgets);
@@ -145,6 +146,39 @@ void main() {
     expect(repository.activeTag, '读书');
     expect(find.text('删除标签 #读书？'), findsNothing);
     expect(repository.tags, <String>['读书']);
+  });
+
+  testWidgets('超长粘贴文本的摘要按卡片总行数封顶', (WidgetTester tester) async {
+    final String longLine =
+        '这是一段从别处复制过来的很长正文，用来测试摘要总行数上限。' * 3;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          // 列表里高度是无界的，这里用滚动容器还原同样的约束。
+          body: SingleChildScrollView(
+            child: NoteTileComfortable(
+              note: Note(
+                id: 'long',
+                created: DateTime(2026, 11, 1, 8, 0),
+                updated: DateTime(2026, 11, 1, 8, 0),
+                body: List<String>.filled(5, longLine).join('\n'),
+              ),
+              thumbnailPaths: const <String>[],
+              onTap: () {},
+              onLongPress: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpFrames(tester, frames: 4);
+
+    // 5 行摘要 ≈ 5 × 23px ≈ 116px；标题/时间/内边距合计约 100px。
+    // 旧实现每块各自 maxLines，长行折行后能到 20 行左右（> 500px）。
+    final double tileHeight =
+        tester.getSize(find.byType(NoteTileComfortable)).height;
+    expect(tileHeight, lessThan(300));
   });
 
   testWidgets('标签管理页点「…」可以删除标签', (WidgetTester tester) async {

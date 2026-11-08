@@ -475,10 +475,10 @@ class _NewEditorPageState extends State<NewEditorPage>
       }
       return;
     }
-    _beginImeCollapse();
+    _beginImeCollapse(previousIme: previous);
   }
 
-  void _beginImeCollapse() {
+  void _beginImeCollapse({required double previousIme}) {
     if (!_imeCollapsing) {
       _imeCollapsing = true;
       _cancelCaretFollow();
@@ -486,6 +486,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     final ScrollPosition? position =
         _editorScroll.hasClients ? _editorScroll.position : null;
     _imeCollapseAnchorPixels ??= position?.pixels;
+    // 关键：在「键盘开始收起的那一帧」就把底部留白算好并写进样式表。
+    // 之前是等布局按新视口结算完、下一帧才 setState 补留白 —— 那一帧
+    // 滚动位置已经被 maxScrollExtent clamp，页面先掉下去再补回来，
+    // 看起来就是「闪一下 / 抖一下」（用户反馈）。
+    _pinContentDuringImeCollapse(previousIme);
     if (!_imeScrollListenerAttached) {
       // 挂在 controller 上而不是某个 ScrollPosition：视口尺寸变化时
       // Scrollable 可能重建并换掉 position，挂在旧 position 上会漏掉
@@ -518,6 +523,46 @@ class _NewEditorPageState extends State<NewEditorPage>
       _detachImeScrollListener();
       _imeCollapseAnchorPixels = null;
     });
+  }
+
+  /// 键盘开始收起时，一次性把「最终需要的底部留白」算出来。
+  ///
+  /// 收起动画里视口高度单调变大，最终高度是确定的：
+  ///   最终视口 = 当前视口 + 本次收起的键盘总高度 + 工具条预留（会一起撤掉）
+  /// 内容高度不变，于是：
+  ///   最终 maxScrollExtent = 内容高度 - 最终视口
+  ///   需要的留白 = 锚点 offset - 最终 maxScrollExtent（小于 0 则不需要）
+  /// 留白从第一帧就生效，之后每一帧 `maxScrollExtent` 都 ≥ 锚点，
+  /// 滚动位置永远不会被 clamp —— 视觉上完全不动，也不会有补丁式闪烁。
+  void _pinContentDuringImeCollapse(double previousIme) {
+    if (!mounted || previousIme <= 0 || !_editorScroll.hasClients) {
+      return;
+    }
+    // 面板/键盘交替由 [_reconcilePanelWithKeyboard] 的锚点补偿负责，
+    // 这里再补留白会双重计算。
+    if (_panelTransitioning) {
+      return;
+    }
+    final ScrollPosition position = _editorScroll.position;
+    final double anchor = _imeCollapseAnchorPixels ?? position.pixels;
+    // 停在顶部时视口变高不会让内容移动，不需要留白。
+    if (anchor <= 0) {
+      return;
+    }
+    // 键盘归零后工具条预留会一起撤掉，视口还要再高出一条工具栏。
+    final double reserveDrop =
+        (_panelOpen || _panelTransitioning) ? 0 : _toolbarHeight;
+    final double contentExtent =
+        position.maxScrollExtent + position.viewportDimension;
+    final double viewportFinal =
+        position.viewportDimension + previousIme + reserveDrop;
+    final double needed =
+        math.max(0.0, anchor - (contentExtent - viewportFinal));
+    if (needed > _imeCollapseBottomPad) {
+      // 在 build 里同步赋值（不 setState）：同一次 build 稍后构造
+      // stylesheet 时会读到新值，留白和视口在同一帧生效。
+      _imeCollapseBottomPad = needed;
+    }
   }
 
   void _endImeCollapse() {
@@ -1377,7 +1422,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         const SheetAction<String>(
           value: 'tags',
           label: '编辑标签',
-          icon: Icons.label_outline_rounded,
+          icon: Icons.sell_outlined,
         ),
         SheetAction<String>(
           value: 'lock',
@@ -1595,42 +1640,18 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   /// 一次 IME 插入是否等价于「粘贴当前剪贴板」。
   ///
-  /// 只有内容完全对得上、长度足够，并且确实能转成 Markdown（HTML 或纯文本
-  /// 带 Markdown 结构）时才拦截；普通打字、短文本不会被误判。
+  /// 判定逻辑在 [shouldTreatImeInsertAsPaste]（可单测）：除了和快照对得上，
+  /// 快照过期但插入文本本身结构明确时也拦截 —— 否则只能退出重进才解析。
   bool _shouldInterceptImePaste(String inserted) {
     if (_handlingImePaste) {
       return false;
     }
-    final String? snapshot = _clipboardText;
-    if (snapshot == null) {
-      return false;
-    }
-    final String incoming = inserted.trim();
-    final String clip = snapshot.trim();
-    if (incoming.length < 20 || clip.length < 20) {
-      return false;
-    }
-    // 输入法可能重排换行/空白（Gboard 的剪贴板会把多行压成一行展示），
-    // 先按原样比，再按「去掉所有空白」比一次，避免格式差异导致漏判。
-    final String incomingFlat = _withoutWhitespace(incoming);
-    final String clipFlat = _withoutWhitespace(clip);
-    final bool same = incoming == clip ||
-        incoming.contains(clip) ||
-        clip.contains(incoming) ||
-        (incomingFlat.isNotEmpty &&
-            clipFlat.isNotEmpty &&
-            (incomingFlat == clipFlat ||
-                incomingFlat.contains(clipFlat) ||
-                clipFlat.contains(incomingFlat)));
-    if (!same) {
-      return false;
-    }
-    return (_clipboardHtml?.trim().isNotEmpty ?? false) ||
-        looksLikeMarkdown(incoming);
+    return shouldTreatImeInsertAsPaste(
+      inserted,
+      clipboardText: _clipboardText,
+      clipboardHtml: _clipboardHtml,
+    );
   }
-
-  String _withoutWhitespace(String value) =>
-      value.replaceAll(RegExp(r'\s+'), '');
 
   /// 键盘粘贴：必须同步完成。
   ///
@@ -1639,22 +1660,31 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// （实测抛 `No such document position in the IME content`）。
   /// 所以直接拿页面缓存的剪贴板快照同步解析；解析不了返回 false，
   /// 交回输入法默认粘贴。
-  bool _handleImePaste() {
+  bool _handleImePaste(String inserted) {
     if (_handlingImePaste) {
-      return false;
-    }
-    final String? text = _clipboardText;
-    if (text == null) {
       return false;
     }
     _handlingImePaste = true;
     try {
-      return MarkdownPaster(
+      final String? snapshot = _clipboardText;
+      // 只有快照确实对应这次插入时才用它的 HTML，否则 HTML 属于上一次
+      // 复制的内容，会把无关排版套进来。
+      final bool fromSnapshot = snapshot != null &&
+          snapshot.trim().isNotEmpty &&
+          clipboardTextsMatch(inserted.trim(), snapshot.trim());
+      final ClipboardContent content = fromSnapshot
+          ? ClipboardContent(text: snapshot, html: _clipboardHtml)
+          : ClipboardContent(text: inserted);
+      final bool handled = MarkdownPaster(
         editor: _editor,
         document: _document,
         composer: _composer,
         ops: _ops,
-      ).pasteContent(ClipboardContent(text: text, html: _clipboardHtml));
+      ).pasteContent(content);
+      if (handled) {
+        _notifyMarkdownPaste();
+      }
+      return handled;
     } catch (error, stack) {
       debugPrint('键盘粘贴解析失败，交给输入法: $error\n$stack');
       return false;
@@ -1662,6 +1692,30 @@ class _NewEditorPageState extends State<NewEditorPage>
       _handlingImePaste = false;
     }
   }
+
+  /// 解析成功后的即时反馈（语雀式提示）。
+  ///
+  /// 用户看不到文档结构被「重建」的过程，需要一句话告诉他这次粘贴被
+  /// 识别成了 Markdown；否则会把「自动排版」当成内容丢失。
+  void _notifyMarkdownPaste() {
+    final DateTime now = DateTime.now();
+    if (_lastMarkdownPasteHint != null &&
+        now.difference(_lastMarkdownPasteHint!) <
+            const Duration(milliseconds: 800)) {
+      return;
+    }
+    _lastMarkdownPasteHint = now;
+    // 粘贴回调发生在输入法消息里，等这一帧布局结束再弹，避免与文档
+    // 重建撞在同一帧。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _disposed) {
+        return;
+      }
+      _showHint('已识别为 Markdown');
+    });
+  }
+
+  DateTime? _lastMarkdownPasteHint;
 
   /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
   Future<bool> _pasteFromClipboard() async {
@@ -1672,7 +1726,9 @@ class _NewEditorPageState extends State<NewEditorPage>
         composer: _composer,
         ops: _ops,
       ).paste();
-      if (!handled) {
+      if (handled) {
+        _notifyMarkdownPaste();
+      } else {
         _ops.paste();
       }
       return handled;
@@ -2303,7 +2359,13 @@ class _NewEditorPageState extends State<NewEditorPage>
         scrollController: _editorScroll,
         // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
         selectionStyle: SelectionStyles(
-          selectionColor: colors.accent.withValues(alpha: 0.25),
+          // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
+          // 必然重叠；半透明色叠两层就会出现一条更深的蓝带（用户反馈）。
+          // 预先与页面底色混成不透明色，画多少层都是同一个颜色。
+          selectionColor: Color.alphaBlend(
+            colors.accent.withValues(alpha: 0.25),
+            colors.page,
+          ),
         ),
         androidHandleColor: colors.accent,
         stylesheet: _buildStylesheet(colors),
@@ -2354,6 +2416,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           ),
           // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
           const _LabListItemComponentBuilder(),
+          // 表格：官方默认组件链里没有表格（表节点会落到 UnknownComponentBuilder）。
+          // 窄屏用横向滚动而不是整体缩小 —— 缩放会让表格字号明显小于正文。
+          const MarkdownTableComponentBuilder(
+            columnWidth: IntrinsicColumnWidth(),
+            fit: TableComponentFit.scroll,
+          ),
           ...defaultComponentBuilders,
           const UnknownComponentBuilder(),
         ],
@@ -2545,6 +2613,27 @@ class _NewEditorPageState extends State<NewEditorPage>
                 bottom: continuesBelow ? 0 : 6,
               ),
             };
+          },
+        ),
+        // 表格：细线网格 + 表头淡底，与语雀的「轻网格」观感一致。
+        // 表格组件只认 TableStyles（MarkdownTableComponent 的样式入口），
+        // 单元格内边距比正文松一点，手指横向滚动时不容易误触。
+        StyleRule(
+          const BlockSelector('tableBlock'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            TableStyles.border: TableBorder.all(
+              color: colors.divider,
+              width: 0.8,
+            ),
+            TableStyles.headerTextStyle: const TextStyle(
+              fontWeight: AppWeight.semibold,
+            ),
+            TableStyles.cellPadding: const CascadingPadding.symmetric(
+              horizontal: 10,
+              vertical: 7,
+            ),
+            TableStyles.cellDecorator: _tableCellDecorator(colors),
+            Styles.padding: const CascadingPadding.symmetric(vertical: 8),
           },
         ),
         // 代码块：等宽 + 底色。等宽字形比中文正文更宽，13 才与 15px
@@ -3280,6 +3369,18 @@ class _LabHorizontalRuleComponentBuilder implements ComponentBuilder {
       color: colors.divider,
     );
   }
+}
+
+/// 表格单元格装饰：表头一行铺页面次级底色，数据行交给表格边框。
+TableCellDecorator _tableCellDecorator(AppColors colors) {
+  return ({
+    required int rowIndex,
+    required int columnIndex,
+    required AttributedText cellText,
+    required Map<String, dynamic> cellMetadata,
+  }) {
+    return rowIndex == 0 ? BoxDecoration(color: colors.pageAlt) : null;
+  };
 }
 
 /// 图片长按菜单的动作。

@@ -53,6 +53,11 @@ bool looksLikeMarkdown(String text) {
     return false;
   }
   final List<String> lines = trimmed.split('\n');
+  // GFM 表格是强信号：`| a | b |` 紧跟 `| --- | --- |` 就必须按 Markdown
+  // 解析，否则管道行会被当成普通正文（旧版实测）。
+  if (_hasGfmTable(lines)) {
+    return true;
+  }
   int markers = 0;
   bool inFence = false;
   for (final String line in lines) {
@@ -84,6 +89,49 @@ bool looksLikeMarkdown(String text) {
       RegExp(r'`[^`\n]+`').hasMatch(trimmed);
 }
 
+/// 输入法的一次插入是否应视为「粘贴」并走 Markdown 解析。
+///
+/// [clipboardText] / [clipboardHtml] 是页面缓存的剪贴板快照，可能已经过期：
+/// 应用内复制、输入法自带剪贴板都不会触发重新读取。因此分两条判定：
+///  1. 与快照对得上 —— 正常粘贴，HTML / Markdown 结构任一即可；
+///  2. 快照对不上（过期）但插入文本本身结构明确 —— 直接按纯文本解析，
+///     不依赖 HTML。否则这类粘贴会退回默认纯文本，只能退出重进才解析。
+bool shouldTreatImeInsertAsPaste(
+  String inserted, {
+  String? clipboardText,
+  String? clipboardHtml,
+}) {
+  final String incoming = inserted.trim();
+  if (incoming.length < 20) {
+    return false;
+  }
+  final String? snapshot = clipboardText?.trim();
+  if (snapshot != null &&
+      snapshot.length >= 20 &&
+      clipboardTextsMatch(incoming, snapshot)) {
+    return (clipboardHtml?.trim().isNotEmpty ?? false) ||
+        looksLikeMarkdown(incoming);
+  }
+  // 输入法的换行走 performAction，不会出现在 commitText 里；一次插入带换行
+  // 基本只能是粘贴。Markdown 结构同理：逐字输入每次 delta 都很短。
+  return looksLikeMarkdown(incoming) || incoming.contains('\n');
+}
+
+/// 两段文本是否等价（容忍输入法重排换行 / 空白）。
+bool clipboardTextsMatch(String a, String b) {
+  if (a == b || a.contains(b) || b.contains(a)) {
+    return true;
+  }
+  final String aFlat = _withoutWhitespace(a);
+  final String bFlat = _withoutWhitespace(b);
+  if (aFlat.isEmpty || bFlat.isEmpty) {
+    return false;
+  }
+  return aFlat == bFlat || aFlat.contains(bFlat) || bFlat.contains(aFlat);
+}
+
+String _withoutWhitespace(String value) => value.replaceAll(RegExp(r'\s+'), '');
+
 /// 从剪贴板内容得到要解析的 Markdown；返回 null 表示按普通文本粘贴。
 String? markdownFromClipboard({required String text, String? html}) {
   final String? rawHtml = html?.trim();
@@ -100,9 +148,86 @@ String? markdownFromClipboard({required String text, String? html}) {
   if (looksLikeMarkdown(plain)) {
     return plain;
   }
+  // Excel / 飞书 / 语雀表格复制成「纯文本」时只剩制表符分隔的行，
+  // 这里按语雀「粘贴为表格」的规则自动还原成 GFM 表格。
+  final String? table = tabSeparatedToMarkdown(plain);
+  if (table != null) {
+    return table;
+  }
   // 从微信 / 备忘录复制出来的纯文本，项目符号常是「•」「·」而不是
   // Markdown 的「-」。这种结构明确，直接归一化成列表再解析。
   return normalizePlainBullets(plain);
+}
+
+/// 制表符分隔文本 → GFM 管道表格；不像表格时返回 null。
+///
+/// 判定条件（与语雀「粘贴为表格」一致）：至少两行、至少两列、每行列数
+/// 相同。首行当表头。正文里偶然出现的单个制表符不会命中，避免误判。
+String? tabSeparatedToMarkdown(String text) {
+  final List<String> lines = <String>[
+    for (final String line in text
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n'))
+      if (line.trim().isNotEmpty) line,
+  ];
+  if (lines.length < 2) {
+    return null;
+  }
+  final List<List<String>> rows = <List<String>>[
+    for (final String line in lines) line.split('\t'),
+  ];
+  final int columns = rows.first.length;
+  if (columns < 2) {
+    return null;
+  }
+  if (rows.any((List<String> row) => row.length != columns)) {
+    return null;
+  }
+  String cell(String value) => value.trim().replaceAll('|', r'\|');
+
+  final StringBuffer buffer = StringBuffer(
+    '| ${rows.first.map(cell).join(' | ')} |\n',
+  );
+  buffer.write('| ${List<String>.filled(columns, '---').join(' | ')} |');
+  for (var r = 1; r < rows.length; r++) {
+    buffer.write('\n| ${rows[r].map(cell).join(' | ')} |');
+  }
+  return buffer.toString();
+}
+
+/// 是否为 GFM 表格：某行是管道行，下一行是 `| --- |` 形态的分隔行。
+bool _hasGfmTable(List<String> lines) {
+  for (var i = 0; i + 1 < lines.length; i++) {
+    final String header = lines[i].trim();
+    if (!header.contains('|')) {
+      continue;
+    }
+    if (!header.startsWith('|') && !header.endsWith('|')) {
+      continue;
+    }
+    if (!_isGfmTableSeparator(lines[i + 1])) {
+      continue;
+    }
+    final int cells = header
+        .replaceAll(RegExp(r'^\||\|$'), '')
+        .split('|')
+        .length;
+    if (cells >= 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _isGfmTableSeparator(String line) {
+  final String trimmed = line.trim();
+  if (!trimmed.startsWith('|') && !trimmed.endsWith('|')) {
+    return false;
+  }
+  // 只允许 | - : 与空白，且至少有一段连续 3 个以上的减号。
+  return RegExp(r'^[|\s:-]+$').hasMatch(trimmed) &&
+      RegExp(r'-{3,}').hasMatch(trimmed);
 }
 
 /// 把纯文本里的富文本项目符号（`• 项`、`· 项`）转成 Markdown 列表。

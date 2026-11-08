@@ -519,6 +519,13 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
       write('---');
       continue;
     }
+    if (node is TableBlockNode) {
+      final String? table = _tableMarkdown(node);
+      if (table != null) {
+        write(table);
+      }
+      continue;
+    }
     if (node is ParagraphNode) {
       final blockType = node.getMetadataValue('blockType');
       final plain = node.text.toPlainText();
@@ -585,6 +592,57 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
   // 正常路径在 _splitSentinelParagraphs 已全部还原成空段落；这里再剥一次，
   // 避免未来新增节点类型时哨兵泄漏成「☒」乱码。
   return out.toString().replaceAll(_blankParagraphSentinel, '');
+}
+
+/// 表格 → GFM 管道表格。
+///
+/// super_editor 的表格模型只存单元格文本与对齐，没有合并单元格；表头
+/// 固定是第 0 行，必须写出分隔行，否则重新解析会退化成普通段落。
+String? _tableMarkdown(TableBlockNode node) {
+  if (node.rowCount == 0 || node.columnCount == 0) {
+    return null;
+  }
+  final int columns = node.columnCount;
+  final List<List<String>> rows = <List<String>>[
+    for (int r = 0; r < node.rowCount; r++)
+      <String>[
+        for (int c = 0; c < columns; c++)
+          _tableCellMarkdown(node.getCell(rowIndex: r, columnIndex: c)),
+      ],
+  ];
+  final StringBuffer buffer = StringBuffer('| ${rows.first.join(' | ')} |');
+  // 对齐信息存在数据行单元格的 textAlign 上（解析器从表头 align 复制）；
+  // 只有表头行时无法还原，统一按默认左对齐输出。
+  final List<String> separators = <String>[
+    for (int c = 0; c < columns; c++)
+      _tableSeparator(
+        node.rowCount > 1 ? node.getCell(rowIndex: 1, columnIndex: c) : null,
+      ),
+  ];
+  buffer.write('\n| ${separators.join(' | ')} |');
+  for (int r = 1; r < rows.length; r++) {
+    buffer.write('\n| ${rows[r].join(' | ')} |');
+  }
+  return buffer.toString();
+}
+
+/// 单元格里的换行与裸 `|` 会破坏管道语法，换成空格与转义；行内样式保留。
+String _tableCellMarkdown(TextNode cell) {
+  return _inlineMarkdown(cell.text)
+      .replaceAll('\n', ' ')
+      .replaceAll('|', r'\|')
+      .trim();
+}
+
+/// 分隔行：`:---` 左对齐、`:---:` 居中、`---:` 右对齐、`---` 默认。
+String _tableSeparator(TextNode? firstDataCell) {
+  final Object? align = firstDataCell?.metadata[TextNodeMetadata.textAlign];
+  return switch (align) {
+    'center' => ':---:',
+    'right' => '---:',
+    'left' => ':---',
+    _ => '---',
+  };
 }
 
 /// 把 [AttributedText] 的行内样式重建回 markdown 记号。

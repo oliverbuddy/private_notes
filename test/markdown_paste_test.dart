@@ -71,6 +71,56 @@ void main() {
     });
   });
 
+  group('shouldTreatImeInsertAsPaste', () {
+    test('快照过期时，结构明确的 Markdown 仍然拦截', () {
+      expect(
+        shouldTreatImeInsertAsPaste(
+          '# 标题\n\n正文一段足够长的内容用来判断',
+          clipboardText: '上一次复制的完全不同的内容，长度也够',
+          clipboardHtml: null,
+        ),
+        isTrue,
+      );
+    });
+
+    test('快照过期时，多行纯文本也按粘贴处理', () {
+      expect(
+        shouldTreatImeInsertAsPaste(
+          '第一段普通文字内容再长一点\n第二段普通文字内容再长一点',
+          clipboardText: '旧内容',
+        ),
+        isTrue,
+      );
+    });
+
+    test('短文本、单行普通输入不拦截', () {
+      expect(shouldTreatImeInsertAsPaste('你好'), isFalse);
+      expect(
+        shouldTreatImeInsertAsPaste('今天天气不错，我们出去走走吧'),
+        isFalse,
+      );
+    });
+
+    test('与快照一致且有 HTML 时拦截', () {
+      const String text = '一段被复制过的正文内容，长度肯定超过二十个字符阈值';
+      expect(
+        shouldTreatImeInsertAsPaste(
+          text,
+          clipboardText: text,
+          clipboardHtml: '<p>$text</p>',
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('clipboardTextsMatch', () {
+    test('忽略空白与换行差异', () {
+      expect(clipboardTextsMatch('a b\nc', 'ab c'), isTrue);
+      expect(clipboardTextsMatch('abc', 'xyz'), isFalse);
+    });
+  });
+
   group('MarkdownPaster', () {
     late MutableDocument document;
     late MutableDocumentComposer composer;
@@ -244,6 +294,33 @@ void main() {
         node.text.hasAttributionAt(11, attribution: boldAttribution),
         isTrue,
       );
+    });
+  });
+
+  group('表格识别', () {
+    test('GFM 表格按 Markdown 处理', () {
+      expect(
+        looksLikeMarkdown('| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |'),
+        isTrue,
+      );
+    });
+
+    test('只有管道行不算表格', () {
+      expect(looksLikeMarkdown('a | b'), isFalse);
+      expect(looksLikeMarkdown('| 只有一行 |'), isFalse);
+    });
+
+    test('制表符分隔文本转表格', () {
+      final String? md = tabSeparatedToMarkdown('名称\t数量\n苹果\t3\n香蕉\t5');
+      expect(
+        md,
+        '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n| 香蕉 | 5 |',
+      );
+    });
+
+    test('列数不一致不转表格', () {
+      expect(tabSeparatedToMarkdown('a\tb\nc\td\te'), isNull);
+      expect(tabSeparatedToMarkdown('单列\n文本'), isNull);
     });
   });
 }

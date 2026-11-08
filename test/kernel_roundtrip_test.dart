@@ -190,4 +190,32 @@ void main() {
     expect(out, contains('[报告.pdf](assets/n1/a.pdf)'));
     expect(out, contains('![](assets/n1/1.jpg)'));
   });
+
+  test('表格：解析成表节点，序列化保持行列与表头', () {
+    const String body = '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |';
+    final doc = deserializeXiaojiMarkdown(body);
+    expect(
+      doc.any((DocumentNode node) => node is TableBlockNode),
+      isTrue,
+      reason: '节点类型：${doc.map((DocumentNode n) => n.runtimeType).toList()}',
+    );
+    expect(serializeDocumentToXiaojiMarkdown(doc), body);
+  });
+
+  test('表格：紧跟在段落后面（无空行）仍能识别并原样保存', () {
+    const String body = '前文\n| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |';
+    final doc = deserializeXiaojiMarkdown(body);
+    expect(
+      doc.any((DocumentNode node) => node is TableBlockNode),
+      isTrue,
+      reason: '节点类型：${doc.map((DocumentNode n) => n.runtimeType).toList()}',
+    );
+    expect(serializeDocumentToXiaojiMarkdown(doc), body);
+  });
+
+  test('表格：单元格内的行内样式往返不丢', () {
+    const String body = '| 名称 | 说明 |\n| --- | --- |\n| 苹果 | **甜** |';
+    final doc = deserializeXiaojiMarkdown(body);
+    expect(serializeDocumentToXiaojiMarkdown(doc), body);
+  });
 }

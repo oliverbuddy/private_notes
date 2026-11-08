@@ -64,5 +64,27 @@ void main() {
       expect(md, isNot(contains('color:red')));
       expect(md, contains('[示例](https://example.com/a.png)'));
     });
+
+    test('HTML 表格转 GFM 管道表格', () {
+      final String md = htmlToMarkdown(
+        '<table><thead><tr><th>名称</th><th>数量</th></tr></thead>'
+        '<tbody><tr><td>苹果</td><td>3</td></tr>'
+        '<tr><td>香蕉</td><td>5</td></tr></tbody></table>',
+      );
+      expect(md, contains('| 名称 | 数量 |'));
+      expect(md, contains('| --- | --- |'));
+      expect(md, contains('| 苹果 | 3 |'));
+      expect(md, contains('| 香蕉 | 5 |'));
+    });
+
+    test('表格对齐与 colspan', () {
+      final String md = htmlToMarkdown(
+        '<table><tr><th align="center">左</th>'
+        '<th style="text-align:right">右</th></tr>'
+        '<tr><td colspan="2">合并</td></tr></table>',
+      );
+      expect(md, contains('| :---: | ---: |'));
+      expect(md, contains('| 合并 |  |'));
+    });
   });
 }
