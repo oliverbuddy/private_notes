@@ -59,6 +59,12 @@ class NoteStore {
 
   Directory get trashDir => Directory(p.join(root.path, 'trash'));
 
+  /// 历史版本目录：`versions/<noteId>/<时间戳>.md`。
+  ///
+  /// 存的是「保存前的原始文件字节」（锁定笔记即密文），所以不需要解密，
+  /// 也不会产生明文副本；目录本身排除在备份/导出之外。
+  Directory get versionsDir => Directory(p.join(root.path, 'versions'));
+
   Directory get backupsDir => Directory(p.join(root.path, 'backups'));
 
   File get settingsFile => File(p.join(root.path, 'settings.json'));
@@ -72,6 +78,7 @@ class NoteStore {
     await notesDir.create(recursive: true);
     await assetsDir.create(recursive: true);
     await trashDir.create(recursive: true);
+    await versionsDir.create(recursive: true);
     await backupsDir.create(recursive: true);
   }
 
@@ -136,7 +143,7 @@ class NoteStore {
   ///
   /// 先写 `.tmp` 再 rename：写大图片/长文本时进程被杀，rename 是原子操作，
   /// 所以用户要么看到旧内容，要么看到新内容，绝不会看到半截文件。
-  Future<void> saveNote(Note note) async {
+  Future<void> saveNote(Note note, {bool keepHistory = true}) async {
     // 锁定笔记：正文在落盘前加密成信封。
     // 恢复备份时 body 已经是信封（以 XIAOJI-LOCK-1: 开头），不能再加一层。
     Note toWrite = note;
@@ -160,6 +167,19 @@ class NoteStore {
     }
     final target = File(pathFor(toWrite));
     await target.parent.create(recursive: true);
+    // 覆盖前给旧内容留一版：版本是「保存前的原始字节」，锁定笔记即密文。
+    if (keepHistory && await target.exists()) {
+      try {
+        await _snapshotBeforeOverwrite(
+          noteId: toWrite.id,
+          target: target,
+          nextBody: toWrite.body,
+        );
+      } catch (error) {
+        // 历史版本只是保险，写失败绝不能拦住正文保存。
+        debugPrint('写入历史版本失败（不影响保存）：$error');
+      }
+    }
     // 临时文件名带序号：同一条笔记可能有两笔保存同时在飞（例如防抖保存
     // 和「锁定笔记」的强制保存），共用一个 `.tmp` 会互相截断内容。
     // 仍然以 `.tmp` 结尾，备份/恢复/导出都按这个后缀跳过临时文件。
@@ -170,6 +190,199 @@ class NoteStore {
 
   /// 是否存在该笔记文件（用于判断恢复/覆盖场景）。
   Future<bool> noteFileExists(Note note) => File(pathFor(note)).exists();
+
+  // ---------------------------------------------------------------------------
+  // 历史版本
+  // ---------------------------------------------------------------------------
+
+  /// 同一篇笔记两次快照的最小间隔；当天第一版不受此限制。
+  static const Duration _versionThrottle = Duration(minutes: 10);
+  static const int _versionKeepRecent = 20;
+  static const int _versionKeepDays = 30;
+
+  final RegExp _versionName = RegExp(
+    r'^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$',
+  );
+
+  Directory versionDirectoryOf(String noteId) =>
+      Directory(p.join(versionsDir.path, noteId));
+
+  /// 覆盖前把旧文件留一版。
+  ///
+  /// 规则：
+  ///  - 正文（锁定笔记是密文）没变 → 不留；
+  ///  - 与最新一版内容相同 → 不留（去重）；
+  ///  - 距最新一版不足 10 分钟且当天已有版本 → 不留（节流）；
+  ///  - 当天还没有版本 → 强制留一版（每天至少一个还原点）。
+  Future<void> _snapshotBeforeOverwrite({
+    required String noteId,
+    required File target,
+    required String nextBody,
+    bool force = false,
+  }) async {
+    final String oldRaw = await target.readAsString();
+    final Note? oldNote = Note.decode(oldRaw, fallbackId: noteId);
+    if (!force && oldNote != null && oldNote.body == nextBody) {
+      return;
+    }
+
+    final Directory directory = versionDirectoryOf(noteId);
+    await directory.create(recursive: true);
+    final List<NoteVersion> versions = await _listVersionFiles(noteId);
+    final DateTime now = DateTime.now();
+    if (versions.isNotEmpty && !force) {
+      final NoteVersion newest = versions.first;
+      if (await newest.file.readAsString() == oldRaw) {
+        return;
+      }
+      if (isSameDay(newest.time, now) &&
+          now.difference(newest.time) < _versionThrottle) {
+        return;
+      }
+    }
+
+    final File file = File(p.join(directory.path, '${_versionStamp(now)}.md'));
+    final File tmp = File('${file.path}.${_tmpSeq++}.tmp');
+    await tmp.writeAsString(oldRaw, flush: true);
+    await tmp.rename(file.path);
+    await _pruneVersions(noteId);
+  }
+
+  String _versionStamp(DateTime time) {
+    final t = time.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    String three(int v) => v.toString().padLeft(3, '0');
+    return '${t.year}${two(t.month)}${two(t.day)}-'
+        '${two(t.hour)}${two(t.minute)}${two(t.second)}-${three(t.millisecond)}';
+  }
+
+  DateTime? _parseVersionTime(String name) {
+    final RegExpMatch? match = _versionName.firstMatch(name);
+    if (match == null) {
+      return null;
+    }
+    int part(int index) => int.tryParse(match.group(index) ?? '') ?? 0;
+    final DateTime parsed = DateTime(
+      part(1),
+      part(2),
+      part(3),
+      part(4),
+      part(5),
+      part(6),
+      part(7),
+    );
+    return parsed;
+  }
+
+  Future<List<NoteVersion>> _listVersionFiles(String noteId) async {
+    final Directory directory = versionDirectoryOf(noteId);
+    if (!await directory.exists()) {
+      return const <NoteVersion>[];
+    }
+    final List<NoteVersion> versions = <NoteVersion>[];
+    await for (final FileSystemEntity entity in directory.list()) {
+      if (entity is! File ||
+          !entity.path.toLowerCase().endsWith('.md') ||
+          entity.path.endsWith('.tmp')) {
+        continue;
+      }
+      final String name = p.basenameWithoutExtension(entity.path);
+      final DateTime? time = _parseVersionTime(name);
+      if (time == null) {
+        continue;
+      }
+      final int size = await entity.length();
+      versions.add(NoteVersion(file: entity, time: time, size: size));
+    }
+    versions.sort(
+      (NoteVersion a, NoteVersion b) => b.time.compareTo(a.time),
+    );
+    return versions;
+  }
+
+  /// 列出某篇笔记的历史版本（新到旧）。
+  Future<List<NoteVersion>> listVersions(String noteId) =>
+      _listVersionFiles(noteId);
+
+  /// 读取某个版本的原始文件内容（含 frontmatter）。
+  Future<String> readVersion(NoteVersion version) =>
+      version.file.readAsString();
+
+  /// 恢复到某个版本。
+  ///
+  /// 恢复前强制把当前内容留一版（可撤销）；锁定笔记会继续保持锁定，
+  /// 明文版本会被重新加密后落盘。
+  Future<Note?> restoreVersion(Note current, NoteVersion version) async {
+    final String raw = await version.file.readAsString();
+    final Note? restored = Note.decode(raw, fallbackId: current.id);
+    if (restored == null) {
+      return null;
+    }
+    final File target = File(pathFor(current));
+    if (await target.exists()) {
+      final Note? old = Note.decode(
+        await target.readAsString(),
+        fallbackId: current.id,
+      );
+      await _snapshotBeforeOverwrite(
+        noteId: current.id,
+        target: target,
+        nextBody: old?.body ?? '',
+        force: true,
+      );
+    }
+    final Note toWrite = restored.copyWith(
+      id: current.id,
+      // 当前是锁定笔记、或这一版本身是密文：恢复后继续保持锁定。
+      locked: current.locked || restored.locked,
+      body: restored.body,
+    );
+    await saveNote(toWrite, keepHistory: false);
+    if (toWrite.locked) {
+      try {
+        // 编辑器需要明文；密文版本在这里解密，明文版本直接返回。
+        final String plain = await readNoteBody(toWrite);
+        return toWrite.copyWith(body: plain);
+      } catch (_) {
+        // 解密失败（密钥失效）：保持原样，界面只展示「已锁定」。
+      }
+    }
+    return toWrite;
+  }
+
+  /// 保留最近 20 版 + 最近 30 天每天最新一版，其余删除。
+  Future<void> _pruneVersions(String noteId) async {
+    final List<NoteVersion> versions = await _listVersionFiles(noteId);
+    if (versions.isEmpty) {
+      return;
+    }
+    final Set<String> keep = <String>{};
+    for (var i = 0; i < versions.length && i < _versionKeepRecent; i++) {
+      keep.add(versions[i].file.path);
+    }
+    final DateTime now = DateTime.now();
+    final Set<String> days = <String>{};
+    for (final NoteVersion version in versions) {
+      if (now.difference(version.time).inDays > _versionKeepDays) {
+        continue;
+      }
+      final String day =
+          '${version.time.year}-${version.time.month}-${version.time.day}';
+      if (days.add(day)) {
+        keep.add(version.file.path);
+      }
+    }
+    for (final NoteVersion version in versions) {
+      if (keep.contains(version.file.path)) {
+        continue;
+      }
+      try {
+        await version.file.delete();
+      } catch (_) {
+        // 单个版本删不掉不影响其它文件。
+      }
+    }
+  }
 
   /// 删除笔记：**整体**移进 `trash/<id>/`（正文 + 附件 + 元信息）。
   ///
@@ -196,6 +409,14 @@ class NoteStore {
     final assets = assetDirectoryOf(note.id);
     if (await assets.exists()) {
       await _moveDirectory(assets, Directory(p.join(directory.path, 'assets')));
+    }
+    // 历史版本跟着笔记一起进回收站，避免留下孤儿目录。
+    final versions = versionDirectoryOf(note.id);
+    if (await versions.exists()) {
+      await _moveDirectory(
+        versions,
+        Directory(p.join(directory.path, 'versions')),
+      );
     }
 
     final meta = <String, Object?>{
@@ -334,7 +555,7 @@ class NoteStore {
       if (note == null) {
         return null;
       }
-      await saveNote(note);
+      await saveNote(note, keepHistory: false);
       await file.delete();
       return note;
     }
@@ -349,7 +570,7 @@ class NoteStore {
     if (note == null) {
       return null;
     }
-    await saveNote(note);
+    await saveNote(note, keepHistory: false);
     final assets = Directory(p.join(directory.path, 'assets'));
     if (await assets.exists()) {
       final target = assetDirectoryOf(note.id);
@@ -357,6 +578,14 @@ class NoteStore {
         await target.delete(recursive: true);
       }
       await _moveDirectory(assets, target);
+    }
+    final versions = Directory(p.join(directory.path, 'versions'));
+    if (await versions.exists()) {
+      final target = versionDirectoryOf(note.id);
+      if (await target.exists()) {
+        await target.delete(recursive: true);
+      }
+      await _moveDirectory(versions, target);
     }
     await directory.delete(recursive: true);
     return note;
@@ -431,6 +660,9 @@ class NoteStore {
     'backups',
     'trash',
     'tmp',
+    // 历史版本是本地保险，且锁定笔记的版本可能是密文/旧明文：
+    // 不进备份也不进导出，避免体积翻倍与隐私面扩大。
+    'versions',
     // 搜索索引是派生数据，且里面是正文分词后的明文：既不该进备份，
     // 也不该被导出。删掉后下次启动会自动重建。
     'index',
@@ -806,7 +1038,7 @@ class NoteStore {
           skipped += 1;
           continue;
         }
-        await saveNote(note);
+        await saveNote(note, keepHistory: false);
         restored += 1;
       } else if (name.startsWith('assets/')) {
         final relative = name.substring('assets/'.length);
@@ -870,7 +1102,7 @@ class NoteStore {
           if (note == null) {
             skipped += 1;
           } else {
-            await saveNote(note);
+            await saveNote(note, keepHistory: false);
             restored += 1;
           }
         } catch (_) {
@@ -1154,6 +1386,21 @@ class NoteStore {
       body: '${Note.lockEnvelopePrefix}$envelope',
     ));
   }
+}
+
+/// 一个历史版本（磁盘上的一个快照文件）。
+class NoteVersion {
+  const NoteVersion({
+    required this.file,
+    required this.time,
+    required this.size,
+  });
+
+  final File file;
+  final DateTime time;
+  final int size;
+
+  String get name => p.basename(file.path);
 }
 
 /// 回收站里的一条笔记。

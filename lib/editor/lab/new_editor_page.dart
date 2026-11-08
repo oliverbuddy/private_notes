@@ -13,6 +13,9 @@ import 'package:super_editor/super_editor.dart';
 
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
+import '../../data/note_store.dart';
+import '../../reminders/reminder_scheduler.dart' show ReminderPermission;
+import '../../reminders/reminder_service.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
@@ -24,10 +27,11 @@ import '../../ui/snack.dart';
 import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
 import '../markdown_toolbar.dart';
+import '../markdown_view.dart';
 import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
-import '../../util/date_format.dart' show formatEditorTime;
+import '../../util/date_format.dart' show formatEditorTime, formatFileSize;
 import 'selection_toolbar.dart';
 import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
@@ -720,6 +724,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       tags: _currentNote.tags,
       pinned: _currentNote.pinned,
       locked: _currentNote.locked,
+      remindAt: _currentNote.remindAt,
       body: md,
     );
     try {
@@ -1426,6 +1431,20 @@ class _NewEditorPageState extends State<NewEditorPage>
           icon: Icons.sell_outlined,
         ),
         SheetAction<String>(
+          value: 'reminder',
+          label: _currentNote.remindAt == null
+              ? '设置提醒'
+              : '提醒：${formatEditorTime(_currentNote.remindAt!)}',
+          icon: _currentNote.remindAt == null
+              ? Icons.notifications_none_rounded
+              : Icons.notifications_active_outlined,
+        ),
+        const SheetAction<String>(
+          value: 'history',
+          label: '历史版本',
+          icon: Icons.history_rounded,
+        ),
+        SheetAction<String>(
           value: 'lock',
           label: _currentNote.locked ? '取消锁定' : '锁定笔记',
           icon: _currentNote.locked
@@ -1453,6 +1472,12 @@ class _NewEditorPageState extends State<NewEditorPage>
       case 'tags':
         await _editTags();
         break;
+      case 'reminder':
+        await _editReminder();
+        break;
+      case 'history':
+        await _showVersionHistory();
+        break;
       case 'lock':
         await _toggleLock();
         break;
@@ -1467,6 +1492,223 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (mounted) {
       setState(() {});
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 提醒
+  // ---------------------------------------------------------------------------
+
+  Future<void> _editReminder() async {
+    final DateTime? current = _currentNote.remindAt;
+    final DateTime now = DateTime.now();
+    final String? action = await showXiaojiActionSheet<String>(
+      context: context,
+      title: current == null ? '设置提醒' : '当前提醒：${formatEditorTime(current)}',
+      actions: <SheetAction<String>>[
+        if (current != null)
+          const SheetAction<String>(
+            value: 'clear',
+            label: '移除提醒',
+            icon: Icons.notifications_off_outlined,
+            destructive: true,
+          ),
+        const SheetAction<String>(
+          value: 'today',
+          label: '今天 20:00',
+          icon: Icons.schedule_rounded,
+        ),
+        const SheetAction<String>(
+          value: 'tomorrow',
+          label: '明天 09:00',
+          icon: Icons.wb_sunny_outlined,
+        ),
+        const SheetAction<String>(
+          value: 'monday',
+          label: '下周一 09:00',
+          icon: Icons.event_outlined,
+        ),
+        const SheetAction<String>(
+          value: 'custom',
+          label: '选择日期与时间',
+          icon: Icons.edit_calendar_outlined,
+        ),
+      ],
+    );
+    if (action == null || !mounted) {
+      return;
+    }
+    DateTime nextAt(int hour) {
+      final DateTime candidate =
+          DateTime(now.year, now.month, now.day, hour);
+      return candidate.isAfter(now)
+          ? candidate
+          : candidate.add(const Duration(days: 1));
+    }
+
+    switch (action) {
+      case 'clear':
+        await _applyReminder(null);
+        break;
+      case 'today':
+        await _applyReminder(nextAt(20));
+        break;
+      case 'tomorrow':
+        await _applyReminder(
+          DateTime(now.year, now.month, now.day + 1, 9),
+        );
+        break;
+      case 'monday':
+        final int delta = (DateTime.monday - now.weekday + 7) % 7;
+        await _applyReminder(
+          DateTime(now.year, now.month, now.day + (delta == 0 ? 7 : delta), 9),
+        );
+        break;
+      case 'custom':
+        final DateTime? date = await showDatePicker(
+          context: context,
+          initialDate: now,
+          firstDate: DateTime(now.year, now.month, now.day),
+          lastDate: now.add(const Duration(days: 3650)),
+        );
+        if (date == null || !mounted) {
+          return;
+        }
+        final TimeOfDay? time = await showTimePicker(
+          context: context,
+          initialTime: const TimeOfDay(hour: 9, minute: 0),
+        );
+        if (time == null || !mounted) {
+          return;
+        }
+        final DateTime at = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          time.hour,
+          time.minute,
+        );
+        if (!at.isAfter(DateTime.now())) {
+          _showHint('请选择将来的时间');
+          return;
+        }
+        await _applyReminder(at);
+        break;
+    }
+  }
+
+  Future<void> _applyReminder(DateTime? at) async {
+    if (at != null) {
+      final ReminderPermission permission =
+          await reminderService.ensurePermissions();
+      if (!mounted) {
+        return;
+      }
+      if (permission == ReminderPermission.denied) {
+        _showHint('通知权限未开启，提醒不会显示');
+        return;
+      }
+      if (permission == ReminderPermission.exactDenied) {
+        _showHint('未获精确提醒权限，提醒可能延迟几分钟');
+      }
+    }
+    _currentNote = _currentNote.copyWith(
+      remindAt: at,
+      clearRemind: at == null,
+    );
+    await _persistCurrentNote();
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    _showHint(
+      at == null ? '已移除提醒' : '将在 ${formatEditorTime(at)} 提醒你',
+    );
+  }
+
+  /// 保存「元信息」类改动（提醒/标签等）：正文一起落盘，但不走节流保存。
+  Future<void> _persistCurrentNote() async {
+    final String md = serializeDocumentToXiaojiMarkdown(_document);
+    _lastSavedBody = md;
+    _dirty = false;
+    _updated = DateTime.now();
+    _currentNote = _currentNote.copyWith(updated: _updated, body: md);
+    await widget.repository.upsert(_currentNote, keepHistory: false);
+    await _syncReminders();
+  }
+
+  Future<void> _syncReminders() async {
+    try {
+      await reminderService.sync(widget.repository.notes);
+    } catch (error) {
+      debugPrint('提醒同步失败：$error');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 历史版本
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showVersionHistory() async {
+    final NoteStore store = widget.repository.store;
+    final List<NoteVersion> versions =
+        await store.listVersions(_currentNote.id);
+    if (!mounted) {
+      return;
+    }
+    if (versions.isEmpty) {
+      _showHint('还没有历史版本');
+      return;
+    }
+    final NoteVersion? picked = await showModalBottomSheet<NoteVersion>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) => _VersionHistorySheet(
+        versions: versions,
+        locked: _currentNote.locked,
+      ),
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    final String raw = await store.readVersion(picked);
+    final Note? preview = Note.decode(raw, fallbackId: _currentNote.id);
+    if (!mounted) {
+      return;
+    }
+    final bool? confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) => _VersionPreviewSheet(
+        note: preview,
+        time: picked.time,
+        locked: _currentNote.locked,
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    final Note? restored = await store.restoreVersion(_currentNote, picked);
+    if (restored == null || !mounted) {
+      _showHint('这个版本无法恢复');
+      return;
+    }
+    await widget.repository.upsert(restored);
+    await _syncReminders();
+    if (!mounted) {
+      return;
+    }
+    // 整页重建：文档/选区/撤销栈全部按恢复后的内容重新初始化。
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => NewEditorPage(
+          repository: widget.repository,
+          note: restored,
+          autoFocus: false,
+        ),
+      ),
+    );
   }
 
   /// 单篇锁定：开启后正文以密文落盘，每次打开都要先验证身份。
@@ -3291,7 +3533,18 @@ class _LabListItemComponentBuilder implements ComponentBuilder {
     Document document,
     DocumentNode node,
   ) {
-    return _delegate.createViewModel(document, node);
+    final SingleColumnLayoutComponentViewModel? viewModel =
+        _delegate.createViewModel(document, node);
+    // 有序列表：内核只算「同层第几个」，起始编号存在节点 metadata 里，
+    // 这里补上偏移，`5.` 开头的列表在编辑器里也显示 5、6、7。
+    if (viewModel is OrderedListItemComponentViewModel && node is ListItemNode) {
+      final ({int ordinal, int start})? number =
+          orderedListItemNumber(document, node);
+      if (number != null) {
+        viewModel.ordinalValue = number.start + number.ordinal - 1;
+      }
+    }
+    return viewModel;
   }
 
   @override
@@ -3534,5 +3787,221 @@ class _CaretAwareScrollPosition extends ScrollPositionWithSingleContext {
       return Future<void>.value();
     }
     return super.animateTo(to, duration: duration, curve: curve);
+  }
+}
+
+/// 历史版本列表：时间 + 体积，点一条进入预览。
+class _VersionHistorySheet extends StatelessWidget {
+  const _VersionHistorySheet({required this.versions, required this.locked});
+
+  final List<NoteVersion> versions;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.only(top: 90),
+        decoration: BoxDecoration(
+          color: colors.page,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.lg,
+                AppSpace.lg,
+                AppSpace.lg,
+                AppSpace.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '历史版本',
+                    style: TextStyle(
+                      fontSize: AppFontSize.subtitle,
+                      fontWeight: AppWeight.semibold,
+                      color: colors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    locked ? '锁定笔记的版本不可预览，但仍可恢复' : '恢复前会自动保留当前内容',
+                    style: TextStyle(
+                      fontSize: AppFontSize.meta,
+                      color: colors.tertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: AppSpace.md),
+                itemCount: versions.length,
+                separatorBuilder: (BuildContext context, int index) =>
+                    Divider(
+                  height: 0.5,
+                  thickness: 0.5,
+                  indent: AppSpace.lg,
+                  endIndent: AppSpace.lg,
+                  color: colors.divider,
+                ),
+                itemBuilder: (BuildContext context, int index) {
+                  final NoteVersion version = versions[index];
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pop(version),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpace.lg,
+                        vertical: AppSpace.md,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              formatEditorTime(version.time),
+                              style: TextStyle(
+                                fontSize: AppFontSize.value,
+                                color: colors.text,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            formatFileSize(version.size),
+                            style: TextStyle(
+                              fontSize: AppFontSize.meta,
+                              color: colors.tertiary,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: AppIcon.chevron,
+                            color: colors.tertiary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 历史版本预览：普通笔记用阅读态渲染，锁定笔记只给「无法预览」。
+class _VersionPreviewSheet extends StatelessWidget {
+  const _VersionPreviewSheet({
+    required this.note,
+    required this.time,
+    required this.locked,
+  });
+
+  final Note? note;
+  final DateTime time;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.75;
+    final List<String> blocks = (locked || note == null)
+        ? const <String>[]
+        : note!.body.split(RegExp(r'\n{2,}'));
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Container(
+          margin: const EdgeInsets.only(top: 70),
+          decoration: BoxDecoration(
+            color: colors.page,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(AppRadius.sheet),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.lg,
+                  AppSpace.lg,
+                  AppSpace.lg,
+                  AppSpace.sm,
+                ),
+                child: Text(
+                  formatEditorTime(time),
+                  style: TextStyle(
+                    fontSize: AppFontSize.subtitle,
+                    fontWeight: AppWeight.semibold,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: locked || note == null
+                    ? Padding(
+                        padding: const EdgeInsets.all(AppSpace.lg),
+                        child: Text(
+                          '这条笔记已锁定，历史版本无法预览。',
+                          style: TextStyle(
+                            fontSize: AppFontSize.value,
+                            height: 1.6,
+                            color: colors.secondary,
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpace.lg,
+                          0,
+                          AppSpace.lg,
+                          AppSpace.md,
+                        ),
+                        itemCount: blocks.length,
+                        itemBuilder: (BuildContext context, int index) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: AppSpace.md),
+                            child: MarkdownBlockView(
+                              text: blocks[index],
+                              baseSize: AppFontSize.summary,
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.lg,
+                  AppSpace.sm,
+                  AppSpace.lg,
+                  AppSpace.lg,
+                ),
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('恢复此版本'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

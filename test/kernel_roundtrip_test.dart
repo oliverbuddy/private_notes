@@ -96,6 +96,147 @@ void main() {
     );
   });
 
+  test('嵌套待办独立成节点，缩进与勾选状态都保留', () {
+    const String body = '- [ ] 父\n  - [x] 子';
+    final doc = deserializeXiaojiMarkdown(body);
+    final List<TaskNode> tasks = doc.whereType<TaskNode>().toList();
+    expect(tasks, hasLength(2));
+    expect(tasks[0].text.toPlainText(), '父');
+    expect(tasks[0].indent, 0);
+    expect(tasks[1].text.toPlainText(), '子');
+    expect(tasks[1].indent, 1);
+    expect(tasks[1].isComplete, isTrue);
+
+    final String out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out, contains('- [ ] 父'));
+    expect(out, contains('  - [x] 子'));
+  });
+
+  test('待办下的无序子项不会被并进父项文本', () {
+    const String body = '- [ ] 父\n  - 子项';
+    final doc = deserializeXiaojiMarkdown(body);
+    expect(doc.whereType<TaskNode>().length, 1);
+    final ListItemNode child = doc.whereType<ListItemNode>().single;
+    expect(child.text.toPlainText(), '子项');
+    expect(child.indent, 1);
+    expect(
+      serializeDocumentToXiaojiMarkdown(doc),
+      contains('  - 子项'),
+    );
+  });
+
+  test('嵌套引用保留换行，不会把两层文字拼在一起', () {
+    const String body = '> 外层\n> > 内层';
+    final doc = deserializeXiaojiMarkdown(body);
+    final ParagraphNode quote = doc.getNodeAt(0)! as ParagraphNode;
+    expect(quote.text.toPlainText(), '外层\n内层');
+    expect(
+      serializeDocumentToXiaojiMarkdown(doc),
+      contains('> 外层\n> 内层'),
+    );
+  });
+
+  test('缩进代码块不在结尾多出空行，往返幂等', () {
+    const String body = '    code line\n    second';
+    final String once = roundTrip(body);
+    expect(once, '```\ncode line\nsecond\n```');
+    expect(roundTrip(once), once);
+  });
+
+  test('setext 标题转成 ATX，不会把 === / --- 留在正文里', () {
+    final ParagraphNode h1 =
+        deserializeXiaojiMarkdown('标题\n===').getNodeAt(0)! as ParagraphNode;
+    expect(
+      h1.getMetadataValue(NodeMetadata.blockType),
+      header1Attribution,
+    );
+    final ParagraphNode h2 =
+        deserializeXiaojiMarkdown('标题\n---').getNodeAt(0)! as ParagraphNode;
+    expect(
+      h2.getMetadataValue(NodeMetadata.blockType),
+      header2Attribution,
+    );
+  });
+
+  test('转义输入的语法字符写回时仍保持字面量', () {
+    const String body = r'不是\*斜体\*';
+    final doc = deserializeXiaojiMarkdown(body);
+    final ParagraphNode node = doc.getNodeAt(0)! as ParagraphNode;
+    expect(node.text.toPlainText(), '不是*斜体*');
+    expect(
+      node.text.spans.hasAttributionAt(2, attribution: italicsAttribution),
+      isFalse,
+    );
+    expect(serializeDocumentToXiaojiMarkdown(doc), contains(r'\*斜体\*'));
+  });
+
+  test('行内码自带反引号时用更长的围栏，往返不破坏', () {
+    const String body = '``a `b` c``';
+    final String once = roundTrip(body);
+    expect(once, '``a `b` c``');
+    expect(roundTrip(once), once);
+  });
+
+  test('有序列表起始编号保留，后续编号顺延', () {
+    const String body = '5. 第五\n6. 第六\n7. 第七';
+    final String out = roundTrip(body);
+    expect(out, '5. 第五\n6. 第六\n7. 第七');
+    expect(roundTrip(out), out);
+  });
+
+  test('嵌套有序列表各自保留自己的起始编号', () {
+    const String body = '3. 外层\n   1. 内层一\n   2. 内层二';
+    final String out = roundTrip(body);
+    expect(out, contains('3. 外层'));
+    expect(out, contains('1. 内层一'));
+    expect(out, contains('2. 内层二'));
+  });
+
+  test('有序项显示编号 = 起始编号 + 层内序号 - 1', () {
+    final doc = deserializeXiaojiMarkdown('5. 甲\n6. 乙');
+    final List<ListItemNode> items = doc.whereType<ListItemNode>().toList();
+    final ({int ordinal, int start}) first =
+        orderedListItemNumber(doc, items[0])!;
+    final ({int ordinal, int start}) second =
+        orderedListItemNumber(doc, items[1])!;
+    expect(first.start + first.ordinal - 1, 5);
+    expect(second.start + second.ordinal - 1, 6);
+  });
+
+  test('链接 title 并入链接属性，往返保留', () {
+    const String body = '[文字](https://example.com "标题")';
+    final doc = deserializeXiaojiMarkdown(body);
+    final ParagraphNode node = doc.getNodeAt(0)! as ParagraphNode;
+    final LinkAttribution link = node.text.spans
+        .getAllAttributionsAt(0)
+        .whereType<LinkAttribution>()
+        .first;
+    expect(link, isA<XiaojiLinkAttribution>());
+    expect((link as XiaojiLinkAttribution).title, '标题');
+    expect(
+      serializeDocumentToXiaojiMarkdown(doc),
+      contains('[文字](https://example.com "标题")'),
+    );
+  });
+
+  test('单引号 / 括号形式的链接 title 也归一化成双引号', () {
+    expect(
+      roundTrip("[文字](https://a.com '标题')"),
+      contains('[文字](https://a.com "标题")'),
+    );
+    expect(
+      roundTrip('[文字](https://b.com (标题))'),
+      contains('[文字](https://b.com "标题")'),
+    );
+  });
+
+  test('没有 title 的链接保持原样', () {
+    expect(
+      roundTrip('[文字](https://example.com)'),
+      contains('[文字](https://example.com)'),
+    );
+  });
+
   test('待办后紧跟图片：图片仍是独立 ImageNode', () {
     const String body = '- [ ] read book\n![](assets/n/1.jpg#xiaoji-small)';
     final doc = deserializeXiaojiMarkdown(body);

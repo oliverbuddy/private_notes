@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:super_editor/super_editor.dart';
 
 /// 任务行：`- [ ]` / `- [x]`（含 `*`/`+` 与缩进）。
@@ -185,6 +186,345 @@ void _applyHighlights(MutableDocument document) {
   }
 }
 
+/// 解析前的块级语法修补。
+///
+/// 内核解析器有几处与 CommonMark 的偏差，必须在解析前校正：
+///  - **setext 标题**（`标题` 下一行 `===` / `---`）不会被识别，`===` / `---`
+///    会变成正文或分隔线 → 转成 ATX（`# ` / `## `）；
+///  - **嵌套引用**（`> > 文本`）会把两层文本直接拼在一起（「外层内层」）
+///    → 拍平成单层，至少保住换行；
+///  - **缩进的列表/待办**会被并进上一项文本（子任务标记直接丢失）
+///    → 解析时先去掉缩进，解析后再把层级写回节点。
+({String markdown, List<int> listIndents}) _normalizeBlockSpecials(String md) {
+  final List<String> lines = md.split('\n');
+  final List<String> out = <String>[];
+  final List<int> indents = <int>[];
+  var insideFence = false;
+  for (final String line in lines) {
+    final String trimmedLeft = line.trimLeft();
+    if (trimmedLeft.startsWith('```') || trimmedLeft.startsWith('~~~')) {
+      insideFence = !insideFence;
+      out.add(line);
+      continue;
+    }
+    if (insideFence) {
+      out.add(line);
+      continue;
+    }
+
+    // setext 标题：只能跟在普通段落行后面。
+    final RegExpMatch? setext =
+        RegExp(r'^\s{0,3}(=+|-+)\s*$').firstMatch(line);
+    if (setext != null && out.isNotEmpty && _isPlainParagraphLine(out.last)) {
+      final bool h1 = setext.group(1)!.startsWith('=');
+      out[out.length - 1] = '${h1 ? '#' : '##'} ${out.last.trim()}';
+      continue;
+    }
+
+    // 嵌套引用：保留文字与换行，层级压平（模型只支持一层）。
+    final RegExpMatch? quote =
+        RegExp(r'^(\s*)(?:>\s*){2,}(.*)$').firstMatch(line);
+    if (quote != null) {
+      out.add('${quote.group(1)}> ${quote.group(2)!.trimLeft()}');
+      continue;
+    }
+
+    // 列表/待办：记录层级，解析时按顶层处理。
+    final RegExpMatch? list =
+        RegExp(r'^(\s*)((?:[-*+]|\d+[.)])\s+.*)$').firstMatch(line);
+    if (list != null) {
+      final int width = _indentWidth(list.group(1)!);
+      indents.add(width ~/ 2);
+      out.add(width > 0 ? list.group(2)! : line);
+      continue;
+    }
+    out.add(line);
+  }
+  return (markdown: out.join('\n'), listIndents: indents);
+}
+
+/// 这一行是不是「可以被 setext 下划线升级」的普通段落行。
+bool _isPlainParagraphLine(String line) {
+  final String t = line.trimLeft();
+  if (t.isEmpty || t == _blankParagraphSentinel) {
+    return false;
+  }
+  if (t.startsWith('#') ||
+      t.startsWith('>') ||
+      t.startsWith('|') ||
+      t.startsWith('```') ||
+      t.startsWith('~~~')) {
+    return false;
+  }
+  return !RegExp(r'^([-*+]|\d+[.)])\s').hasMatch(t);
+}
+
+/// 缩进宽度：空格 1，Tab 按 4 计。
+int _indentWidth(String indent) {
+  var width = 0;
+  for (final int unit in indent.codeUnits) {
+    width += unit == 9 ? 4 : 1;
+  }
+  return width;
+}
+
+/// 把解析前记录的列表层级写回节点。
+///
+/// 节点数量对不上（解析器吞掉了某行）时整体放弃，避免把层级错位到
+/// 别的条目上 —— 宁可层级不准，也不能把内容挂到错误的父项。
+void _restoreListIndents(MutableDocument document, List<int> indents) {
+  if (indents.isEmpty) {
+    return;
+  }
+  final List<DocumentNode> items = <DocumentNode>[
+    for (var i = 0; i < document.nodeCount; i++)
+      if (document.getNodeAt(i) case final DocumentNode node
+          when node is ListItemNode || node is TaskNode)
+        node,
+  ];
+  if (items.length != indents.length) {
+    debugPrint(
+      '[markdown] 列表层级记录数不一致：nodes=${items.length} '
+      'lines=${indents.length}，跳过层级还原',
+    );
+    return;
+  }
+  for (var i = 0; i < items.length; i++) {
+    final DocumentNode node = items[i];
+    final int depth = indents[i];
+    if (node is TaskNode) {
+      if (node.indent != depth) {
+        document.replaceNodeById(node.id, node.copyTaskWith(indent: depth));
+      }
+    } else if (node is ListItemNode) {
+      if (node.indent != depth) {
+        document.replaceNodeById(node.id, node.copyListItemWith(indent: depth));
+      }
+    }
+  }
+}
+
+/// 链接 title（`[文字](url "标题")`）的承载者。
+///
+/// 内核的 [LinkAttribution] 只有 URI，没有 title；这里用子类挂上 title，
+/// 序列化时再写回。子类仍然是一个 LinkAttribution，打开链接、点击判定、
+/// 复制粘贴都不受影响。
+class XiaojiLinkAttribution extends LinkAttribution {
+  const XiaojiLinkAttribution(super.plainTextUri, [super.uri, this.title = '']);
+
+  /// `[文字](url "标题")` 里的标题，空串表示没有标题。
+  final String title;
+}
+
+/// 链接 title 的提取结果。
+///
+/// 解析前先把 title 从 `[文字](url "标题")` 里摘出来（内核不认），
+/// 解析后按 URL 顺序回填到对应的 [LinkAttribution] 上。
+final RegExp _linkWithTitlePattern = RegExp(
+  r'''!?\[([^\]\n]*)\]\(\s*([^)\s]+)\s+(?:"([^"]*)"|'([^']*)'|\(([^)]*)\))\s*\)''',
+);
+
+({String markdown, Map<String, List<String>> titles}) _extractLinkTitles(
+  String md,
+) {
+  final Map<String, List<String>> titles = <String, List<String>>{};
+  final String stripped = md.replaceAllMapped(_linkWithTitlePattern, (Match m) {
+    final String url = m.group(2)!;
+    final String title = m.group(3) ?? m.group(4) ?? m.group(5) ?? '';
+    titles.putIfAbsent(url, () => <String>[]).add(title);
+    return '${m.group(0)!.startsWith('!') ? '!' : ''}[${m.group(1)}]($url)';
+  });
+  return (markdown: stripped, titles: titles);
+}
+
+/// 把 title 回填到链接属性上（普通段落与表格单元格都处理）。
+void _restoreLinkTitles(
+  MutableDocument document,
+  Map<String, List<String>> titles,
+) {
+  if (titles.isEmpty) {
+    return;
+  }
+  for (var i = 0; i < document.nodeCount; i++) {
+    final DocumentNode? node = document.getNodeAt(i);
+    if (node == null) {
+      continue;
+    }
+    if (node is TableBlockNode) {
+      List<List<TextNode>>? cells;
+      for (var r = 0; r < node.rowCount; r++) {
+        for (var c = 0; c < node.columnCount; c++) {
+          final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
+          final AttributedText? text = _linkTitleText(cell.text, titles);
+          if (text == null) {
+            continue;
+          }
+          cells ??= <List<TextNode>>[
+            for (var row = 0; row < node.rowCount; row++)
+              List<TextNode>.from(node.getRow(row)),
+          ];
+          cells[r][c] = cell.copyTextNodeWith(text: text);
+        }
+      }
+      if (cells != null) {
+        document.replaceNodeById(
+          node.id,
+          TableBlockNode(
+            id: node.id,
+            cells: cells,
+            metadata: node.copyMetadata(),
+          ),
+        );
+      }
+      continue;
+    }
+    if (node is! TextNode) {
+      continue;
+    }
+    final AttributedText? text = _linkTitleText(node.text, titles);
+    if (text != null) {
+      document.replaceNodeById(node.id, node.copyTextNodeWith(text: text));
+    }
+  }
+}
+
+/// 把一段文本里的链接换成带 title 的子类；没有可回填的 title 时返回 null。
+AttributedText? _linkTitleText(
+  AttributedText source,
+  Map<String, List<String>> titles,
+) {
+  AttributedText? result;
+  var i = 0;
+  while (i < source.length) {
+    final LinkAttribution? link = source.spans
+        .getAllAttributionsAt(i)
+        .whereType<LinkAttribution>()
+        .firstOrNull;
+    if (link == null) {
+      i++;
+      continue;
+    }
+    final SpanRange range = source.spans.getAttributedRange({link}, i);
+    final List<String>? queue = titles[link.plainTextUri];
+    final String title =
+        queue != null && queue.isNotEmpty ? queue.removeAt(0) : '';
+    if (title.isNotEmpty) {
+      result ??= source.copyText(0);
+      result.removeAttribution(link, range);
+      result.addAttribution(
+        XiaojiLinkAttribution(link.plainTextUri, link.uri, title),
+        range,
+      );
+    }
+    i = range.end + 1;
+  }
+  return result;
+}
+
+/// 有序列表起始编号的 metadata key。
+///
+/// 内核模型里有序项只有「同层第几个」，没有起始编号（`5.` 会被写成 `1.`）。
+/// 解析前按行记录源编号，解析后把每个 run 的起始编号挂到节点上；
+/// 渲染与序列化都按「起始编号 + 层内序号 - 1」计算。
+const String kOrderedStartMetadata = 'orderedStart';
+
+/// 解析前依序收集有序列表行的编号（含缩进行，跳过代码块）。
+List<int> _collectOrderedNumbers(String markdown) {
+  final List<int> numbers = <int>[];
+  var insideFence = false;
+  for (final String line in markdown.split('\n')) {
+    final String t = line.trimLeft();
+    if (t.startsWith('```') || t.startsWith('~~~')) {
+      insideFence = !insideFence;
+      continue;
+    }
+    if (insideFence) {
+      continue;
+    }
+    final RegExpMatch? m = RegExp(r'^(\d+)[.)]\s+').firstMatch(t);
+    if (m != null) {
+      numbers.add(int.parse(m.group(1)!));
+    }
+  }
+  return numbers;
+}
+
+/// 有序项的「层内序号」与「run 起始编号」。
+///
+/// 序号规则与内核一致：向上找同层连续的有序项；遇到同层无序项或非列表块
+/// 就断开。起始编号取该 run 第一项上记录的 metadata。
+({int ordinal, int start})? orderedListItemNumber(
+  Document document,
+  ListItemNode item,
+) {
+  if (item.type != ListItemType.ordered) {
+    return null;
+  }
+  var ordinal = 1;
+  ListItemNode first = item;
+  DocumentNode? above = document.getNodeBeforeById(item.id);
+  while (above is ListItemNode && above.indent >= item.indent) {
+    if (above.indent == item.indent) {
+      if (above.type != ListItemType.ordered) {
+        break;
+      }
+      ordinal++;
+      first = above;
+    }
+    above = document.getNodeBeforeById(above.id);
+  }
+  final int start =
+      (first.getMetadataValue(kOrderedStartMetadata) as int?) ?? 1;
+  return (ordinal: ordinal, start: start);
+}
+
+/// 把源编号按 run 写回节点（0 基 run 的首项保存起始编号）。
+void _restoreOrderedStarts(MutableDocument document, List<int> numbers) {
+  if (numbers.isEmpty) {
+    return;
+  }
+  final List<ListItemNode> items = <ListItemNode>[
+    for (var i = 0; i < document.nodeCount; i++)
+      if (document.getNodeAt(i) case final ListItemNode node
+          when node.type == ListItemType.ordered)
+        node,
+  ];
+  if (items.length != numbers.length) {
+    debugPrint(
+      '[markdown] 有序列表编号记录数不一致：nodes=${items.length} '
+      'lines=${numbers.length}，跳过起始编号还原',
+    );
+    return;
+  }
+  final Map<String, int> sourceById = <String, int>{
+    for (var i = 0; i < items.length; i++) items[i].id: numbers[i],
+  };
+  for (final ListItemNode item in items) {
+    // 找这个 run 的第一项（与 orderedListItemNumber 同规则）。
+    ListItemNode first = item;
+    DocumentNode? above = document.getNodeBeforeById(item.id);
+    while (above is ListItemNode && above.indent >= item.indent) {
+      if (above.indent == item.indent) {
+        if (above.type != ListItemType.ordered) {
+          break;
+        }
+        first = above;
+      }
+      above = document.getNodeBeforeById(above.id);
+    }
+    final int start = sourceById[first.id] ?? 1;
+    if (start > 1) {
+      document.replaceNodeById(
+        item.id,
+        item.copyListItemWith(metadata: <String, dynamic>{
+          ...item.metadata,
+          kOrderedStartMetadata: start,
+        }),
+      );
+    }
+  }
+}
+
 /// 代码块语言标记的 metadata key。
 ///
 /// super_editor 的模型只存代码文本，不记住围栏后面的语言（` ```dart `
@@ -258,13 +598,24 @@ void _restoreCodeFenceLanguages(
 /// 编辑页与测试统一走这里。
 MutableDocument deserializeXiaojiMarkdown(String md) {
   final String prepared = _isolateImageLines(_protectBlankLines(md));
-  // 语言标记要先按原始围栏顺序收集：解析后的文档里没有这个信息。
-  final List<String> codeLanguages = _collectCodeFenceLanguages(prepared);
+  // 块级修补（setext 标题 / 嵌套引用 / 列表缩进）要在解析前完成。
+  final ({String markdown, List<int> listIndents}) specials =
+      _normalizeBlockSpecials(prepared);
+  // 链接 title 内核不认：先摘出来，解析后再回填到链接属性上。
+  final ({String markdown, Map<String, List<String>> titles}) links =
+      _extractLinkTitles(specials.markdown);
+  // 语言标记 / 有序编号要先按源码顺序收集：解析后的文档里没有这些信息。
+  final List<String> codeLanguages =
+      _collectCodeFenceLanguages(links.markdown);
+  final List<int> orderedNumbers = _collectOrderedNumbers(links.markdown);
   final document = deserializeMarkdownToDocument(
-    normalizeMarkdownForKernel(prepared),
+    normalizeMarkdownForKernel(links.markdown),
   );
+  _restoreListIndents(document, specials.listIndents);
+  _restoreOrderedStarts(document, orderedNumbers);
   _restoreCodeFenceLanguages(document, codeLanguages);
   _applyHighlights(document);
+  _restoreLinkTitles(document, links.titles);
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
@@ -647,11 +998,10 @@ void _splitMultilineTasks(MutableDocument document) {
 ///  - 行内样式（粗体/斜体/删除线/行内码/链接）从 AttributedText 的
 ///    spans 重建回 md 记号。
 ///
-/// 已知取舍：super_editor 的列表模型不保留用户手写的起始编号
-/// （`5.` 开头会规范化为 `1.`）—— Notion 同款语义，M1 接受。
+/// 已知取舍：行内样式的组合顺序以「粗体 → 斜体 → 删除线 → 行内码 → 高亮」
+/// 输出；有序列表起始编号通过节点 metadata 保留（见 [kOrderedStartMetadata]）。
 String serializeDocumentToXiaojiMarkdown(Document document) {
   final out = StringBuffer();
-  final orderedCounters = <int, int>{};
   // 每一层列表项的「标记宽度」（如 `1. `=3、`- `=2）。CommonMark 要求
   // 子项缩进 ≥ 父项标记宽度，固定两个空格在 `2. ` 之类的父项下会被当成
   // 续行而不是子列表（实测），所以缩进按各级标记宽度累加。
@@ -704,11 +1054,13 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
       }
       final indent = indentForDepth(node.indent);
       if (node.type == ListItemType.ordered) {
-        // 更浅的缩进 = 回到父级：更深层计数器清零。
-        orderedCounters.removeWhere((depth, _) => depth > node.indent);
-        final index = (orderedCounters[node.indent] ?? 0) + 1;
-        orderedCounters[node.indent] = index;
-        final marker = '$index. ';
+        // 编号 = run 起始编号 + 层内序号 - 1（`5.` 开头不会再被写成 `1.`）。
+        final ({int ordinal, int start})? number =
+            orderedListItemNumber(document, node);
+        final int value = number == null
+            ? 1
+            : number.start + number.ordinal - 1;
+        final marker = '$value. ';
         markerWidths.add(marker.length);
         write('$indent$marker${_inlineMarkdown(node.text)}');
       } else {
@@ -721,15 +1073,21 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
       while (markerWidths.length > node.indent) {
         markerWidths.removeLast();
       }
+      // 父级可能是非列表块（栈被清空）：补齐缺失层级的标记宽度，
+      // 否则 `indentForDepth` 会算出 0，嵌套待办写回后变成顶层。
+      while (markerWidths.length < node.indent) {
+        markerWidths.add('- '.length);
+      }
       final mark = node.isComplete ? 'x' : ' ';
       // markdown 解析器给任务文本带前导换行（实测），trim 掉。
       final text = _inlineMarkdown(node.text).trim();
       write('${indentForDepth(node.indent)}- [$mark] $text');
+      // 待办行也是列表项：压入自身标记宽度，子项才能算对缩进。
+      markerWidths.add('- '.length);
       continue;
     }
     // 非列表块：清空层级状态。
     markerWidths.clear();
-    orderedCounters.clear();
     if (node is ImageNode) {
       write('![${node.altText}](${node.imageUrl})');
       continue;
@@ -785,12 +1143,16 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
       if (blockType == codeAttribution) {
         // 代码块：围栏包裹，保留语言标记；内容里出现 ``` 时自动加长围栏，
         // 否则片段里的一段示例代码会把围栏提前闭合、把后半段挤成正文。
+        //
+        // 解析器会给代码文本补一个结尾换行，直接按行写回会多出一行空行，
+        // 往返回合会让空行越积越多 —— 这里先去掉结尾换行。
+        final String code = plain.replaceFirst(RegExp(r'\n+$'), '');
         final String language =
             (node.getMetadataValue(kCodeLanguageMetadata) as String?)?.trim() ??
                 '';
-        final String fence = _codeFenceFor(plain);
+        final String fence = _codeFenceFor(code);
         write('$fence$language');
-        for (final line in plain.split('\n')) {
+        for (final line in code.split('\n')) {
           write(line);
         }
         write(fence);
@@ -920,7 +1282,39 @@ String _inlineMarkdown(AttributedText attributed) {
       final start = range.start.clamp(0, plain.length);
       final end = (range.end + 1).clamp(0, plain.length);
       final inner = plain.substring(start, end);
-      out.write('[$inner](${linkHere.plainTextUri})');
+      final String title =
+          linkHere is XiaojiLinkAttribution ? linkHere.title : '';
+      final String suffix =
+          title.isEmpty ? '' : ' "${title.replaceAll('"', r'\"')}"';
+      out.write('[$inner](${linkHere.plainTextUri}$suffix)');
+      i = end;
+      continue;
+    }
+
+    // 行内码整段输出：内容里自带反引号时要用更长的围栏，
+    // 否则 ``a `b` c`` 会被写成 `a `b` c`，下次解析直接断掉。
+    if (spans.hasAttributionAt(i, attribution: codeAttribution)) {
+      for (final marker in openMarkers.reversed) {
+        out.write(markerOrder[marker]);
+      }
+      openMarkers = <Attribution>[];
+      var end = i;
+      while (end < plain.length &&
+          spans.hasAttributionAt(end, attribution: codeAttribution)) {
+        end++;
+      }
+      final String content = plain.substring(i, end);
+      var longest = 0;
+      for (final RegExpMatch run in RegExp(r'`+').allMatches(content)) {
+        if (run.group(0)!.length > longest) {
+          longest = run.group(0)!.length;
+        }
+      }
+      final String fence = '`' * (longest + 1);
+      // CommonMark：内容首尾是反引号时，围栏与内容之间各留一个空格。
+      final String pad =
+          content.startsWith('`') || content.endsWith('`') ? ' ' : '';
+      out.write('$fence$pad$content$pad$fence');
       i = end;
       continue;
     }
@@ -943,6 +1337,9 @@ String _inlineMarkdown(AttributedText attributed) {
       }
       openMarkers = current;
     }
+    if (_needsLiteralEscape(plain, i, current)) {
+      out.write(r'\');
+    }
     out.write(plain[i]);
     i++;
   }
@@ -950,6 +1347,35 @@ String _inlineMarkdown(AttributedText attributed) {
     out.write(markerOrder[marker]);
   }
   return out.toString();
+}
+
+/// 这个字符是不是「普通正文里的语法字符」，需要转义后才不会在下次
+/// 解析时被当成格式标记。
+///
+/// 例：用户输入的 `*斜体*` 如果并没有斜体属性（是用 `\*` 转义输入的），
+/// 原样写回会变成真斜体 —— 必须输出 `\*斜体\*`。被对应属性覆盖的字符
+/// 本来就会被包在标记里，不再单独转义。
+bool _needsLiteralEscape(String text, int index, List<Attribution> active) {
+  final String ch = text[index];
+  switch (ch) {
+    case r'\':
+    case '`':
+      return true;
+    case '*':
+      return !active.contains(boldAttribution) &&
+          !active.contains(italicsAttribution);
+    case '~':
+      return !active.contains(strikethroughAttribution);
+    case '=':
+      if (active.contains(highlightAttribution)) {
+        return false;
+      }
+      final bool prev = index > 0 && text[index - 1] == '=';
+      final bool next = index + 1 < text.length && text[index + 1] == '=';
+      return prev || next;
+    default:
+      return false;
+  }
 }
 
 bool _sameSet(List<Attribution> a, List<Attribution> b) {

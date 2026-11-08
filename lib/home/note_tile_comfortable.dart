@@ -579,6 +579,15 @@ class _MetaRow extends StatelessWidget {
             child: Icon(Icons.push_pin_rounded,
                 size: AppIcon.badge, color: colors.accent),
           ),
+        if (note.remindAt != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Icon(
+              Icons.notifications_none_rounded,
+              size: AppIcon.badge,
+              color: note.hasUpcomingReminder ? colors.accent : colors.tertiary,
+            ),
+          ),
         Text(
           formatListTime(note.updated),
           style: AppText.meta.copyWith(color: colors.tertiary),

@@ -14,6 +14,7 @@ class Note {
     this.tags = const <String>[],
     this.pinned = false,
     this.locked = false,
+    this.remindAt,
     this.body = '',
   });
 
@@ -34,8 +35,26 @@ class Note {
   /// 正文是否加密（单篇锁定）。
   final bool locked;
 
+  /// 本地提醒时间（本地时区、无时区后缀，写入 frontmatter 的 `remind`）。
+  ///
+  /// 放在 frontmatter 而不是正文里：文件级可移植，PC/iOS 端读同一份数据
+  /// 就能恢复提醒；也不会污染 Markdown 正文。
+  final DateTime? remindAt;
+
   /// 原始 markdown 正文（不含 frontmatter）。
   final String body;
+
+  /// 是否有尚未到期的提醒（UI 小铃铛用）。
+  bool get hasUpcomingReminder {
+    final at = remindAt;
+    return at != null && at.isAfter(DateTime.now());
+  }
+
+  /// 提醒是否已经过期（首页可用灰色铃铛）。
+  bool get hasExpiredReminder {
+    final at = remindAt;
+    return at != null && !at.isAfter(DateTime.now());
+  }
 
   Note copyWith({
     String? id,
@@ -44,6 +63,8 @@ class Note {
     List<String>? tags,
     bool? pinned,
     bool? locked,
+    DateTime? remindAt,
+    bool clearRemind = false,
     String? body,
   }) {
     return Note(
@@ -53,6 +74,7 @@ class Note {
       tags: tags ?? this.tags,
       pinned: pinned ?? this.pinned,
       locked: locked ?? this.locked,
+      remindAt: clearRemind ? null : (remindAt ?? this.remindAt),
       body: body ?? this.body,
     );
   }
@@ -72,10 +94,12 @@ class Note {
       ..write('created: ${formatIsoLocal(created)}\n')
       ..write('updated: ${formatIsoLocal(updated)}\n')
       ..write('tags: ${tags.join(', ')}\n')
-      ..write('pinned: $pinned\n')
-      // 只在锁定笔记上写这个字段：普通笔记的文件保持原样，不制造
+      ..write(pinned ? 'pinned: true\n' : 'pinned: false\n')
+      // 只在锁定笔记上写锁定字段：普通笔记的文件保持原样，不制造
       // 无意义的 diff（用户可能在「文件」App 里同步/比对）。
       ..write(locked ? 'locked: true\n' : '')
+      // 提醒同理：没设提醒就不写这一行。
+      ..write(remindAt != null ? 'remind: ${formatIsoLocal(remindAt!)}\n' : '')
       ..write('---\n')
       ..write('\n')
       ..write(body);
@@ -147,6 +171,7 @@ class Note {
       tags: parseTags(fields['tags'] ?? ''),
       pinned: (fields['pinned'] ?? 'false').toLowerCase() == 'true',
       locked: (fields['locked'] ?? 'false').toLowerCase() == 'true',
+      remindAt: parseIsoLocal(fields['remind'] ?? ''),
       body: body,
     );
   }
