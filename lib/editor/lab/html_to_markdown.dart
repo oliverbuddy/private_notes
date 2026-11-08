@@ -312,6 +312,9 @@ String _inline(String html) {
       RegExp(r'</(del|s|strike)>', caseSensitive: false), '~~');
   s = s.replaceAll(RegExp(r'<code\b[^>]*>', caseSensitive: false), '`');
   s = s.replaceAll(RegExp(r'</code>', caseSensitive: false), '`');
+  // 高亮：网页里的 `<mark>` 对应小记的 `==…==`。
+  s = s.replaceAll(RegExp(r'<mark\b[^>]*>', caseSensitive: false), '==');
+  s = s.replaceAll(RegExp(r'</mark>', caseSensitive: false), '==');
   return s;
 }
 
@@ -330,12 +333,18 @@ String? _attribute(String tag, String name) {
 
 String _decodeEntities(String text) {
   var s = text
-      .replaceAll('&nbsp;', ' ')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
       .replaceAll('&apos;', "'")
       .replaceAll('&#39;', "'");
+  // 常见命名实体：网页 / 语雀复制过来的正文里 `&mdash;`、`&hellip;`、
+  // `&rsquo;` 很常见，不解析会在正文里原样显示成 `&mdash;`
+  // （用户反馈「特殊符号显示不正常」）。
+  s = s.replaceAllMapped(
+    RegExp(r'&([a-zA-Z][a-zA-Z0-9]{1,31});'),
+    (Match m) => _namedHtmlEntities[m.group(1)] ?? m.group(0)!,
+  );
   s = s.replaceAllMapped(
     RegExp(r'&#(x?[0-9a-fA-F]+);'),
     (Match m) {
@@ -352,3 +361,60 @@ String _decodeEntities(String text) {
   // &amp; 最后解，避免 `&amp;lt;` 被二次解码成 `<`。
   return s.replaceAll('&amp;', '&');
 }
+
+/// 常见 HTML 命名实体 → 字符。
+///
+/// 只收「正文里会真的出现」的标点与符号；未收录的保持原样，不猜。
+const Map<String, String> _namedHtmlEntities = <String, String>{
+  'nbsp': ' ',
+  'ensp': '\u2002',
+  'emsp': '\u2003',
+  'thinsp': '\u2009',
+  'zwnj': '\u200C',
+  'zwj': '\u200D',
+  'mdash': '—',
+  'ndash': '–',
+  'hellip': '…',
+  'middot': '·',
+  'bull': '•',
+  'lsquo': '‘',
+  'rsquo': '’',
+  'ldquo': '“',
+  'rdquo': '”',
+  'laquo': '«',
+  'raquo': '»',
+  'lsaquo': '‹',
+  'rsaquo': '›',
+  'copy': '©',
+  'reg': '®',
+  'trade': '™',
+  'sect': '§',
+  'para': '¶',
+  'deg': '°',
+  'plusmn': '±',
+  'times': '×',
+  'divide': '÷',
+  'minus': '−',
+  'sup2': '²',
+  'sup3': '³',
+  'frac12': '½',
+  'frac14': '¼',
+  'frac34': '¾',
+  'euro': '€',
+  'pound': '£',
+  'yen': '¥',
+  'cent': '¢',
+  'larr': '←',
+  'rarr': '→',
+  'uarr': '↑',
+  'darr': '↓',
+  'harr': '↔',
+  'dagger': '†',
+  'Dagger': '‡',
+  'prime': '′',
+  'Prime': '″',
+  'check': '✓',
+  'cross': '✗',
+  'star': '★',
+  'hearts': '♥',
+};

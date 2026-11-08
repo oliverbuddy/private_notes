@@ -38,14 +38,233 @@ String normalizeMarkdownForKernel(String md) {
   return out.join('\n');
 }
 
+/// `==高亮==` 的行内属性。
+///
+/// super_editor 内核只认粗体/斜体/删除线/行内码/链接，高亮是扩展语法：
+/// 解析后我们把标记字符摘掉、把区间打上这个自定义属性，
+/// 渲染端（编辑器 inlineTextStyler / 首页摘要）再按属性上色。
+const Attribution highlightAttribution = NamedAttribution('highlight');
+
+/// `==高亮==`：等号对之间不能有等号或换行（与主流实现一致）。
+final RegExp _highlightPattern = RegExp(r'==([^=\n]+)==');
+
+/// 把 `==...==` 换成 [highlightAttribution]，标记字符从文本里删除。
+///
+/// 返回 null 表示这段文本没有高亮标记。已有的行内样式（粗体/链接等）
+/// 会按「删除标记后的新位置」重映射，不会因为位置变化而错位。
+AttributedText? _highlightToAttribution(AttributedText source) {
+  final String plain = source.toPlainText();
+  if (!plain.contains('==')) {
+    return null;
+  }
+  final List<RegExpMatch> matches = _highlightPattern.allMatches(plain).toList();
+  if (matches.isEmpty) {
+    return null;
+  }
+
+  final StringBuffer buffer = StringBuffer();
+  final List<({int start, int end})> highlightRanges = <({int start, int end})>[];
+  // 被删掉的 `==` 标记（每个标记 2 个字符），用于把旧下标映射到新文本。
+  final List<({int oldStart, int oldEnd})> removed = <({int oldStart, int oldEnd})>[];
+  var oldCursor = 0;
+  var newLength = 0;
+  for (final RegExpMatch match in matches) {
+    final String before = plain.substring(oldCursor, match.start);
+    buffer.write(before);
+    newLength += before.length;
+
+    final String inner = match.group(1)!;
+    final int start = newLength;
+    buffer.write(inner);
+    newLength += inner.length;
+    highlightRanges.add((start: start, end: newLength - 1));
+
+    removed.add((oldStart: match.start, oldEnd: match.start + 1));
+    removed.add((oldStart: match.end - 2, oldEnd: match.end - 1));
+    oldCursor = match.end;
+  }
+  buffer.write(plain.substring(oldCursor));
+
+  final AttributedText result = AttributedText(buffer.toString());
+
+  int mapIndex(int oldIndex) {
+    var shift = 0;
+    for (final ({int oldStart, int oldEnd}) range in removed) {
+      if (oldIndex > range.oldEnd) {
+        shift += range.oldEnd - range.oldStart + 1;
+        continue;
+      }
+      if (oldIndex >= range.oldStart) {
+        // 落在被删掉的标记里（如 `==重点==` 整体是粗体时，粗体区间从
+        // 第一个 `=` 开始）：夹到标记后的第一个字符，样式不丢。
+        return range.oldStart - shift;
+      }
+      // removed 按位置升序，后面的都比 oldIndex 大。
+      break;
+    }
+    return oldIndex - shift;
+  }
+
+  if (plain.isNotEmpty) {
+    final spans = source.spans.getAttributionSpansInRange(
+      attributionFilter: (Attribution _) => true,
+      start: 0,
+      end: plain.length - 1,
+    );
+    for (final span in spans) {
+      final int start = mapIndex(span.start);
+      final int end = mapIndex(span.end);
+      if (start < 0 || end < start || start >= result.length) {
+        continue;
+      }
+      result.addAttribution(
+        span.attribution,
+        SpanRange(start, end >= result.length ? result.length - 1 : end),
+      );
+    }
+  }
+  for (final ({int start, int end}) range in highlightRanges) {
+    if (range.end < range.start || range.start >= result.length) {
+      continue;
+    }
+    result.addAttribution(
+      highlightAttribution,
+      SpanRange(range.start, range.end),
+    );
+  }
+  return result;
+}
+
+/// 对所有文本节点应用 `==高亮==`（代码块内部保持原样）。
+void _applyHighlights(MutableDocument document) {
+  for (var i = 0; i < document.nodeCount; i++) {
+    final DocumentNode? node = document.getNodeAt(i);
+    if (node == null) {
+      continue;
+    }
+    if (node is TableBlockNode) {
+      // 表格单元格也要支持：重建整张表的单元格网格。
+      List<List<TextNode>>? cells;
+      for (var r = 0; r < node.rowCount; r++) {
+        for (var c = 0; c < node.columnCount; c++) {
+          final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
+          final AttributedText? text = _highlightToAttribution(cell.text);
+          if (text == null) {
+            continue;
+          }
+          cells ??= <List<TextNode>>[
+            for (var row = 0; row < node.rowCount; row++)
+              List<TextNode>.from(node.getRow(row)),
+          ];
+          cells[r][c] = cell.copyTextNodeWith(text: text);
+        }
+      }
+      if (cells != null) {
+        document.replaceNodeById(
+          node.id,
+          TableBlockNode(
+            id: node.id,
+            cells: cells,
+            metadata: node.copyMetadata(),
+          ),
+        );
+      }
+      continue;
+    }
+    if (node is! TextNode) {
+      continue;
+    }
+    // 代码块里的 == 是代码，不是语法。
+    if (node.getMetadataValue(NodeMetadata.blockType) == codeAttribution) {
+      continue;
+    }
+    final AttributedText? text = _highlightToAttribution(node.text);
+    if (text != null) {
+      document.replaceNodeById(node.id, node.copyTextNodeWith(text: text));
+    }
+  }
+}
+
+/// 代码块语言标记的 metadata key。
+///
+/// super_editor 的模型只存代码文本，不记住围栏后面的语言（` ```dart `
+/// 解析后只剩代码内容）。这里在解析后把语言按顺序挂到节点 metadata 上，
+/// 序列化时再写回，保证「复制一段带语言的代码 → 保存 → 重开」不丢信息。
+const String kCodeLanguageMetadata = 'codeLanguage';
+
+/// 依序收集围栏代码块的语言标记（与文档里代码块的出现顺序一致）。
+///
+/// 同时支持 ``` 与 ~~~ 两种围栏；只有「同字符、长度不小于开启围栏、
+/// 后面没有内容」的行才算闭合，避免把代码里的 ``` 当成结束。
+List<String> _collectCodeFenceLanguages(String markdown) {
+  final List<String> languages = <String>[];
+  String fenceChar = '';
+  int fenceLength = 0;
+  for (final String line in markdown.split('\n')) {
+    final RegExpMatch? match =
+        RegExp(r'^([`~]{3,})([^`~]*)$').firstMatch(line.trimLeft());
+    if (match == null) {
+      continue;
+    }
+    final String marker = match.group(1)!;
+    final String info = match.group(2)!.trim();
+    if (fenceLength == 0) {
+      fenceChar = marker[0];
+      fenceLength = marker.length;
+      languages.add(info);
+    } else if (marker[0] == fenceChar &&
+        marker.length >= fenceLength &&
+        info.isEmpty) {
+      fenceChar = '';
+      fenceLength = 0;
+    }
+  }
+  return languages;
+}
+
+/// 把语言标记按顺序写回代码块节点。
+void _restoreCodeFenceLanguages(
+  MutableDocument document,
+  List<String> languages,
+) {
+  if (languages.isEmpty) {
+    return;
+  }
+  var index = 0;
+  for (var i = 0; i < document.nodeCount; i++) {
+    final DocumentNode? node = document.getNodeAt(i);
+    if (node == null ||
+        node is! ParagraphNode ||
+        node.getMetadataValue(NodeMetadata.blockType) != codeAttribution) {
+      continue;
+    }
+    if (index >= languages.length) {
+      return;
+    }
+    final String language = languages[index++];
+    if (language.isEmpty) {
+      continue;
+    }
+    document.replaceNodeById(
+      node.id,
+      node.copyWithAddedMetadata(<String, dynamic>{
+        kCodeLanguageMetadata: language,
+      }),
+    );
+  }
+}
+
 /// 解析入口：规范化 + super_editor 解析 + 空行/任务行/附件行拆分。
 /// 编辑页与测试统一走这里。
 MutableDocument deserializeXiaojiMarkdown(String md) {
+  final String prepared = _isolateImageLines(_protectBlankLines(md));
+  // 语言标记要先按原始围栏顺序收集：解析后的文档里没有这个信息。
+  final List<String> codeLanguages = _collectCodeFenceLanguages(prepared);
   final document = deserializeMarkdownToDocument(
-    normalizeMarkdownForKernel(
-      _isolateImageLines(_protectBlankLines(md)),
-    ),
+    normalizeMarkdownForKernel(prepared),
   );
+  _restoreCodeFenceLanguages(document, codeLanguages);
+  _applyHighlights(document);
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
@@ -564,12 +783,17 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
         continue;
       }
       if (blockType == codeAttribution) {
-        // 代码块：围栏包裹。行内反引号冲突不处理（与旧版一致，遇到再说）。
-        write('```');
+        // 代码块：围栏包裹，保留语言标记；内容里出现 ``` 时自动加长围栏，
+        // 否则片段里的一段示例代码会把围栏提前闭合、把后半段挤成正文。
+        final String language =
+            (node.getMetadataValue(kCodeLanguageMetadata) as String?)?.trim() ??
+                '';
+        final String fence = _codeFenceFor(plain);
+        write('$fence$language');
         for (final line in plain.split('\n')) {
           write(line);
         }
-        write('```');
+        write(fence);
         continue;
       }
       // 普通段落：空段落跳过（不产出空行，存储保持紧凑）。
@@ -592,6 +816,21 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
   // 正常路径在 _splitSentinelParagraphs 已全部还原成空段落；这里再剥一次，
   // 避免未来新增节点类型时哨兵泄漏成「☒」乱码。
   return out.toString().replaceAll(_blankParagraphSentinel, '');
+}
+
+/// 代码围栏长度：内容里最长的一串反引号再加 1，至少 3。
+///
+/// 例：代码里本身有 ``` 时输出 ````（4 个），解析器就不会提前闭合。
+String _codeFenceFor(String content) {
+  var length = 3;
+  for (final RegExpMatch match
+      in RegExp(r'^[ \t]*(`{3,})', multiLine: true).allMatches(content)) {
+    final int run = match.group(1)!.length + 1;
+    if (run > length) {
+      length = run;
+    }
+  }
+  return '`' * length;
 }
 
 /// 表格 → GFM 管道表格。
@@ -660,6 +899,7 @@ String _inlineMarkdown(AttributedText attributed) {
     italicsAttribution: '*',
     strikethroughAttribution: '~~',
     codeAttribution: '`',
+    highlightAttribution: '==',
   };
 
   var openMarkers = <Attribution>[];

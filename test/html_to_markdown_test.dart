@@ -77,6 +77,28 @@ void main() {
       expect(md, contains('| 香蕉 | 5 |'));
     });
 
+    test('命名实体与数字实体都还原成符号', () {
+      final String md = htmlToMarkdown(
+        '<p>破折号&mdash;省略&hellip;&ldquo;引号&rdquo;'
+        '&#8212;&#x2014;版权&copy;数量&times;2</p>',
+      );
+      expect(md, contains('破折号—省略…'));
+      expect(md, contains('“引号”'));
+      expect(md, contains('——版权©数量×2'));
+      expect(md, isNot(contains('&mdash;')));
+      expect(md, isNot(contains('&copy;')));
+    });
+
+    test('实体里的 &amp; 不会被二次解码', () {
+      final String md = htmlToMarkdown('<p>&amp;mdash; 是字面量</p>');
+      expect(md, contains('&mdash; 是字面量'));
+    });
+
+    test('<mark> 高亮转成 ==…==', () {
+      final String md = htmlToMarkdown('<p>这是 <mark>重点</mark> 内容</p>');
+      expect(md, contains('==重点=='));
+    });
+
     test('表格对齐与 colspan', () {
       final String md = htmlToMarkdown(
         '<table><tr><th align="center">左</th>'

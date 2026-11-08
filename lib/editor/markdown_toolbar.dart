@@ -25,6 +25,7 @@ enum MarkdownCommand {
   italic,
   strike,
   code,
+  highlight,
   link,
   codeBlock,
   divider,
@@ -152,19 +153,25 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
           const SizedBox(width: 8),
           _ToolButton(
             icon: Icons.sell_outlined,
+            // 价签图标的字形几乎填满 em 框，用 24 会比相邻图标重一圈；
+            // 降到 22 与「加号 / Aa / 收键盘」的视觉重量对齐。
+            size: AppIcon.dense,
             onTap: widget.onEditTags ?? () {},
           ),
           // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
           // 两侧各占一块，不再把五个按钮均匀撒满整条。
           const Spacer(),
           // 撤销/还原用「掉头箭头」：方向感最直观，也不会和返回/前进混淆。
+          // 掉头箭头同样比常规线性图标更满，统一降到 22 保持视觉一致。
           _FixedButton(
             icon: Icons.u_turn_left_rounded,
+            size: AppIcon.dense,
             enabled: widget.canUndo,
             onTap: widget.onUndo,
           ),
           _FixedButton(
             icon: Icons.u_turn_right_rounded,
+            size: AppIcon.dense,
             enabled: widget.canRedo,
             onTap: widget.onRedo,
           ),
@@ -359,13 +366,14 @@ class MarkdownTextStylePanel extends StatelessWidget {
     (MarkdownCommand.quote, Icons.format_quote_rounded, '引用'),
   ];
 
-  /// 行内样式：加粗 / 斜体 / 删除线 / 行内码 / 链接。
+  /// 行内样式：加粗 / 斜体 / 删除线 / 行内码 / 高亮 / 链接。
   static const List<(MarkdownCommand, IconData, String)> _inlineItems =
       <(MarkdownCommand, IconData, String)>[
     (MarkdownCommand.bold, Icons.format_bold_rounded, '加粗'),
     (MarkdownCommand.italic, Icons.format_italic_rounded, '斜体'),
     (MarkdownCommand.strike, Icons.strikethrough_s_rounded, '删除线'),
     (MarkdownCommand.code, Icons.code_rounded, '行内码'),
+    (MarkdownCommand.highlight, Icons.format_color_fill_rounded, '高亮'),
     (MarkdownCommand.link, Icons.link_rounded, '链接'),
   ];
 
@@ -722,6 +730,8 @@ class _ActionCell extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: AppFontSize.badge,
                 height: 1,
@@ -797,11 +807,16 @@ class _ToolButton extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.selected = false,
+    this.size = AppIcon.action,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final bool selected;
+
+  /// 图标绘制尺寸。字形偏满的图标（价签等）传 [AppIcon.dense]，
+  /// 让视觉重量与其他 24dp 图标一致。
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -825,7 +840,7 @@ class _ToolButton extends StatelessWidget {
                 : null,
             child: Icon(
               icon,
-              size: AppIcon.action,
+              size: size,
               // 未选中用弱化正文色：纯黑太重，secondary 又像禁用，
               // 主色只留给「当前生效」的状态。
               color: selected
@@ -863,11 +878,15 @@ class _FixedButton extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.enabled = true,
+    this.size = AppIcon.action,
   });
 
   final IconData icon;
   final VoidCallback? onTap;
   final bool enabled;
+
+  /// 见 [_ToolButton.size]：字形偏满的图标降一档，保持视觉重量一致。
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -881,7 +900,7 @@ class _FixedButton extends StatelessWidget {
         alignment: Alignment.center,
         child: Icon(
           icon,
-          size: AppIcon.action,
+          size: size,
           color: enabled ? colors.text.withValues(alpha: 0.72) : colors.tertiary,
         ),
       ),

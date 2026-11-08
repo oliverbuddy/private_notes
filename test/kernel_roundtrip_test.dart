@@ -29,6 +29,73 @@ void main() {
     return serializeDocumentToXiaojiMarkdown(doc);
   }
 
+  test('围栏代码块的语言标记往返保留', () {
+    const String body = '```dart\nvoid main() { print(1); }\n```';
+    final doc = deserializeXiaojiMarkdown(body);
+    final String out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out, contains('```dart'));
+    expect(out, contains('void main() { print(1); }'));
+  });
+
+  test('代码内容含 ``` 时围栏自动加长，不会被提前闭合', () {
+    const String body = '````\n```\n片段\n```\n````';
+    final doc = deserializeXiaojiMarkdown(body);
+    final String out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out.split('\n').first, '````');
+    expect(out, contains('片段'));
+  });
+
+  test('==高亮== 解析成属性，标记字符从正文里移除', () {
+    final doc = deserializeXiaojiMarkdown('这是 ==重点== 内容');
+    final node = doc.getNodeAt(0)! as ParagraphNode;
+    expect(node.text.toPlainText(), '这是 重点 内容');
+    expect(
+      node.text.spans.getAllAttributionsAt(3).contains(highlightAttribution),
+      isTrue,
+    );
+    expect(
+      node.text.spans.getAllAttributionsAt(0).contains(highlightAttribution),
+      isFalse,
+    );
+  });
+
+  test('==高亮== 序列化回标记，且往返幂等', () {
+    final String out = roundTrip('这是 ==重点== 内容');
+    expect(out, contains('==重点=='));
+    expect(roundTrip(out), out);
+  });
+
+  test('高亮与粗体叠加时两种属性都保留', () {
+    final doc = deserializeXiaojiMarkdown('**==重点==**');
+    final node = doc.getNodeAt(0)! as ParagraphNode;
+    expect(node.text.toPlainText(), '重点');
+    final Set<Attribution> attrs = node.text.spans.getAllAttributionsAt(0);
+    expect(attrs.contains(highlightAttribution), isTrue);
+    expect(attrs.contains(boldAttribution), isTrue);
+    final String out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out, contains('==重点=='));
+    expect(out, contains('**'));
+  });
+
+  test('代码块里的 == 不当高亮语法', () {
+    final doc = deserializeXiaojiMarkdown('```\na == b\n```');
+    final String out = serializeDocumentToXiaojiMarkdown(doc);
+    expect(out, contains('a == b'));
+    expect(out, isNot(contains('==a')));
+  });
+
+  test('表格单元格里的 ==高亮== 同样生效', () {
+    final doc = deserializeXiaojiMarkdown(
+      '| 名称 | 说明 |\n| --- | --- |\n| 甲 | ==重点== |',
+    );
+    final table = doc.getNodeAt(0)! as TableBlockNode;
+    expect(table.getCell(rowIndex: 1, columnIndex: 1).text.toPlainText(), '重点');
+    expect(
+      serializeDocumentToXiaojiMarkdown(doc),
+      contains('| 甲 | ==重点== |'),
+    );
+  });
+
   test('待办后紧跟图片：图片仍是独立 ImageNode', () {
     const String body = '- [ ] read book\n![](assets/n/1.jpg#xiaoji-small)';
     final doc = deserializeXiaojiMarkdown(body);

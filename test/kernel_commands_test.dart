@@ -303,7 +303,7 @@ void main() {
         nodeIndex: 0,
         newNode: ParagraphNode(
           id: Editor.createNodeId(),
-          text: AttributedText('加粗斜体删除线行内码'),
+          text: AttributedText('加粗斜体删除线行内码高亮'),
         ),
       ),
     ]);
@@ -329,6 +329,7 @@ void main() {
       (MarkdownCommand.italic, italicsAttribution, 2, 4),
       (MarkdownCommand.strike, strikethroughAttribution, 4, 7),
       (MarkdownCommand.code, codeAttribution, 7, 10),
+      (MarkdownCommand.highlight, highlightAttribution, 10, 12),
     ];
     for (final (command, attribution, start, end) in cases) {
       select(start, end);

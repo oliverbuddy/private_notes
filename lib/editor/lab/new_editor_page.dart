@@ -1207,6 +1207,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       MarkdownCommand.italic ||
       MarkdownCommand.strike ||
       MarkdownCommand.code ||
+      MarkdownCommand.highlight ||
       MarkdownCommand.link =>
         false,
       _ => true,
@@ -2416,11 +2417,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           ),
           // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
           const _LabListItemComponentBuilder(),
-          // 表格：官方默认组件链里没有表格（表节点会落到 UnknownComponentBuilder）。
-          // 窄屏用横向滚动而不是整体缩小 —— 缩放会让表格字号明显小于正文。
-          const MarkdownTableComponentBuilder(
-            columnWidth: IntrinsicColumnWidth(),
-            fit: TableComponentFit.scroll,
+          // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
+          // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
+          // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
+          // 才保留横向滚动兜底。断点差异只体现在这里，结构不动。
+          _AdaptiveTableComponentBuilder(
+            availableWidth: MediaQuery.sizeOf(context).width - 36,
           ),
           ...defaultComponentBuilders,
           const UnknownComponentBuilder(),
@@ -2471,6 +2473,18 @@ class _NewEditorPageState extends State<NewEditorPage>
                 offset: 3,
                 capType: StrokeCap.round,
               ),
+              // `==高亮==`：内核不认识这个属性，只在这里给它上底色。
+              // 先走内核默认的行内样式（粗体/斜体/删除线/行内码/链接），
+              // 再叠加高亮，避免覆盖掉既有样式。
+              Styles.inlineTextStyler:
+                  (Set<Attribution> attributions, TextStyle baseStyle) {
+                final TextStyle style =
+                    defaultInlineTextStyler(attributions, baseStyle);
+                if (!attributions.contains(highlightAttribution)) {
+                  return style;
+                }
+                return style.copyWith(backgroundColor: colors.accentBg);
+              },
             };
           },
         ),
@@ -3381,6 +3395,74 @@ TableCellDecorator _tableCellDecorator(AppColors colors) {
   }) {
     return rowIndex == 0 ? BoxDecoration(color: colors.pageAlt) : null;
   };
+}
+
+/// 列宽 = 内容自适应，但每条列最多 [maxWidth]，超出的单元格内换行。
+///
+/// Flutter 自带的 `MaxColumnWidth` 是「取两个宽度的较大者」，没有封顶
+/// 语义，所以这里单独实现。
+class _CappedIntrinsicColumnWidth extends TableColumnWidth {
+  const _CappedIntrinsicColumnWidth(this.maxWidth);
+
+  final double maxWidth;
+
+  static const TableColumnWidth _intrinsic = IntrinsicColumnWidth();
+
+  @override
+  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
+      math.min(_intrinsic.minIntrinsicWidth(cells, containerWidth), maxWidth);
+
+  @override
+  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
+      math.min(_intrinsic.maxIntrinsicWidth(cells, containerWidth), maxWidth);
+}
+
+/// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
+///
+/// 2~3 列表格在手机上基本一屏放下；列特别多时单列不低于 [min]，宁可
+/// 略微横向滚动也不把字挤成一条；平板/PC 因 [availableWidth] 更大，
+/// 单列自然更宽，不需要按端写第二套分支。
+double tableColumnCap({
+  required double availableWidth,
+  required int columns,
+  double min = 96,
+  double max = 240,
+}) {
+  if (columns <= 0 || availableWidth <= 0) {
+    return max;
+  }
+  return (availableWidth / columns).clamp(min, max).toDouble();
+}
+
+/// 表格组件：按「正文可用宽度 / 列数」给每列分配上限。
+///
+/// 手机窄屏下，长文本单元格以前会把列撑到内容宽度（整表几千 dp），
+/// 必须横向滑很久才能看完。现在每列最多拿到自己那份屏宽。
+class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
+  const _AdaptiveTableComponentBuilder({required this.availableWidth})
+      : super(fit: TableComponentFit.scroll);
+
+  /// 正文内容区宽度（已扣掉页面左右页边距）。
+  final double availableWidth;
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(
+    Document document,
+    DocumentNode node,
+  ) {
+    final SingleColumnLayoutComponentViewModel? viewModel =
+        super.createViewModel(document, node);
+    if (viewModel is! MarkdownTableViewModel || node is! TableBlockNode) {
+      return viewModel;
+    }
+    final int columns = node.columnCount;
+    if (columns > 0 && availableWidth > 0) {
+      viewModel.columnWidth = _CappedIntrinsicColumnWidth(
+        tableColumnCap(availableWidth: availableWidth, columns: columns),
+      );
+    }
+    return viewModel;
+  }
 }
 
 /// 图片长按菜单的动作。

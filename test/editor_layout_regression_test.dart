@@ -70,6 +70,22 @@ Note _note(String id, String body) {
 }
 
 void main() {
+  group('表格列宽适配手机窄屏', () {
+    test('列数少时按可用宽度均分，铺满一屏', () {
+      // 360dp 手机、正文左右各 18dp 页边距 → 可用 324。
+      expect(tableColumnCap(availableWidth: 324, columns: 2), 162);
+      expect(tableColumnCap(availableWidth: 324, columns: 3), 108);
+    });
+
+    test('列很多时单列不低于下限，靠横向滚动兜底', () {
+      expect(tableColumnCap(availableWidth: 324, columns: 6), 96);
+    });
+
+    test('平板/PC 单列不超过上限，避免一行字拉得过长', () {
+      expect(tableColumnCap(availableWidth: 800, columns: 2), 240);
+    });
+  });
+
   group('引用块回车续行', () {
     test('有内容的引用行末尾回车，新行仍然是引用', () {
       final MutableDocument document = deserializeXiaojiMarkdown('> 引用一行');

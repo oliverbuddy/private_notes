@@ -2,6 +2,7 @@ import 'package:flutter/services.dart' show TextAffinity;
 import 'package:super_editor/super_editor.dart';
 
 import '../markdown_toolbar.dart';
+import 'xiaoji_markdown.dart';
 
 /// super_editor 内核的命令映射层（M2）。
 ///
@@ -73,6 +74,10 @@ class KernelCommands {
         break;
       case MarkdownCommand.code:
         ops.toggleAttributionsOnSelection(<Attribution>{codeAttribution});
+        break;
+      case MarkdownCommand.highlight:
+        ops.toggleAttributionsOnSelection(
+            <Attribution>{highlightAttribution});
         break;
       case MarkdownCommand.link:
         _applyLink();
@@ -557,6 +562,9 @@ class KernelCommands {
       }
       if (_covers(node.text, codeAttribution, lo, hi)) {
         active.add(MarkdownCommand.code);
+      }
+      if (_covers(node.text, highlightAttribution, lo, hi)) {
+        active.add(MarkdownCommand.highlight);
       }
       final link = node.text.spans
           .getAllAttributionsAt(lo)

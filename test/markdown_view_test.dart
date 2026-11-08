@@ -110,6 +110,20 @@ void main() {
       expect(text.contains('```'), isFalse);
     });
 
+    test('高亮的 == 记号消失，只剩带底色的文字', () {
+      final List<InlineSpan> spans = markdownSpans(
+        '这是 ==重点== 内容',
+        const TextStyle(fontSize: 17),
+        AppColors.light,
+      );
+      expect(spans.map(_spanText).join(), '这是 重点 内容');
+      final highlighted = spans.whereType<TextSpan>().where(
+            (TextSpan span) => span.style?.backgroundColor != null,
+          );
+      expect(highlighted.length, 1);
+      expect(highlighted.first.text, '重点');
+    });
+
     test('普通段落原样输出', () {
       expect(render('就一句话'), '就一句话');
     });

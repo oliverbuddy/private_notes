@@ -302,7 +302,8 @@ final RegExp _inlinePattern = RegExp(
   r'|`([^`\n]+)`'
   r'|\[([^\]\n]*)\]\(([^)\n]*)\)'
   r'|\*([^*\n]+)\*'
-  r'|#([^\s#，。！？、,.!?]+)',
+  r'|#([^\s#，。！？、,.!?]+)'
+  r'|==([^=\n]+)==',
 );
 
 List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
@@ -318,6 +319,7 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
     final linkText = match.group(4);
     final italic = match.group(6);
     final tag = match.group(7);
+    final highlight = match.group(8);
 
     if (bold != null) {
       // 正文强调用 600：中文 500 与 400 的字面差几乎看不见（见 AppWeight 注释）。
@@ -355,6 +357,12 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
       ));
     } else if (italic != null) {
       spans.add(TextSpan(text: italic, style: style.copyWith(fontStyle: FontStyle.italic)));
+    } else if (highlight != null) {
+      // `==高亮==`：与编辑器 inlineTextStyler 同一套底色，逐字可读。
+      spans.add(TextSpan(
+        text: highlight,
+        style: style.copyWith(backgroundColor: colors.accentBg),
+      ));
     } else if (tag != null) {
       // 标签做成真胶囊。规格逐项对齐详情页（TagChips 内容层）：
       // 字号与正文一致、左右各留 4、圆角 5、0.5 描边、按标签名取固定色。
