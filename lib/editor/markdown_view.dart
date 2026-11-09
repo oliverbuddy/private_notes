@@ -42,19 +42,26 @@ class MarkdownBlockView extends StatelessWidget {
       fontWeight: AppWeight.regular,
     );
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: (TapUpDetails details) => onTap?.call(details.globalPosition),
-      child: Text.rich(
-        TextSpan(
-          children: markdownSpans(
-            text,
-            base,
-            colors,
-            onToggleTodo: onToggleTodo,
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (TapUpDetails details) =>
+              onTap?.call(details.globalPosition),
+          child: Text.rich(
+            TextSpan(
+              children: markdownSpans(
+                text,
+                base,
+                colors,
+                onToggleTodo: onToggleTodo,
+                codeBlockWidth:
+                    constraints.hasBoundedWidth ? constraints.maxWidth : null,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -74,13 +81,18 @@ List<InlineSpan> markdownSpans(
   /// 不为空时，待办渲染成可点选的真 checkbox，第 n 个待办被点击时回调 n；
   /// 为空（列表摘要）渲染字符字形。
   void Function(int todoIndex)? onToggleTodo,
+
+  /// 代码块整宽容器的可用宽度。为空（没有布局约束的调用方）时退回
+  /// 逐行字符底色；有宽度时渲染成与详情页一致的整宽圆角卡片。
+  double? codeBlockWidth,
 }) {
   // 结果缓存：键盘弹出动画的每一帧都会重建可见块（MediaQuery 逐帧变化），
   // 而 text 没变 —— 不缓存的话每帧都要对整块做几十次正则匹配，真机上
   // 键盘动画肉眼可见地卡。TextSpan 不可变，整树复用安全；span 里捕获的
   // 回调（勾选待办/点击聚焦）都指向同一个 entry，缓存不影响行为。
   final cacheKey = '$markdown\x1F${base.fontSize}\x1F${base.color}\x1F'
-      '${identityHashCode(colors)}\x1F$headingBoost\x1F${onToggleTodo != null}';
+      '${identityHashCode(colors)}\x1F$headingBoost\x1F${onToggleTodo != null}'
+      '\x1F${codeBlockWidth ?? 0}';
   final cached = _spansCache[cacheKey];
   if (cached != null) {
     return cached;
@@ -95,7 +107,7 @@ List<InlineSpan> markdownSpans(
   String? fenceChar;
   var fenceLength = 0;
   final RegExp fenceLine = RegExp(r'^([`~]{3,})([^`~]*)$');
-  var codeLineCount = 0;
+  List<String>? codeLines;
   // 待办序号计数器：回调按「块内第几个待办」定位要翻转的行。
   var todoCounter = 0;
   final lines = markdown.split('\n');
@@ -105,9 +117,9 @@ List<InlineSpan> markdownSpans(
     final isLast = i == lines.length - 1;
     final newline = isLast ? '' : '\n';
 
-    // 代码块整体等宽、带浅底，围栏本身不显示。
-    // 行首尾各垫一个空格当左右留白（span 做不了 padding，这是等价做法）；
-    // 空行也要有底色，否则色块中间会断开一条白缝。
+    // 代码块：与详情页同一套视觉 —— 整宽 surface2 圆角卡片 + 等宽文本。
+    // 旧实现是「逐行字符底色」，只覆盖到文字宽度、没有圆角，和详情页的
+    // 整宽容器明显不一致（用户多轮反馈「详情和列表效果不一致」）。
     final RegExpMatch? fence = fenceLine.firstMatch(line.trimLeft());
     if (fence != null &&
         (fenceChar == null ||
@@ -117,26 +129,19 @@ List<InlineSpan> markdownSpans(
       if (opening) {
         fenceChar = fence.group(1)![0];
         fenceLength = fence.group(1)!.length;
-        codeLineCount = 0;
+        codeLines = <String>[];
       } else {
+        if (codeLines != null) {
+          _appendCodeBlock(spans, codeLines, base, colors, codeBlockWidth);
+        }
+        codeLines = null;
         fenceChar = null;
         fenceLength = 0;
-        if (codeLineCount > 0) {
-          // 块结束：尾部补一个空行当块后间距（阅读态专属，不回写文本）。
-          spans.add(TextSpan(text: '\n', style: _codeBase(base, colors)));
-        }
-      }
-      if (!isLast) {
-        spans.add(TextSpan(text: newline, style: _codeBase(base, colors)));
       }
       continue;
     }
     if (fenceChar != null) {
-      codeLineCount++;
-      spans.add(TextSpan(
-        text: ' $line$newline',
-        style: _codeBase(base, colors),
-      ));
+      codeLines?.add(line);
       continue;
     }
 
@@ -163,10 +168,8 @@ List<InlineSpan> markdownSpans(
       // 还有 18，但 H3 16.5 × 0.86 = 14.2，比正文 15.5 更小 —— 整页会
       // 看起来像被「等比缩小」了一档（用户反馈）。主流列表方案是正文与
       // 详情同字号、标题只收敛层级，所以这里给标题兜一个正文字号下限。
-      final double scaledSize =
-          baseSize * scales[level - 1] * headingBoost;
-      final double titleSize =
-          scaledSize < baseSize ? baseSize : scaledSize;
+      final double scaledSize = baseSize * scales[level - 1] * headingBoost;
+      final double titleSize = scaledSize < baseSize ? baseSize : scaledSize;
       final style = base.copyWith(
         fontSize: titleSize,
         // 中文标题用 600 才立得住，500 和正文的粗细差几乎看不出来。
@@ -193,7 +196,8 @@ List<InlineSpan> markdownSpans(
     final quote = RegExp(r'^\s*>\s?(.*)$').firstMatch(line);
     if (quote != null) {
       final style = base.copyWith(
-        color: colors.text.withValues(alpha: 0.78),
+        // 与详情页引用块同一个文字浓度（AppQuote 用 0.8）。
+        color: colors.text.withValues(alpha: 0.8),
         backgroundColor: colors.accentBg,
         height: 1.6,
       );
@@ -264,8 +268,7 @@ List<InlineSpan> markdownSpans(
 
     // 有序列表：编号分层（1. → a. → i.），Word/Typora/Notion 的通行方案。
     // 只改**显示**，不改 md 源码 —— 源码里仍是合法的十进制编号，往返无损。
-    final ordered =
-        RegExp(r'^(\s*)(\d+)([.)])\s+(.*)$').firstMatch(line);
+    final ordered = RegExp(r'^(\s*)(\d+)([.)])\s+(.*)$').firstMatch(line);
     if (ordered != null) {
       final level = _listLevel(ordered.group(1)!);
       final number = int.tryParse(ordered.group(2)!) ?? 1;
@@ -287,6 +290,11 @@ List<InlineSpan> markdownSpans(
     spans.add(TextSpan(text: newline, style: base));
   }
 
+  // 文档末尾没有闭合围栏时，把已收集的代码行也渲染出来，避免内容消失。
+  if (codeLines != null) {
+    _appendCodeBlock(spans, codeLines, base, colors, codeBlockWidth);
+  }
+
   if (_spansCache.length >= _spansCacheLimit) {
     _spansCache.clear();
   }
@@ -299,15 +307,56 @@ List<InlineSpan> markdownSpans(
 final Map<String, List<InlineSpan>> _spansCache = <String, List<InlineSpan>>{};
 const int _spansCacheLimit = 24;
 
-/// 代码块行样式：等宽 + 浅底 + 微缩。整块一个底色才有「代码区域」的观感。
+/// 代码块行样式：等宽 + 微缩。底色由调用方负责（整宽容器 / fallback 底色）。
 TextStyle _codeBase(TextStyle base, AppColors colors) {
   return base.copyWith(
     fontFamily: 'monospace',
     fontSize: (base.fontSize ?? 17) * 0.9,
     height: 1.55,
     color: colors.text.withValues(alpha: 0.85),
-    backgroundColor: colors.surface2,
   );
+}
+
+/// 把收集到的代码行渲染成一个整宽圆角卡片。
+///
+/// [width] 来自外层 [LayoutBuilder]：有宽度时用 [WidgetSpan] 撑满一行，
+/// 与详情页的代码块容器保持同一视觉；没有宽度（直接调用 markdownSpans 的
+/// 老场景）退回逐行字符底色，至少保证等宽与浅底不丢。
+void _appendCodeBlock(
+  List<InlineSpan> spans,
+  List<String> lines,
+  TextStyle base,
+  AppColors colors,
+  double? width,
+) {
+  final TextStyle codeStyle = _codeBase(base, colors);
+  if (width == null || width <= 0) {
+    for (var i = 0; i < lines.length; i++) {
+      final String suffix = i == lines.length - 1 ? '' : '\n';
+      spans.add(TextSpan(
+        text: ' ${lines[i]}$suffix',
+        style: codeStyle.copyWith(backgroundColor: colors.surface2),
+      ));
+    }
+    spans.add(TextSpan(
+      text: '\n',
+      style: codeStyle.copyWith(backgroundColor: colors.surface2),
+    ));
+    return;
+  }
+  spans.add(WidgetSpan(
+    alignment: PlaceholderAlignment.middle,
+    child: Container(
+      width: width,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(AppRadius.block),
+      ),
+      child: Text(lines.join('\n'), style: codeStyle),
+    ),
+  ));
 }
 
 final RegExp _inlinePattern = RegExp(
@@ -325,7 +374,8 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
   var last = 0;
   for (final match in _inlinePattern.allMatches(text)) {
     if (match.start > last) {
-      spans.add(TextSpan(text: text.substring(last, match.start), style: style));
+      spans
+          .add(TextSpan(text: text.substring(last, match.start), style: style));
     }
     final bold = match.group(1);
     final strike = match.group(2);
@@ -370,7 +420,8 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
         ),
       ));
     } else if (italic != null) {
-      spans.add(TextSpan(text: italic, style: style.copyWith(fontStyle: FontStyle.italic)));
+      spans.add(TextSpan(
+          text: italic, style: style.copyWith(fontStyle: FontStyle.italic)));
     } else if (highlight != null) {
       // `==高亮==`：与编辑器 inlineTextStyler 同一套底色，逐字可读。
       spans.add(TextSpan(
@@ -378,11 +429,10 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
         style: style.copyWith(backgroundColor: colors.accentBg),
       ));
     } else if (tag != null) {
-      // 标签做成真胶囊。规格逐项对齐详情页（TagChips 内容层）：
-      // 字号与正文一致、左右各留 4、圆角 5、0.5 描边、按标签名取固定色。
-      // 之前这里把字号乘了 0.84、颜色写死 accentBg，与详情里小一圈、颜色
-      // 也不随标签变化（用户反馈两处不一致）。
-      final double tagSize = style.fontSize ?? 17;
+      // 标签胶囊按「正文里的行内标记」处理：字号压到正文的 0.78
+      // （约 12.5），否则一个 16px 的彩色胶囊嵌在正文里会非常突兀。
+      // 左右留 4、圆角与详情胶囊一致，高度约 18dp。
+      final double tagSize = (style.fontSize ?? 17) * 0.78;
       final TagTone tone = TagPalette.toneFor(tag, colors);
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.middle,
@@ -455,8 +505,19 @@ String _romanNumeral(int number) {
     return '$number';
   }
   const values = <int, String>{
-    1000: 'm', 900: 'cm', 500: 'd', 400: 'cd', 100: 'c', 90: 'xc',
-    50: 'l', 40: 'xl', 10: 'x', 9: 'ix', 5: 'v', 4: 'iv', 1: 'i',
+    1000: 'm',
+    900: 'cm',
+    500: 'd',
+    400: 'cd',
+    100: 'c',
+    90: 'xc',
+    50: 'l',
+    40: 'xl',
+    10: 'x',
+    9: 'ix',
+    5: 'v',
+    4: 'iv',
+    1: 'i',
   };
   var n = number;
   final out = StringBuffer();

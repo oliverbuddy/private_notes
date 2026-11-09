@@ -21,8 +21,8 @@ class TagChip extends StatelessWidget {
     final colors = AppColors.of(context);
     final TagTone tone = TagPalette.toneFor(label, colors);
     return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
         color: isOverflow ? colors.accentBg : tone.background,
         borderRadius: BorderRadius.circular(AppRadius.chip),

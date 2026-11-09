@@ -126,15 +126,6 @@ class NoteTileCompact extends StatelessWidget {
               media,
             ],
             const SizedBox(width: 12),
-            if (note.remindAt != null) ...<Widget>[
-              Icon(
-                Icons.notifications_none_rounded,
-                size: AppIcon.badge,
-                color:
-                    note.hasUpcomingReminder ? colors.accent : colors.tertiary,
-              ),
-              const SizedBox(width: 4),
-            ],
             Text(
               formatListTime(note.updated),
               style: AppText.meta.copyWith(color: colors.secondary),

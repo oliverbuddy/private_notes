@@ -9,7 +9,6 @@ import 'data/note_repository.dart';
 import 'data/note_store.dart';
 import 'home/home_page.dart';
 import 'models/note_settings.dart';
-import 'reminders/reminder_service.dart';
 import 'security/app_lock_gate.dart';
 import 'theme/app_theme.dart';
 
@@ -56,23 +55,10 @@ Future<void> main() async {
     // 放在首帧之后，避免大备份和首屏抢 IO。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(repository.runMaintenance());
-      // 提醒：初始化通知插件并把未到期提醒排进系统；冷启动的通知点击
-      // 由 reminderService 内部转成 openNoteRequest，首页会消费。
-      unawaited(_initReminders(repository));
     });
   } catch (error) {
     // 文档目录不可用（极少见，通常是沙箱异常）时也不能白屏。
     runApp(_StartupFailureApp(message: '$error'));
-  }
-}
-
-/// 提醒初始化：插件不可用时静默降级，绝不影响 App 启动。
-Future<void> _initReminders(NoteRepository repository) async {
-  try {
-    await reminderService.initialize();
-    await reminderService.sync(repository.notes);
-  } catch (error) {
-    debugPrint('提醒初始化失败：$error');
   }
 }
 
@@ -114,8 +100,6 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
     // runMaintenance 内部有并发锁，且 24 小时内会直接返回。
     if (state == AppLifecycleState.resumed) {
       unawaited(widget.repository.runMaintenance());
-      // 回到前台重新对账：用户可能在系统里改过时间/时区，或强行停止过应用。
-      unawaited(reminderService.sync(widget.repository.notes));
     }
   }
 

@@ -14,8 +14,6 @@ import 'package:super_editor/super_editor.dart';
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
 import '../../data/note_store.dart';
-import '../../reminders/reminder_scheduler.dart' show ReminderPermission;
-import '../../reminders/reminder_service.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
@@ -783,7 +781,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       tags: _currentNote.tags,
       pinned: _currentNote.pinned,
       locked: _currentNote.locked,
-      remindAt: _currentNote.remindAt,
       body: md,
     );
     try {
@@ -834,8 +831,22 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 输入态只留在点击样式时的那个块：光标跨块移动或变成展开选区时清空，
     // 避免样式残留到下一段的输入（对齐 Word / Notion 的 typing style）。
     if (_typingStyleNodeId != null && selection != null) {
-      if (!selection.isCollapsed ||
-          selection.extent.nodeId != _typingStyleNodeId) {
+      bool clear = !selection.isCollapsed ||
+          selection.extent.nodeId != _typingStyleNodeId;
+      // 同一块内换行也要结束输入态：代码块里回车是插入字面 `\n`
+      // （节点不变），旧逻辑会让行内码/加粗延续到下一行。Notion、语雀
+      // 的行内样式遇到换行即失效，不会带过行。
+      if (!clear && selection.isCollapsed) {
+        final node = _editor.document.getNodeById(selection.extent.nodeId);
+        final position = selection.extent.nodePosition;
+        if (node is TextNode &&
+            position is TextNodePosition &&
+            position.offset > 0 &&
+            node.text.toPlainText().codeUnitAt(position.offset - 1) == 0x0A) {
+          clear = true;
+        }
+      }
+      if (clear) {
         _typingStyleNodeId = null;
         _composer.preferences.clearStyles();
       }
@@ -1521,15 +1532,6 @@ class _NewEditorPageState extends State<NewEditorPage>
           label: '编辑标签',
           icon: Icons.sell_outlined,
         ),
-        SheetAction<String>(
-          value: 'reminder',
-          label: _currentNote.remindAt == null
-              ? '设置提醒'
-              : '提醒：${formatEditorTime(_currentNote.remindAt!)}',
-          icon: _currentNote.remindAt == null
-              ? Icons.notifications_none_rounded
-              : Icons.notifications_active_outlined,
-        ),
         const SheetAction<String>(
           value: 'history',
           label: '历史版本',
@@ -1563,9 +1565,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       case 'tags':
         await _editTags();
         break;
-      case 'reminder':
-        await _editReminder();
-        break;
       case 'history':
         await _showVersionHistory();
         break;
@@ -1582,156 +1581,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     _currentNote = await widget.repository.togglePin(_currentNote);
     if (mounted) {
       setState(() {});
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // 提醒
-  // ---------------------------------------------------------------------------
-
-  Future<void> _editReminder() async {
-    final DateTime? current = _currentNote.remindAt;
-    final DateTime now = DateTime.now();
-    final String? action = await showXiaojiActionSheet<String>(
-      context: context,
-      title: current == null ? '设置提醒' : '当前提醒：${formatEditorTime(current)}',
-      actions: <SheetAction<String>>[
-        if (current != null)
-          const SheetAction<String>(
-            value: 'clear',
-            label: '移除提醒',
-            icon: Icons.notifications_off_outlined,
-            destructive: true,
-          ),
-        const SheetAction<String>(
-          value: 'today',
-          label: '今天 20:00',
-          icon: Icons.schedule_rounded,
-        ),
-        const SheetAction<String>(
-          value: 'tomorrow',
-          label: '明天 09:00',
-          icon: Icons.wb_sunny_outlined,
-        ),
-        const SheetAction<String>(
-          value: 'monday',
-          label: '下周一 09:00',
-          icon: Icons.event_outlined,
-        ),
-        const SheetAction<String>(
-          value: 'custom',
-          label: '选择日期与时间',
-          icon: Icons.edit_calendar_outlined,
-        ),
-      ],
-    );
-    if (action == null || !mounted) {
-      return;
-    }
-    DateTime nextAt(int hour) {
-      final DateTime candidate =
-          DateTime(now.year, now.month, now.day, hour);
-      return candidate.isAfter(now)
-          ? candidate
-          : candidate.add(const Duration(days: 1));
-    }
-
-    switch (action) {
-      case 'clear':
-        await _applyReminder(null);
-        break;
-      case 'today':
-        await _applyReminder(nextAt(20));
-        break;
-      case 'tomorrow':
-        await _applyReminder(
-          DateTime(now.year, now.month, now.day + 1, 9),
-        );
-        break;
-      case 'monday':
-        final int delta = (DateTime.monday - now.weekday + 7) % 7;
-        await _applyReminder(
-          DateTime(now.year, now.month, now.day + (delta == 0 ? 7 : delta), 9),
-        );
-        break;
-      case 'custom':
-        final DateTime? date = await showDatePicker(
-          context: context,
-          initialDate: now,
-          firstDate: DateTime(now.year, now.month, now.day),
-          lastDate: now.add(const Duration(days: 3650)),
-        );
-        if (date == null || !mounted) {
-          return;
-        }
-        final TimeOfDay? time = await showTimePicker(
-          context: context,
-          initialTime: const TimeOfDay(hour: 9, minute: 0),
-        );
-        if (time == null || !mounted) {
-          return;
-        }
-        final DateTime at = DateTime(
-          date.year,
-          date.month,
-          date.day,
-          time.hour,
-          time.minute,
-        );
-        if (!at.isAfter(DateTime.now())) {
-          _showHint('请选择将来的时间');
-          return;
-        }
-        await _applyReminder(at);
-        break;
-    }
-  }
-
-  Future<void> _applyReminder(DateTime? at) async {
-    if (at != null) {
-      final ReminderPermission permission =
-          await reminderService.ensurePermissions();
-      if (!mounted) {
-        return;
-      }
-      if (permission == ReminderPermission.denied) {
-        _showHint('通知权限未开启，提醒不会显示');
-        return;
-      }
-      if (permission == ReminderPermission.exactDenied) {
-        _showHint('未获精确提醒权限，提醒可能延迟几分钟');
-      }
-    }
-    _currentNote = _currentNote.copyWith(
-      remindAt: at,
-      clearRemind: at == null,
-    );
-    await _persistCurrentNote();
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-    _showHint(
-      at == null ? '已移除提醒' : '将在 ${formatEditorTime(at)} 提醒你',
-    );
-  }
-
-  /// 保存「元信息」类改动（提醒/标签等）：正文一起落盘，但不走节流保存。
-  Future<void> _persistCurrentNote() async {
-    final String md = serializeDocumentToXiaojiMarkdown(_document);
-    _lastSavedBody = md;
-    _dirty = false;
-    _updated = DateTime.now();
-    _currentNote = _currentNote.copyWith(updated: _updated, body: md);
-    await widget.repository.upsert(_currentNote, keepHistory: false);
-    await _syncReminders();
-  }
-
-  Future<void> _syncReminders() async {
-    try {
-      await reminderService.sync(widget.repository.notes);
-    } catch (error) {
-      debugPrint('提醒同步失败：$error');
     }
   }
 
@@ -1786,7 +1635,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       return;
     }
     await widget.repository.upsert(restored);
-    await _syncReminders();
     if (!mounted) {
       return;
     }
@@ -2263,7 +2111,11 @@ class _NewEditorPageState extends State<NewEditorPage>
       // 选择器/相机可能把焦点和选区抢走：插入前把快照选区还回来，
       // 图片才会落在用户原本的光标处。
       _restoreEditingSelection();
-      _commands.insertImageNode(relative);
+      // 新插入的图片默认用小图：正文里先给一个不打断阅读的缩略，
+      // 需要看细节时再通过图片菜单切「大图」（对齐主流笔记 App）。
+      _commands.insertImageNode(
+        imageUrlWithSize(relative, ImageDisplaySize.small),
+      );
     } catch (error) {
       // 图片插入失败不能崩编辑页：提示后照常继续编辑。
       _restoreEditingSelection();
@@ -2327,147 +2179,158 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncImeState(imeInset);
     // 面板/键盘交替时按当前 ime 结算锚点（工具条保持同一屏幕 Y）。
     _reconcilePanelWithKeyboard(imeInset);
-    return Scaffold(
-      backgroundColor: colors.page,
-      // 键盘避让根修的延续：视口真正缩短，编辑器视口贴键盘上沿。
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: <Widget>[
-            Column(
-              children: <Widget>[
-                _buildHeader(colors),
-                Container(height: 0.5, color: colors.dividerStrong),
-                Expanded(
-                  // 工具条是浮层，会盖住正文底部。工具条可见时给视口
-                  // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
-                  // 上方，不再出现「最后几行被工具栏/键盘压住」。
-                  //
-                  // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
-                  // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
-                  // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
-                  // （用户反馈）。预留量每帧精确计算，所以不用动画。
-                  child: AnimatedBuilder(
-                    animation: _editing,
-                    builder: (
-                      BuildContext context,
-                      Widget? child,
-                    ) {
-                      final double panelReserve = _toolbarAnchorIme == null
-                          ? 0
-                          : math.max(_toolbarAnchorIme! - imeInset, 0);
-                      // 预留必须在「工具栏真的会盖住正文」时才有意义：
-                      //  - 键盘可见（工具条贴键盘上沿）；
-                      //  - 面板/键盘交替（工具条被锚点钉住）；
-                      //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
-                      //    冻结，工具条位置要全程不变）。
-                      // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
-                      // 选区还在、工具条已经滑走，多预留的一条就会变成页面
-                      // 底部一片「工具栏白底」的遮挡（用户反馈）。
-                      final bool reserve =
-                          imeInset > 0 || _panelTransitioning || _panelOpen;
-                      // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
-                      // 不含 safe area、也不随键盘高度变化：
-                      //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
-                      //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
-                      //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
-                      final double reserveHeight =
-                          _toolbarHeight + panelReserve;
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          bottom: reserve ? reserveHeight : 0,
-                        ),
-                        child: child,
-                      );
-                    },
-                    child: Theme(
-                      // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
-                      // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
-                      // 成 accent，不动全局 app_theme。
-                      data: Theme.of(context).copyWith(
-                        checkboxTheme: CheckboxThemeData(
-                          fillColor: WidgetStateProperty.resolveWith(
-                            (states) => states.contains(WidgetState.selected)
-                                ? colors.accent
-                                : null,
+    return PopScope(
+      // 子菜单/Aa 面板展开时，侧滑先收起面板，不直接退出编辑页；
+      // 键盘可见时交给系统先收键盘（Android 默认），再侧滑才 pop。
+      canPop: !_panelExpanded,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop && _panelExpanded) {
+          _closePanel(showKeyboard: false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colors.page,
+        // 键盘避让根修的延续：视口真正缩短，编辑器视口贴键盘上沿。
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          bottom: false,
+          child: Stack(
+            children: <Widget>[
+              Column(
+                children: <Widget>[
+                  _buildHeader(colors),
+                  Container(height: 0.5, color: colors.dividerStrong),
+                  Expanded(
+                    // 工具条是浮层，会盖住正文底部。工具条可见时给视口
+                    // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
+                    // 上方，不再出现「最后几行被工具栏/键盘压住」。
+                    //
+                    // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
+                    // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
+                    // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
+                    // （用户反馈）。预留量每帧精确计算，所以不用动画。
+                    child: AnimatedBuilder(
+                      animation: _editing,
+                      builder: (
+                        BuildContext context,
+                        Widget? child,
+                      ) {
+                        final double panelReserve = _toolbarAnchorIme == null
+                            ? 0
+                            : math.max(_toolbarAnchorIme! - imeInset, 0);
+                        // 预留必须在「工具栏真的会盖住正文」时才有意义：
+                        //  - 键盘可见（工具条贴键盘上沿）；
+                        //  - 面板/键盘交替（工具条被锚点钉住）；
+                        //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
+                        //    冻结，工具条位置要全程不变）。
+                        // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
+                        // 选区还在、工具条已经滑走，多预留的一条就会变成页面
+                        // 底部一片「工具栏白底」的遮挡（用户反馈）。
+                        final bool reserve =
+                            imeInset > 0 || _panelTransitioning || _panelOpen;
+                        // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
+                        // 不含 safe area、也不随键盘高度变化：
+                        //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
+                        //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
+                        //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
+                        final double reserveHeight =
+                            _toolbarHeight + panelReserve;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: reserve ? reserveHeight : 0,
                           ),
-                          side: BorderSide(color: colors.tertiary, width: 1.6),
+                          child: child,
+                        );
+                      },
+                      child: Theme(
+                        // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
+                        // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
+                        // 成 accent，不动全局 app_theme。
+                        data: Theme.of(context).copyWith(
+                          checkboxTheme: CheckboxThemeData(
+                            fillColor: WidgetStateProperty.resolveWith(
+                              (states) => states.contains(WidgetState.selected)
+                                  ? colors.accent
+                                  : null,
+                            ),
+                            side:
+                                BorderSide(color: colors.tertiary, width: 1.6),
+                          ),
                         ),
-                      ),
-                      child: LayoutBuilder(
-                        builder: (
-                          BuildContext context,
-                          BoxConstraints constraints,
-                        ) {
-                          // 占位提示要和正文内容列对齐：SingleColumnLayout
-                          // 在宽度超过 maxWidth(640) 时把内容整体居中，
-                          // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
-                          // （用户反馈「提示语和光标没对齐」）。
-                          const double contentMaxWidth = 640;
-                          final bool centered =
-                              constraints.maxWidth > contentMaxWidth;
-                          final double gutter = centered
-                              ? (constraints.maxWidth - contentMaxWidth) / 2 +
-                                  AppSpace.page
-                              : AppSpace.page;
-                          return Stack(
-                            children: <Widget>[
-                              SuperEditorAndroidControlsScope(
-                                controller: _androidControls,
-                                child: _buildEditor(colors),
-                              ),
-                              // 空文档占位提示（新建小记时的 tip）。
-                              // 不拦截点击：点它应该像点正文一样把光标放进来。
-                              // top 12 与段落规则里的 `padding top: 12` 一致，
-                              // 文字行盒与光标起点因此完全重合。
-                              Positioned(
-                                left: gutter,
-                                top: 12,
-                                right: gutter,
-                                child: IgnorePointer(
-                                  child: ValueListenableBuilder<bool>(
-                                    valueListenable: _documentEmpty,
-                                    builder: (
-                                      BuildContext context,
-                                      bool empty,
-                                      _,
-                                    ) {
-                                      if (!empty) {
-                                        return const SizedBox.shrink();
-                                      }
-                                      return Text(
-                                        '开始记录…',
-                                        style: TextStyle(
-                                          fontSize: AppFontSize.summary,
-                                          height: 1.7,
-                                          letterSpacing: 0.3,
-                                          leadingDistribution:
-                                              TextLeadingDistribution.even,
-                                          color: colors.tertiary,
-                                        ),
-                                      );
-                                    },
+                        child: LayoutBuilder(
+                          builder: (
+                            BuildContext context,
+                            BoxConstraints constraints,
+                          ) {
+                            // 占位提示要和正文内容列对齐：SingleColumnLayout
+                            // 在宽度超过 maxWidth(640) 时把内容整体居中，
+                            // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
+                            // （用户反馈「提示语和光标没对齐」）。
+                            const double contentMaxWidth = 640;
+                            final bool centered =
+                                constraints.maxWidth > contentMaxWidth;
+                            final double gutter = centered
+                                ? (constraints.maxWidth - contentMaxWidth) / 2 +
+                                    AppSpace.page
+                                : AppSpace.page;
+                            return Stack(
+                              children: <Widget>[
+                                SuperEditorAndroidControlsScope(
+                                  controller: _androidControls,
+                                  child: _buildEditor(colors),
+                                ),
+                                // 空文档占位提示（新建小记时的 tip）。
+                                // 不拦截点击：点它应该像点正文一样把光标放进来。
+                                // top 12 与段落规则里的 `padding top: 12` 一致，
+                                // 文字行盒与光标起点因此完全重合。
+                                Positioned(
+                                  left: gutter,
+                                  top: 12,
+                                  right: gutter,
+                                  child: IgnorePointer(
+                                    child: ValueListenableBuilder<bool>(
+                                      valueListenable: _documentEmpty,
+                                      builder: (
+                                        BuildContext context,
+                                        bool empty,
+                                        _,
+                                      ) {
+                                        if (!empty) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Text(
+                                          '开始记录…',
+                                          style: TextStyle(
+                                            fontSize: AppFontSize.summary,
+                                            height: 1.7,
+                                            letterSpacing: 0.3,
+                                            leadingDistribution:
+                                                TextLeadingDistribution.even,
+                                            color: colors.tertiary,
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
-                ),
-                // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
-                _buildTagBar(colors, imeInset),
-              ],
-            ),
-            // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
-            if (_panelExpanded) _buildPanelSheet(colors, imeInset),
-            // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
-            // 挪光标（旧版实测的坑）。
-            _buildToolbar(imeInset),
-          ],
+                  // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
+                  _buildTagBar(colors, imeInset),
+                ],
+              ),
+              // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
+              if (_panelExpanded) _buildPanelSheet(colors, imeInset),
+              // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
+              // 挪光标（旧版实测的坑）。
+              _buildToolbar(imeInset),
+            ],
+          ),
         ),
       ),
     );
@@ -2791,14 +2654,14 @@ class _NewEditorPageState extends State<NewEditorPage>
       // 「高亮 / 行内码在详情页完全没效果，列表摘要却正常」的根因。
       inlineTextStyler: (Set<Attribution> attributions, TextStyle baseStyle) =>
           xiaojiInlineTextStyler(
-            attributions,
-            baseStyle,
-            textColor: colors.text,
-            accentColor: colors.accent,
-            mutedColor: colors.tertiary,
-            codeBackground: colors.surface2,
-            highlightBackground: colors.accentBg,
-          ),
+        attributions,
+        baseStyle,
+        textColor: colors.text,
+        accentColor: colors.accent,
+        mutedColor: colors.tertiary,
+        codeBackground: colors.surface2,
+        highlightBackground: colors.accentBg,
+      ),
       addRulesAfter: <StyleRule>[
         StyleRule(
           BlockSelector.all,
@@ -3678,7 +3541,8 @@ class _LabListItemComponentBuilder implements ComponentBuilder {
         _delegate.createViewModel(document, node);
     // 有序列表：内核只算「同层第几个」，起始编号存在节点 metadata 里，
     // 这里补上偏移，`5.` 开头的列表在编辑器里也显示 5、6、7。
-    if (viewModel is OrderedListItemComponentViewModel && node is ListItemNode) {
+    if (viewModel is OrderedListItemComponentViewModel &&
+        node is ListItemNode) {
       final ({int ordinal, int start})? number =
           orderedListItemNumber(document, node);
       if (number != null) {
@@ -3790,7 +3654,8 @@ class _LabCodeBlockComponentBuilder implements ComponentBuilder {
 
   /// 复用官方 builder 构造 ViewModel（方向、缩进、样式构建器等默认值），
   /// 只接管「渲染成什么组件」这一步。
-  static const ParagraphComponentBuilder _paragraph = ParagraphComponentBuilder();
+  static const ParagraphComponentBuilder _paragraph =
+      ParagraphComponentBuilder();
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -4092,8 +3957,7 @@ class _VersionHistorySheet extends StatelessWidget {
                 shrinkWrap: true,
                 padding: const EdgeInsets.only(bottom: AppSpace.md),
                 itemCount: versions.length,
-                separatorBuilder: (BuildContext context, int index) =>
-                    Divider(
+                separatorBuilder: (BuildContext context, int index) => Divider(
                   height: 0.5,
                   thickness: 0.5,
                   indent: AppSpace.lg,

@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../editor/block.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
-import '../reminders/reminder_service.dart';
 import '../util/date_format.dart';
 import 'note_store.dart';
 import 'search_index.dart';
@@ -295,10 +294,6 @@ class NoteRepository extends ChangeNotifier {
 
   /// 新增或更新。落盘成功后才更新内存，避免出现「界面有、磁盘没有」的假象。
   Future<void> upsert(Note note, {bool keepHistory = true}) async {
-    final int previousIndex =
-        _notes.indexWhere((Note item) => item.id == note.id);
-    final DateTime? previousRemindAt =
-        previousIndex >= 0 ? _notes[previousIndex].remindAt : null;
     await _store.saveNote(note, keepHistory: keepHistory);
     // 锁定笔记的明文只留在当前编辑页：列表/搜索拿到的永远是没有正文的
     // 副本，避免首页摘要或标签云把锁定内容带出来。
@@ -315,10 +310,6 @@ class NoteRepository extends ChangeNotifier {
     _index?.upsertNote(stored);
     _invalidateSearchCache();
     notifyListeners();
-    // 只有提醒时间变化才需要重排系统通知，避免每次自动保存都全量对账。
-    if (previousRemindAt != note.remindAt) {
-      unawaited(reminderService.sync(_notes));
-    }
   }
 
   Future<void> remove(Note note) async {
@@ -327,8 +318,6 @@ class NoteRepository extends ChangeNotifier {
     _index?.removeNote(note.id);
     _invalidateSearchCache();
     notifyListeners();
-    // 删除后必须取消对应提醒，否则还会在预定时间弹出。
-    unawaited(reminderService.sync(_notes));
   }
 
   /// 回收站列表（按删除时间倒序）。
@@ -338,13 +327,7 @@ class NoteRepository extends ChangeNotifier {
   Future<Note?> restoreFromTrash(TrashedNote trashed) async {
     final note = await _store.restoreFromTrash(trashed);
     await load();
-    unawaited(reminderService.sync(_notes));
     return note;
-  }
-
-  /// 批量恢复/导入后重新对账提醒（恢复的笔记可能带提醒）。
-  Future<void> syncReminders() async {
-    await reminderService.sync(_notes);
   }
 
   /// 删除后撤销：按 id 找回最近一条回收站记录。
@@ -354,7 +337,6 @@ class NoteRepository extends ChangeNotifier {
       return false;
     }
     await load();
-    unawaited(reminderService.sync(_notes));
     return true;
   }
 

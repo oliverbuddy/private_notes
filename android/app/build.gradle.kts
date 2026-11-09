@@ -22,9 +22,6 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // flutter_local_notifications 的定时通知依赖 java.time，需要开启脱糖
-        // （否则 Android 7/8 上定时提醒会在运行时崩溃）。
-        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -90,6 +87,4 @@ flutter {
     source = "../.."
 }
 
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-}
+

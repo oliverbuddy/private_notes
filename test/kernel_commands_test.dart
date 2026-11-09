@@ -391,6 +391,22 @@ void main() {
     }
   });
 
+  test('光标在代码块内：结构「代码块」按钮点亮', () {
+    final ParagraphNode code = deserializeXiaojiMarkdown(
+      '```dart\nvoid main() {}\n```',
+    ).getNodeAt(0)! as ParagraphNode;
+    editor.execute(<EditRequest>[
+      InsertNodeAtIndexRequest(nodeIndex: 0, newNode: code),
+    ]);
+    placeCaretAt(0, offset: 2);
+
+    expect(
+      commands.computeActiveCommands(),
+      contains(MarkdownCommand.codeBlock),
+      reason: '光标在代码块里，Aa 面板的结构行应点亮「代码块」',
+    );
+  });
+
   /// 光标停在已有样式的文字里：按钮要按「光标处样式」点亮，
   /// 而不是只看输入态。否则用户看不出当前这段本来是加粗的。
   test('光标在已有加粗文字中：加粗按钮点亮（即使输入态为空）', () {

@@ -93,7 +93,6 @@ class NoteSettings {
     this.externalBackupUri,
     this.lastExternalBackupAt,
     this.backupTipShown = false,
-    this.lastReminderSeenAt,
   });
 
   final AppThemeMode theme;
@@ -127,12 +126,6 @@ class NoteSettings {
   /// 主页的「数据只存在本机」提示是否已经展示/关闭过（只提醒一次）。
   final bool backupTipShown;
 
-  /// 上一次检查「错过提醒」的时间（ISO 字符串）。
-  ///
-  /// 启动/回前台时用它划一个窗口：只汇总这段时间内到期、但没弹出来的
-  /// 提醒，避免把几个月前的历史提醒一次性糊到用户脸上。
-  final String? lastReminderSeenAt;
-
   ThemeMode get themeMode => theme.themeMode;
 
   NoteSettings copyWith({
@@ -147,7 +140,6 @@ class NoteSettings {
     String? externalBackupUri,
     String? lastExternalBackupAt,
     bool? backupTipShown,
-    String? lastReminderSeenAt,
     bool clearExternalBackup = false,
   }) {
     return NoteSettings(
@@ -166,7 +158,6 @@ class NoteSettings {
       lastExternalBackupAt:
           lastExternalBackupAt ?? this.lastExternalBackupAt,
       backupTipShown: backupTipShown ?? this.backupTipShown,
-      lastReminderSeenAt: lastReminderSeenAt ?? this.lastReminderSeenAt,
     );
   }
 
@@ -183,8 +174,6 @@ class NoteSettings {
         if (lastExternalBackupAt != null)
           'lastExternalBackupAt': lastExternalBackupAt,
         'backupTipShown': backupTipShown,
-        if (lastReminderSeenAt != null)
-          'lastReminderSeenAt': lastReminderSeenAt,
       };
 
   /// 容错解析：字段缺失或类型不对都回落到默认值，配置文件坏掉不能让 app 起不来。
@@ -204,7 +193,6 @@ class NoteSettings {
     final externalBackupUri = json['externalBackupUri'];
     final lastExternalBackupAt = json['lastExternalBackupAt'];
     final backupTipShown = json['backupTipShown'];
-    final lastReminderSeenAt = json['lastReminderSeenAt'];
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
       density: ListDensity.fromWire(density is String ? density : null),
@@ -222,10 +210,6 @@ class NoteSettings {
               ? lastExternalBackupAt
               : null,
       backupTipShown: backupTipShown is bool ? backupTipShown : false,
-      lastReminderSeenAt:
-          lastReminderSeenAt is String && lastReminderSeenAt.isNotEmpty
-              ? lastReminderSeenAt
-              : null,
     );
   }
 
@@ -242,8 +226,7 @@ class NoteSettings {
       other.secureScreen == secureScreen &&
       other.externalBackupUri == externalBackupUri &&
       other.lastExternalBackupAt == lastExternalBackupAt &&
-      other.backupTipShown == backupTipShown &&
-      other.lastReminderSeenAt == lastReminderSeenAt;
+      other.backupTipShown == backupTipShown;
 
   @override
   int get hashCode => Object.hash(
@@ -258,6 +241,5 @@ class NoteSettings {
         externalBackupUri,
         lastExternalBackupAt,
         backupTipShown,
-        lastReminderSeenAt,
       );
 }

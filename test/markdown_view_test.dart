@@ -138,6 +138,53 @@ void main() {
     });
   });
 
+  group('代码块整宽卡片', () {
+    testWidgets('列表摘要里的代码块与详情一样铺满整行', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 300,
+                child: MarkdownBlockView(
+                  text: '```dart\nvoid main() {}\n```',
+                  baseSize: 16,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final Finder code = find.text('void main() {}');
+      expect(code, findsOneWidget);
+      final Finder card = find
+          .ancestor(of: code, matching: find.byType(Container))
+          .first;
+      expect(
+        tester.getSize(card).width,
+        closeTo(300, 1),
+        reason: '摘要里的代码块也要是整宽卡片，不能只包住文字',
+      );
+    });
+  });
+
+  group('标签胶囊', () {
+    test('正文里的标签字号压到正文的 0.78，避免背景过大', () {
+      final List<InlineSpan> spans = markdownSpans(
+        '今天 #工作 完成',
+        const TextStyle(fontSize: 16),
+        AppColors.light,
+      );
+      final WidgetSpan tagSpan = spans.whereType<WidgetSpan>().first;
+      final Container capsule = tagSpan.child as Container;
+      final Text label = capsule.child! as Text;
+      expect(label.style!.fontSize, closeTo(16 * 0.78, 0.01));
+    });
+  });
+
   group('excerptSource', () {
     test('表格行压成单行，分隔行不出现', () {
       final String source = excerptSource(

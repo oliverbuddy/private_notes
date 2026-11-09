@@ -649,6 +649,9 @@ class KernelCommands {
         active.add(MarkdownCommand.h3);
       } else if (blockType == blockquoteAttribution) {
         active.add(MarkdownCommand.quote);
+      } else if (blockType == codeAttribution) {
+        // 光标在代码块内，结构行的「代码块」按钮要亮（用户反馈不亮）。
+        active.add(MarkdownCommand.codeBlock);
       }
     }
     if (node is TaskNode) {

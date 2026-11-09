@@ -9,7 +9,6 @@ import '../editor/lab/new_editor_page.dart';
 import '../security/unlock.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
-import '../reminders/reminder_service.dart';
 import '../settings/settings_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
@@ -19,7 +18,6 @@ import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/share.dart';
-import '../util/date_format.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
 
@@ -58,50 +56,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     newNoteRequests.addListener(_onShortcutNewNote);
-    reminderService.openNoteRequest.addListener(_onReminderOpenNote);
     if (widget.startWithNewNote) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openEditor(null));
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumeShared());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkMissedReminders());
-  }
-
-  /// 点击提醒通知后打开对应笔记（冷启动与前台都会走到）。
-  void _onReminderOpenNote() {
-    final String? noteId = reminderService.openNoteRequest.value;
-    if (noteId == null || !mounted) {
-      return;
-    }
-    reminderService.openNoteRequest.value = null;
-    final Note? note = _repo.notes.where((Note n) => n.id == noteId).firstOrNull;
-    if (note == null) {
-      showSnack(context, message: '这条小记已被删除');
-      return;
-    }
-    _openEditor(note);
-  }
-
-  /// 启动时汇总「上次检查之后已经错过」的提醒，只提示一次。
-  Future<void> _checkMissedReminders() async {
-    final NoteSettings settings = _repo.settings;
-    final DateTime? since = parseIsoLocal(settings.lastReminderSeenAt ?? '');
-    final List<Note> missed = ReminderService.missedReminders(
-      _repo.notes,
-      since: since,
-    );
-    // 无论有没有错过，都把检查点推进到当前时间，避免下次重复提示。
-    await _repo.updateSettings(
-      settings.copyWith(lastReminderSeenAt: formatIsoLocal(DateTime.now())),
-    );
-    if (!mounted || missed.isEmpty) {
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext sheetContext) =>
-          _MissedRemindersSheet(missed: missed, onOpen: _openEditor),
-    );
   }
 
   @override
@@ -163,7 +121,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     newNoteRequests.removeListener(_onShortcutNewNote);
-    reminderService.openNoteRequest.removeListener(_onReminderOpenNote);
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -1161,124 +1118,4 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// 「错过的提醒」汇总弹层：只列最近 5 条，点一条直接打开对应小记。
-class _MissedRemindersSheet extends StatelessWidget {
-  const _MissedRemindersSheet({required this.missed, required this.onOpen});
-
-  final List<Note> missed;
-  final ValueChanged<Note> onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    final List<Note> shown = missed.take(5).toList();
-    return SafeArea(
-      top: false,
-      child: Container(
-        margin: const EdgeInsets.all(AppSpace.md),
-        decoration: BoxDecoration(
-          color: colors.page,
-          borderRadius: BorderRadius.circular(AppRadius.sheet),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.lg,
-                AppSpace.lg,
-                AppSpace.lg,
-                AppSpace.sm,
-              ),
-              child: Text(
-                '错过的提醒',
-                style: TextStyle(
-                  fontSize: AppFontSize.subtitle,
-                  fontWeight: AppWeight.semibold,
-                  color: colors.text,
-                ),
-              ),
-            ),
-            for (final Note note in shown)
-              InkWell(
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onOpen(note);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpace.lg,
-                    vertical: AppSpace.md,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Icon(
-                        Icons.notifications_none_rounded,
-                        size: AppIcon.dense,
-                        color: colors.tertiary,
-                      ),
-                      const SizedBox(width: AppSpace.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              note.locked
-                                  ? '已锁定的小记'
-                                  : plainSummary(note.body).split('\n').first,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: AppFontSize.value,
-                                color: colors.text,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              formatListTime(note.remindAt!),
-                              style: TextStyle(
-                                fontSize: AppFontSize.meta,
-                                color: colors.tertiary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (missed.length > shown.length)
-              Padding(
-                padding: const EdgeInsets.only(
-                  left: AppSpace.lg,
-                  right: AppSpace.lg,
-                  bottom: AppSpace.sm,
-                ),
-                child: Text(
-                  '还有 ${missed.length - shown.length} 条',
-                  style: TextStyle(
-                    fontSize: AppFontSize.meta,
-                    color: colors.tertiary,
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.lg,
-                AppSpace.sm,
-                AppSpace.lg,
-                AppSpace.lg,
-              ),
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('知道了'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+/// 「错过的提醒」汇总弹层已随提醒功能一并移除。

@@ -348,8 +348,8 @@ class MarkdownTextStylePanel extends StatelessWidget {
     this.showTopDivider = true,
   });
 
-  /// 面板固定高度：标题/段落/结构各 56、文字行两行 116，加下留白 8×2。
-  static const double height = 300;
+  /// 面板固定高度：标题/段落/结构各 56、文字行两行 110，加下留白 8×2。
+  static const double height = 294;
 
   final Set<MarkdownCommand> active;
   final ValueChanged<MarkdownCommand> onPick;
@@ -417,11 +417,11 @@ class MarkdownTextStylePanel extends StatelessWidget {
                 onPicked: onPick,
               ),
             ),
-            // 文字行 6 项：3 列 × 2 行。一行 6 列时每列仅约 43dp，
-            // 「删除线 / 行内码」会被 ellipsis 截断（用户反馈显示不全）。
+            // 文字行两行 48 + 行距 6 + 上下各 4 = 110，与其它分组的
+            // 56（48 + 上下各 4）共用同一套上下留白，组间距才一致。
             _PanelGroupRow(
               label: '文字',
-              height: 116,
+              height: 110,
               child: _ActionGrid(
                 items: _inlineItems,
                 columns: 3,
