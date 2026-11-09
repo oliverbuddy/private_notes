@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -13,6 +14,7 @@ import 'package:xiaoji/editor/lab/list_style.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
 import 'package:xiaoji/editor/markdown_view.dart' show CodeBlockCardStyle;
+import 'package:xiaoji/editor/note_image_share.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
 import 'package:xiaoji/ui/quote_block.dart';
@@ -674,5 +676,65 @@ void main() {
       reason: '末尾空行要变回普通段落（退出代码块）',
     );
     expect(below.text.toPlainText(), isEmpty);
+  });
+
+  testWidgets('分享长图直接复用详情文档布局（表格/代码块完整、宽 1080）',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final NoteRepository repository =
+        await _createRepository(tester, 'xiaoji_share_layout_');
+    await tester.pumpWidget(
+      _buildEditor(
+        repository,
+        _note(
+          'share_layout',
+          '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 2 |\n'
+              '| 香蕉 | 3 |\n\n```dart\nvoid main() {}\n```',
+        ),
+        autoFocus: false,
+      ),
+    );
+    await _pumpFrames(tester, frames: 12);
+
+    // 文档布局在滚动容器里被 SliverToBoxAdapter 包着；
+    // 分享渲染必须能把这层 sliver 拆掉，取到真正的内容盒子。
+    final Finder slivers = find.descendant(
+      of: find.byType(SuperEditor),
+      matching: find.byType(SliverToBoxAdapter),
+    );
+    final RenderSliverToBoxAdapter layout = tester
+        .renderObjectList<RenderSliverToBoxAdapter>(slivers)
+        .firstWhere((RenderSliverToBoxAdapter sliver) {
+      final RenderBox? child = sliver.child;
+      return child != null && child.size.height > 150;
+    });
+
+    final Uint8List? bytes = await tester.runAsync(() {
+      return renderDocumentShareImage(
+        documentLayout: layout,
+        background: const Color(0xFFFFFFFF),
+      );
+    });
+    expect(bytes, isNotNull);
+
+    final ui.Image? image = await tester.runAsync(() async {
+      final ui.Codec codec = await ui.instantiateImageCodec(bytes!);
+      final ui.FrameInfo frame = await codec.getNextFrame();
+      return frame.image;
+    });
+    expect(image, isNotNull);
+    // 360dp 内容宽 × 3 倍率 → 1080px，与详情页同宽同排版。
+    expect(image!.width, 1080);
+    expect(image.height, greaterThan(450));
+    image.dispose();
+
+    // 分享渲染走的是真实异步编码，可能留下编辑器/仓库的防抖计时器；
+    // 收尾时把树和计时器一起清掉，避免测试框架报 pending timer。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 2));
   });
 }

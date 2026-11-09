@@ -184,6 +184,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
   final FocusNode _editorFocus = FocusNode(debugLabel: 'xiaoji-editor');
 
+  /// 文档布局的渲染入口：分享长图直接复用它，保证与详情页同一份排版。
+  final GlobalKey _documentLayoutKey = GlobalKey();
+
   /// 输入法层粘贴拦截器：覆盖 Gboard 剪贴板建议这条路径。
   late final PasteImeDecorator _pasteImeDecorator;
 
@@ -1777,22 +1780,38 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  /// 把当前详情（实时文档内容 + 标签）渲染成一张长图并调起系统分享。
+  /// 把当前详情渲染成整篇长图并调起系统分享。
   ///
-  /// 用实时文档而不是 `_currentNote.body`：还没落盘的修改也要出现在分享图里。
-  /// 生成期间输入法先收起，避免分享面板弹出时键盘还挂着。
+  /// 直接取详情页文档布局的渲染对象（`_documentLayoutKey`），所以分享图与
+  /// 详情是同一份排版：列宽、换行、表格、代码块、图片全部一致，而不是另外
+  /// 用 Markdown 再渲染一遍（那样宽度不同会导致每行字数不一致、表格丢失）。
   Future<void> _shareAsImage() async {
+    if (_documentEmpty.value) {
+      _showHint('空白笔记没有可分享的内容');
+      return;
+    }
+    final AppColors colors = AppColors.of(context);
+    // 分享图里不应出现光标/选区高亮：先失焦并清空选区，再等这一帧画完。
     FocusManager.instance.primaryFocus?.unfocus();
+    _composer.clearSelection();
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) {
+      return;
+    }
+    final RenderObject? layout =
+        _documentLayoutKey.currentContext?.findRenderObject();
+    if (layout == null) {
+      _showHint('分享失败：内容还没准备好');
+      return;
+    }
     try {
       await shareNoteAsImage(
-        markdown: serializeDocumentToXiaojiMarkdown(_document),
-        tags: _currentNote.tags,
-        created: _currentNote.created,
-        store: widget.repository.store,
+        documentLayout: layout,
+        background: colors.page,
       );
     } catch (error) {
       if (mounted) {
-        showSnack(context, message: '分享失败：$error');
+        _showHint('分享失败：$error');
       }
     }
   }
@@ -2578,6 +2597,8 @@ class _NewEditorPageState extends State<NewEditorPage>
         // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
         // _ensureCaretVisible），内部自建的控制器拿不到位置。
         scrollController: _editorScroll,
+        // 分享长图用的布局入口：直接取这份渲染结果，宽度/换行/表格与详情一致。
+        documentLayoutKey: _documentLayoutKey,
         // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
         selectionStyle: SelectionStyles(
           // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
