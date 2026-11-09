@@ -97,21 +97,122 @@ class KernelCommands {
 
   /// 行内样式切换。
   ///
-  /// 折叠光标（没选中文字）时 [CommonEditorOperations.toggleAttributionsOnSelection]
-  /// 会直接返回 false —— 内核只对非空选区生效。之前用户在只有光标时点
-  /// 「加粗 / 斜体 / 删除线 / 行内码 / 高亮」毫无反应，就是这里漏了分支。
-  /// 对齐官方移动工具栏的做法：折叠光标写进 composer 的输入态，下一次
-  /// 输入的字符自动带上该样式。
+  /// 展开选区：直接切换选区样式（内核原生）。
+  ///
+  /// 折叠光标（没选中文字）对齐主流编辑器（Word / Notion / 语雀）：
+  ///  - 点亮态 = 输入态 ∪ **光标处字符的实际样式**；
+  ///  - 未点亮 → 写入输入态，接下来输入的文字带该样式；
+  ///  - 已点亮 → 关闭：先清输入态，再把光标所在那段连续样式去掉。
+  /// 之前只 toggle 输入态，光标停在已有的加粗文字里时按钮不亮、点一下又
+  /// 只是「开输入态」，用户会觉得「点了没反应 / 状态对不上」（用户反馈）。
   void _toggleInline(Set<Attribution> attributions) {
     final selection = composer.selection;
     if (selection == null) {
       return;
     }
-    if (selection.isCollapsed) {
-      ops.toggleComposerAttributions(attributions);
-    } else {
+    if (!selection.isCollapsed) {
       ops.toggleAttributionsOnSelection(attributions);
+      return;
     }
+    final TextNode? node = _selectedNode;
+    if (node == null) {
+      return;
+    }
+    final int offset =
+        (selection.extent.nodePosition as TextNodePosition).offset;
+    final Set<Attribution> input = composer.preferences.currentAttributions;
+    bool isOn(Attribution attribution) =>
+        input.contains(attribution) ||
+        _attributionActiveAt(node.text, attribution, offset);
+
+    if (!attributions.every(isOn)) {
+      ops.toggleComposerAttributions(attributions);
+      return;
+    }
+
+    // 已点亮：清输入态 + 去掉光标处连续的样式片段。
+    for (final Attribution attribution in attributions) {
+      if (input.contains(attribution)) {
+        composer.preferences.removeStyle(attribution);
+      }
+      final ({int start, int end})? range =
+          _attributionRange(node.text, attribution, offset);
+      if (range == null) {
+        continue;
+      }
+      editor.execute(<EditRequest>[
+        ChangeSelectionRequest(
+          DocumentSelection(
+            base: DocumentPosition(
+              nodeId: node.id,
+              nodePosition: TextNodePosition(offset: range.start),
+            ),
+            extent: DocumentPosition(
+              nodeId: node.id,
+              nodePosition: TextNodePosition(offset: range.end),
+            ),
+          ),
+          SelectionChangeType.expandSelection,
+          SelectionReason.userInteraction,
+        ),
+      ]);
+      ops.toggleAttributionsOnSelection(<Attribution>{attribution});
+    }
+    // 收尾把光标放回原处（toggle 后选区仍是刚选中的片段）。
+    editor.execute(<EditRequest>[
+      ChangeSelectionRequest(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: offset),
+          ),
+        ),
+        SelectionChangeType.placeCaret,
+        SelectionReason.userInteraction,
+      ),
+    ]);
+  }
+
+  /// 光标处是否带该行内样式。
+  ///
+  /// 光标在字符之间：优先看左侧字符（光标停在加粗段末尾仍显示加粗，
+  /// 与 Word / Notion 一致）；行首看右侧字符。
+  bool _attributionActiveAt(
+    AttributedText text,
+    Attribution attribution,
+    int offset,
+  ) {
+    if (text.isEmpty) {
+      return false;
+    }
+    final int probe = offset > 0 ? offset - 1 : offset;
+    if (probe < 0 || probe >= text.length) {
+      return false;
+    }
+    return text.spans.hasAttributionAt(probe, attribution: attribution);
+  }
+
+  /// 光标处该样式覆盖的连续区间 `[start, end)`。
+  ({int start, int end})? _attributionRange(
+    AttributedText text,
+    Attribution attribution,
+    int offset,
+  ) {
+    if (!_attributionActiveAt(text, attribution, offset)) {
+      return null;
+    }
+    final int probe = offset > 0 ? offset - 1 : offset;
+    int start = probe;
+    while (start > 0 &&
+        text.spans.hasAttributionAt(start - 1, attribution: attribution)) {
+      start -= 1;
+    }
+    int end = probe + 1;
+    while (end < text.length &&
+        text.spans.hasAttributionAt(end, attribution: attribution)) {
+      end += 1;
+    }
+    return (start: start, end: end);
   }
 
   /// 缩进/减少缩进。列表项走 ops；待办行内核有专用请求
@@ -560,24 +661,30 @@ class KernelCommands {
     }
 
     // 行内格式：
-    //  - 折叠光标：读 composer 的「下一次输入样式」。用户在 Aa 面板点的
-    //    加粗/斜体就写在这里，不读的话按钮不点亮、看起来像没生效；
+    //  - 折叠光标：点亮态 = 输入态 ∪ 光标处字符的实际样式。只读输入态时，
+    //    光标停在已有的加粗/高亮文字里按钮不亮，用户无法判断当前状态
+    //    （主流编辑器 Word / Notion / 语雀都会按光标处样式点亮）；
     //  - 展开选区：样式覆盖整个选区才点亮。
     if (selection.isCollapsed) {
       final Set<Attribution> input = composer.preferences.currentAttributions;
-      if (input.contains(boldAttribution)) {
+      final int offset =
+          (selection.extent.nodePosition as TextNodePosition).offset;
+      bool isOn(Attribution attribution) =>
+          input.contains(attribution) ||
+          _attributionActiveAt(node.text, attribution, offset);
+      if (isOn(boldAttribution)) {
         active.add(MarkdownCommand.bold);
       }
-      if (input.contains(italicsAttribution)) {
+      if (isOn(italicsAttribution)) {
         active.add(MarkdownCommand.italic);
       }
-      if (input.contains(strikethroughAttribution)) {
+      if (isOn(strikethroughAttribution)) {
         active.add(MarkdownCommand.strike);
       }
-      if (input.contains(codeAttribution)) {
+      if (isOn(codeAttribution)) {
         active.add(MarkdownCommand.code);
       }
-      if (input.contains(highlightAttribution)) {
+      if (isOn(highlightAttribution)) {
         active.add(MarkdownCommand.highlight);
       }
     } else if (selection.base.nodeId == selection.extent.nodeId) {

@@ -348,8 +348,8 @@ class MarkdownTextStylePanel extends StatelessWidget {
     this.showTopDivider = true,
   });
 
-  /// 面板固定高度：4 行 × 56 + 上下留白 8×2。
-  static const double height = 240;
+  /// 面板固定高度：标题/段落/结构各 56、文字行两行 116，加下留白 8×2。
+  static const double height = 300;
 
   final Set<MarkdownCommand> active;
   final ValueChanged<MarkdownCommand> onPick;
@@ -372,7 +372,9 @@ class MarkdownTextStylePanel extends StatelessWidget {
     (MarkdownCommand.bold, Icons.format_bold_rounded, '加粗'),
     (MarkdownCommand.italic, Icons.format_italic_rounded, '斜体'),
     (MarkdownCommand.strike, Icons.strikethrough_s_rounded, '删除线'),
-    (MarkdownCommand.code, Icons.code_rounded, '行内码'),
+    // 行内码用终端图标，与「结构 → 代码块」的 code 图标区分开：
+    // 两者此前同图标，是最容易被误点的入口（用户反馈「分不清」）。
+    (MarkdownCommand.code, Icons.terminal_rounded, '行内码'),
     (MarkdownCommand.highlight, Icons.format_color_fill_rounded, '高亮'),
     (MarkdownCommand.link, Icons.link_rounded, '链接'),
   ];
@@ -415,10 +417,14 @@ class MarkdownTextStylePanel extends StatelessWidget {
                 onPicked: onPick,
               ),
             ),
+            // 文字行 6 项：3 列 × 2 行。一行 6 列时每列仅约 43dp，
+            // 「删除线 / 行内码」会被 ellipsis 截断（用户反馈显示不全）。
             _PanelGroupRow(
               label: '文字',
-              child: _ActionRow(
+              height: 116,
+              child: _ActionGrid(
                 items: _inlineItems,
+                columns: 3,
                 active: active,
                 onPicked: onPick,
               ),
@@ -517,6 +523,58 @@ class _ActionRow extends StatelessWidget {
               selected: active.contains(items[i].$1),
               onTap: () => onPicked(items[i].$1),
             ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// 多行动作网格：固定 [columns] 列等宽，超出自动换行。
+///
+/// 行内样式 6 项用 3 列 × 2 行：列宽从一行 6 列的约 43dp 提到约 92dp，
+/// 「删除线 / 行内码」不再被省略号截断；不足一行时右侧留空占位，
+/// 保证列宽与其它行一致。
+class _ActionGrid extends StatelessWidget {
+  const _ActionGrid({
+    required this.items,
+    required this.active,
+    required this.onPicked,
+    required this.columns,
+  });
+
+  final List<(MarkdownCommand, IconData, String)> items;
+  final Set<MarkdownCommand> active;
+  final ValueChanged<MarkdownCommand> onPicked;
+  final int columns;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <List<(MarkdownCommand, IconData, String)>>[];
+    for (var i = 0; i < items.length; i += columns) {
+      final end = i + columns < items.length ? i + columns : items.length;
+      rows.add(items.sublist(i, end));
+    }
+    return Column(
+      children: <Widget>[
+        for (var r = 0; r < rows.length; r++) ...<Widget>[
+          if (r > 0) const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              for (var c = 0; c < columns; c++) ...<Widget>[
+                if (c > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: c < rows[r].length
+                      ? _ActionCell(
+                          icon: rows[r][c].$2,
+                          label: rows[r][c].$3,
+                          selected: active.contains(rows[r][c].$1),
+                          onTap: () => onPicked(rows[r][c].$1),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ],
           ),
         ],
       ],

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
@@ -411,6 +412,105 @@ void main() {
           reason: 'H4 必须比正文更重，否则与正文无异');
       // 正文没有显式字重（走默认 400），所以只校验它确实不是 semibold。
       expect(body.style?.fontWeight, isNot(AppWeight.semibold));
+    });
+
+    testWidgets('代码块：字号/行高/等宽与列表摘要同源',
+        (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_style_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_style', '```dart\nvoid main() {}\n```'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder code =
+          find.textContaining('void main()', findRichText: true);
+      expect(code, findsOneWidget);
+      final RenderParagraph paragraph =
+          tester.renderObject<RenderParagraph>(code);
+      final TextStyle style = paragraph.text.style!;
+      expect(style.fontFamily, 'monospace');
+      expect(
+        style.fontSize,
+        closeTo(AppFontSize.summary * 0.9, 0.01),
+        reason: '详情 14.4 与列表摘要 base×0.9 必须一致',
+      );
+      expect(style.height, 1.55, reason: '行高要与列表的 1.55 一致');
+      expect(
+        style.backgroundColor,
+        isNull,
+        reason: '底色交给整宽容器，不能再挂在 TextStyle 上（否则只覆盖字符）',
+      );
+    });
+
+    testWidgets('代码块底色铺满整行，而不是只包住文字',
+        (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_band_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_band', '```dart\nvoid main() {}\n```'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder code =
+          find.textContaining('void main()', findRichText: true);
+      // 文字左缘 = 页面边距 16 + 容器内边距 12。
+      expect(
+        tester.getRect(code).left,
+        closeTo(AppSpace.page + AppSpace.md, 1),
+      );
+      // 最近的一层 Container 就是代码块底色容器：宽度要撑满内容区。
+      final Finder band = find
+          .ancestor(of: code, matching: find.byType(Container))
+          .first;
+      expect(
+        tester.getSize(band).width,
+        closeTo(360 - AppSpace.page * 2, 1),
+        reason: '底色容器必须铺满整行内容区（用户反馈代码块不是整行）',
+      );
+    });
+
+    testWidgets('代码块：点击可定位光标，代理测量不抛异常',
+        (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_tap_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_tap', '```dart\nvoid main() {}\n```'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      await tester.tap(
+        find.textContaining('void main()', findRichText: true),
+        warnIfMissed: false,
+      );
+      await _pumpFrames(tester, frames: 8);
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '代码块用了自定义代理组件，点击定位不能抛异常',
+      );
     });
   });
 }

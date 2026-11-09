@@ -390,4 +390,77 @@ void main() {
       );
     }
   });
+
+  /// 光标停在已有样式的文字里：按钮要按「光标处样式」点亮，
+  /// 而不是只看输入态。否则用户看不出当前这段本来是加粗的。
+  test('光标在已有加粗文字中：加粗按钮点亮（即使输入态为空）', () {
+    final ParagraphNode bold = deserializeXiaojiMarkdown('**整段加粗**')
+        .getNodeAt(0)! as ParagraphNode;
+    editor.execute(<EditRequest>[
+      InsertNodeAtIndexRequest(nodeIndex: 0, newNode: bold),
+    ]);
+    placeCaretAt(0, offset: 2);
+
+    expect(composer.preferences.currentAttributions, isEmpty);
+    expect(
+      commands.computeActiveCommands(),
+      contains(MarkdownCommand.bold),
+      reason: '点亮态应包含光标处字符的真实样式',
+    );
+  });
+
+  test('光标在加粗文字中点加粗：取消该段加粗，文字保留', () {
+    final ParagraphNode bold = deserializeXiaojiMarkdown('**整段加粗**')
+        .getNodeAt(0)! as ParagraphNode;
+    editor.execute(<EditRequest>[
+      InsertNodeAtIndexRequest(nodeIndex: 0, newNode: bold),
+    ]);
+    placeCaretAt(0, offset: 2);
+
+    commands.handleCommand(MarkdownCommand.bold);
+
+    final ParagraphNode node = document.getNodeAt(0)! as ParagraphNode;
+    expect(node.text.toPlainText(), '整段加粗', reason: '只去样式，不动文字');
+    for (var i = 0; i < node.text.length; i++) {
+      expect(
+        node.text.spans.getAllAttributionsAt(i).contains(boldAttribution),
+        isFalse,
+        reason: '第 $i 个字符的加粗应被取消',
+      );
+    }
+    expect(
+      commands.computeActiveCommands(),
+      isNot(contains(MarkdownCommand.bold)),
+      reason: '取消后按钮应熄灭',
+    );
+  });
+
+  test('光标在普通文字中点加粗：只写输入态，已有文字不变', () {
+    editor.execute(<EditRequest>[
+      InsertNodeAtIndexRequest(
+        nodeIndex: 0,
+        newNode: ParagraphNode(
+          id: Editor.createNodeId(),
+          text: AttributedText('普通文字'),
+        ),
+      ),
+    ]);
+    placeCaretAt(0, offset: 2);
+
+    commands.handleCommand(MarkdownCommand.bold);
+
+    final ParagraphNode node = document.getNodeAt(0)! as ParagraphNode;
+    expect(node.text.toPlainText(), '普通文字');
+    expect(
+      node.text.spans.getAllAttributionsAt(0).contains(boldAttribution),
+      isFalse,
+      reason: '折叠光标不应改写已有文字',
+    );
+    expect(
+      composer.preferences.currentAttributions,
+      contains(boldAttribution),
+      reason: '应写入输入态，下一次输入才生效',
+    );
+    expect(commands.computeActiveCommands(), contains(MarkdownCommand.bold));
+  });
 }

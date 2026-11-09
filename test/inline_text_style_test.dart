@@ -14,6 +14,7 @@ void main() {
   const TextStyle base = TextStyle(fontSize: 16);
   const Color textColor = Color(0xFF222222);
   const Color accentColor = Color(0xFF0A6CFF);
+  const Color mutedColor = Color(0xFF8A8A8A);
   const Color codeBackground = Color(0xFFF1F3F5);
   const Color highlightBackground = Color(0xFFE8F0FF);
 
@@ -23,18 +24,23 @@ void main() {
       base,
       textColor: textColor,
       accentColor: accentColor,
+      mutedColor: mutedColor,
       codeBackground: codeBackground,
       highlightBackground: highlightBackground,
     );
   }
 
-  test('加粗对齐阅读态的 600，斜体 / 删除线沿用内核默认', () {
+  test('加粗对齐阅读态的 600，斜体沿用内核默认', () {
     expect(styleFor(<Attribution>{boldAttribution}).fontWeight,
         AppWeight.semibold);
     expect(styleFor(<Attribution>{italicsAttribution}).fontStyle,
         FontStyle.italic);
-    expect(styleFor(<Attribution>{strikethroughAttribution}).decoration,
-        TextDecoration.lineThrough);
+  });
+
+  test('删除线与列表摘要一致：划线 + 三级文字色', () {
+    final TextStyle style = styleFor(<Attribution>{strikethroughAttribution});
+    expect(style.decoration, TextDecoration.lineThrough);
+    expect(style.color, mutedColor);
   });
 
   test('行内码补上等宽 + 浅底 + 微缩', () {

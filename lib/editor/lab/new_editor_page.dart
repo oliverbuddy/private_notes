@@ -57,6 +57,7 @@ TextStyle xiaojiInlineTextStyler(
   TextStyle baseStyle, {
   required Color textColor,
   required Color accentColor,
+  required Color mutedColor,
   required Color codeBackground,
   required Color highlightBackground,
 }) {
@@ -65,6 +66,11 @@ TextStyle xiaojiInlineTextStyler(
   // 在列表摘要里是 600、详情里是 700 时，来回切换会觉得「字重变了」。
   if (attributions.contains(boldAttribution)) {
     style = style.copyWith(fontWeight: AppWeight.semibold);
+  }
+  // 删除线：与阅读态（列表摘要）一致，整段文字淡成三级色。
+  // 默认只加 lineThrough、颜色仍是正文色，两处看起来不是同一篇文档。
+  if (attributions.contains(strikethroughAttribution)) {
+    style = style.copyWith(color: mutedColor);
   }
   // 行内码：等宽 + 微缩 + 浅底，与阅读态（markdown_view 的 code 分支）一致。
   if (attributions.contains(codeAttribution)) {
@@ -160,6 +166,14 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 覆盖成「一个光标」（实测：标题全选后加粗，只有最后一个字变粗）。
   /// 打开面板的那一帧冻结快照，关闭时再恢复。
   bool _panelOpen = false;
+
+  /// 行内样式「输入态」作用的节点。
+  ///
+  /// 折叠光标点加粗/斜体等，样式写入 composer 的输入态，只对接下来输入的
+  /// 文字生效。这个作用范围应该只留在当前块：光标移到别的块或变成展开
+  /// 选区时清空，避免「在 A 段点了加粗，去 B 段打字还是加粗」的残留
+  /// （主流编辑器 Word / Notion 同语义）。
+  String? _typingStyleNodeId;
 
   /// SuperEditor 自己的焦点节点。面板关闭后（选区可能被清空）用
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
@@ -817,6 +831,15 @@ class _NewEditorPageState extends State<NewEditorPage>
         _panelOpeningUntilHidden = false;
       }
     }
+    // 输入态只留在点击样式时的那个块：光标跨块移动或变成展开选区时清空，
+    // 避免样式残留到下一段的输入（对齐 Word / Notion 的 typing style）。
+    if (_typingStyleNodeId != null && selection != null) {
+      if (!selection.isCollapsed ||
+          selection.extent.nodeId != _typingStyleNodeId) {
+        _typingStyleNodeId = null;
+        _composer.preferences.clearStyles();
+      }
+    }
     // 光标/换行位置可能被输入法挡住：布局结算后校正一次可见性。
     _scheduleCaretVisibilityCheck();
     final next = _commands.computeActiveCommands();
@@ -1240,17 +1263,18 @@ class _NewEditorPageState extends State<NewEditorPage>
       _showLinkSheet();
       return;
     }
-    // 没选中文字时，行内样式只能作用到「接下来输入的文字」（内核的
-    // 输入态，和 Word / Notion / 鸿蒙 RichEditor 的 typing style 同理）。
-    // 此时按钮会点亮，但正文暂时不会变化 —— 给一句提示，避免用户以为
-    // 点了没反应。
-    final bool typingStyle = _isTypingStyleCommand(command) &&
-        (_composer.selection?.isCollapsed ?? false);
+    // 没选中文字时，行内样式作用于「接下来输入的文字」（内核的输入态，
+    // 与 Word / Notion / 语雀同语义）。按钮点亮即反馈，不弹任何提示：
+    // 主流编辑器都不会为输入态弹 SnackBar（旧实现的长提示会盖住键盘）。
+    // 记录当前块，光标跨块移动时清空输入态。
+    final DocumentSelection? selection = _composer.selection;
+    if (_isInlineStyleCommand(command) &&
+        selection != null &&
+        selection.isCollapsed) {
+      _typingStyleNodeId = selection.extent.nodeId;
+    }
     _commands.handleCommand(command);
     _refreshActiveCommands();
-    if (typingStyle) {
-      _showTypingStyleHint(command);
-    }
     // 块级 / 插入类命令是一次性结构动作：执行后立刻收面板、回键盘，
     // 用户可以马上继续输入（不用再点一次 Aa，符合「点一下就走」的直觉）。
     // 文字样式保持展开，方便连续加粗 + 斜体。
@@ -1260,7 +1284,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   /// 是否属于「行内样式」（可以作用于输入态而不只是选区）。
-  bool _isTypingStyleCommand(MarkdownCommand command) {
+  bool _isInlineStyleCommand(MarkdownCommand command) {
     return switch (command) {
       MarkdownCommand.bold ||
       MarkdownCommand.italic ||
@@ -1270,20 +1294,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         true,
       _ => false,
     };
-  }
-
-  /// 折叠光标下行内样式的提示文案。
-  void _showTypingStyleHint(MarkdownCommand command) {
-    final (String label, Attribution attribution) = switch (command) {
-      MarkdownCommand.bold => ('加粗', boldAttribution),
-      MarkdownCommand.italic => ('斜体', italicsAttribution),
-      MarkdownCommand.strike => ('删除线', strikethroughAttribution),
-      MarkdownCommand.code => ('行内码', codeAttribution),
-      _ => ('高亮', highlightAttribution),
-    };
-    final bool on =
-        _composer.preferences.currentAttributions.contains(attribution);
-    _showHint(on ? '已开启$label，输入的文字将生效' : '已关闭$label');
   }
 
   /// Aa 面板里「点一下就收起」的命令（结构/插入类）。
@@ -2723,6 +2733,9 @@ class _NewEditorPageState extends State<NewEditorPage>
           // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
           // 构建器前面，用主题 divider 色重建同一个组件。
           const _LabHorizontalRuleComponentBuilder(),
+          // 代码块：整宽圆角底色。默认组件把底色挂在 TextStyle 上，只覆盖
+          // 字符本身、行尾留白（用户反馈「代码块不是整行」）。
+          const _LabCodeBlockComponentBuilder(),
           // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
           _LabBlockquoteComponentBuilder(
             editor: _editor,
@@ -2782,6 +2795,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             baseStyle,
             textColor: colors.text,
             accentColor: colors.accent,
+            mutedColor: colors.tertiary,
             codeBackground: colors.surface2,
             highlightBackground: colors.accentBg,
           ),
@@ -3020,24 +3034,23 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.padding: const CascadingPadding.symmetric(vertical: 8),
           },
         ),
-        // 代码块：等宽 + 底色。等宽字形比中文正文更宽，13 才与 15px
-        // 正文在同一视觉重量上；内边距同步收小，代码块不再「撑满一屏」。
+        // 代码块：等宽 + 字号/行高与列表摘要同源（base×0.9、1.55）。
+        // 底色由 [_LabCodeBlockComponent] 的整宽容器负责，这里不再给
+        // TextStyle 上 backgroundColor —— 那样只覆盖字符，行尾会露白。
         StyleRule(
           const BlockSelector('code'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
-              fontSize: AppFontSize.labelLg,
-              height: 1.6,
+              fontSize: AppFontSize.summary * 0.9,
+              height: 1.55,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text.withValues(alpha: 0.85),
-              backgroundColor: colors.surface2,
             ),
-            Styles.padding: const CascadingPadding.symmetric(
-              vertical: 10,
-              horizontal: 16,
-            ),
+            // 横向页边距从 BlockSelector.all 级联（16），这里只补块间呼吸；
+            // 容器内部 padding 由组件自己给，保证底色贴满内容区。
+            Styles.padding: const CascadingPadding.symmetric(vertical: 8),
           },
         ),
         // 有序列表分层编号（1. → a. → i.），与阅读态渲染器同方案。
@@ -3762,6 +3775,109 @@ class _LabHorizontalRuleComponentBuilder implements ComponentBuilder {
       opacity: componentViewModel.opacity,
       // 品牌色的分隔线：浅色用 6% 黑、深色用 7% 白，两种主题都贴纸感。
       color: colors.divider,
+    );
+  }
+}
+
+/// 代码块整宽渲染：只看 `blockType == code` 的段落，其余交给默认链。
+///
+/// 为什么不能继续用默认 [ParagraphComponent]：底色写在 `TextStyle` 上，
+/// 只会覆盖字符本身，每行右侧和行间都露出页面底色（用户反馈「代码块不是
+/// 整行」）。这里在文本外层铺一层铺满内容区的圆角容器，观感与语雀 /
+/// Notion 的代码块一致。
+class _LabCodeBlockComponentBuilder implements ComponentBuilder {
+  const _LabCodeBlockComponentBuilder();
+
+  /// 复用官方 builder 构造 ViewModel（方向、缩进、样式构建器等默认值），
+  /// 只接管「渲染成什么组件」这一步。
+  static const ParagraphComponentBuilder _paragraph = ParagraphComponentBuilder();
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(
+    Document document,
+    DocumentNode node,
+  ) {
+    if (node is! ParagraphNode ||
+        node.getMetadataValue(NodeMetadata.blockType) != codeAttribution) {
+      return null;
+    }
+    return _paragraph.createViewModel(document, node);
+  }
+
+  @override
+  Widget? createComponent(
+    SingleColumnDocumentComponentContext componentContext,
+    SingleColumnLayoutComponentViewModel componentViewModel,
+  ) {
+    // 注意：单列布局会对**每个节点**依次调用所有 builder 的
+    // createComponent（见 SingleColumnLayout 的组件构建循环），传入的是
+    // presenter 已选定的 ViewModel。所以这里必须再判断一次 blockType，
+    // 否则普通段落也会被套上代码块容器（实测空文档光标左移 12dp）。
+    if (componentViewModel is! ParagraphComponentViewModel ||
+        componentViewModel.blockType != codeAttribution) {
+      return null;
+    }
+    return _LabCodeBlockComponent(
+      key: componentContext.componentKey,
+      viewModel: componentViewModel,
+    );
+  }
+}
+
+/// 代码块容器 + 内部文本组件。
+///
+/// 用 [ProxyDocumentComponent] 把内部的 [TextComponent] 暴露给单列布局，
+/// 光标测量/选区绘制才会落在文本上（照抄官方 ParagraphComponent 的代理方式）。
+class _LabCodeBlockComponent extends StatefulWidget {
+  const _LabCodeBlockComponent({super.key, required this.viewModel});
+
+  final ParagraphComponentViewModel viewModel;
+
+  @override
+  State<_LabCodeBlockComponent> createState() => _LabCodeBlockComponentState();
+}
+
+class _LabCodeBlockComponentState extends State<_LabCodeBlockComponent>
+    with ProxyDocumentComponent<_LabCodeBlockComponent>, ProxyTextComposable {
+  final GlobalKey _textKey = GlobalKey();
+
+  @override
+  GlobalKey<State<StatefulWidget>> get childDocumentComponentKey => _textKey;
+
+  @override
+  TextComposable get childTextComposable =>
+      _textKey.currentState as TextComposable;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final ParagraphComponentViewModel vm = widget.viewModel;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface2,
+        borderRadius: BorderRadius.circular(AppRadius.block),
+      ),
+      // 顺应上下 8、左右 12 的代码块内边距；底色撑满内容区，文字不贴边。
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: TextComponent(
+        key: _textKey,
+        text: vm.text,
+        textDirection: vm.textDirection,
+        textAlign: vm.textAlignment,
+        textScaler: vm.textScaler,
+        maxLines: vm.maxLines,
+        overflow: vm.overflow,
+        textStyleBuilder: vm.textStyleBuilder,
+        inlineWidgetBuilders: vm.inlineWidgetBuilders,
+        // 不把 blockType 传给 TextComponent：它会把 blockType 当作一条
+        // 行内 attribution 叠加到每个字符上，代码块因此被「行内码」样式
+        // 再缩放一次（14.4 → 12.96）。代码块样式已经由 Stylesheet 给到。
+        metadata: const <String, dynamic>{},
+        textSelection: vm.selection,
+        selectionColor: vm.selectionColor,
+        highlightWhenEmpty: vm.highlightWhenEmpty,
+        underlines: vm.createUnderlines(),
+      ),
     );
   }
 }
