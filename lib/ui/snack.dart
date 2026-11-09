@@ -10,18 +10,24 @@ Timer? _hideTimer;
 /// 为 true，含 UiAutomation 调试环境）下会刻意停用 SnackBar 自带的计时器，
 /// 导致「已移到「回收站」」这类提示一直挂在底部不消失。
 ///
-/// 主流产品（Gmail / Keep / 微信）的撤销提示都是 4~5 秒后自动收起，只留
-/// 一次撤销窗口。这里统一用显式计时器兜底：普通模式 4 秒；无障碍模式把
-/// 阅读时间延长到 10 秒，但仍然会收起，不再常驻。
+/// 主流产品（Gmail / Keep / 微信）的提示时长：纯告知类 2 秒足够读完，
+/// 只有带「撤销」这类可操作按钮时才需要 4~5 秒的决策窗口。
+/// 无障碍模式把阅读时间延长（纯提示 6 秒、带操作 10 秒），但仍然会收起。
 void showSnack(
   BuildContext context, {
   required String message,
   SnackBarAction? action,
-  Duration duration = const Duration(seconds: 4),
+  Duration? duration,
 }) {
   final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
   final bool accessible = MediaQuery.accessibleNavigationOf(context);
-  final Duration visible = accessible ? const Duration(seconds: 10) : duration;
+  final Duration base = duration ??
+      (action == null
+          ? const Duration(seconds: 2)
+          : const Duration(seconds: 4));
+  final Duration visible = accessible
+      ? (action == null ? const Duration(seconds: 6) : const Duration(seconds: 10))
+      : base;
 
   _hideTimer?.cancel();
   messenger

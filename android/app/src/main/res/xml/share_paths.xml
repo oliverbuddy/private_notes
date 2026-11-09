@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分享长图时暴露给其他 App 的目录：只开放缓存目录（图片生成后写在这里）。
+     不开放 files/ 等私有目录，避免把笔记数据一起暴露出去。 -->
+<paths>
+    <cache-path name="share" path="." />
+</paths>

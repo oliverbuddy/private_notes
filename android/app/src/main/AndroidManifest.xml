@@ -76,6 +76,18 @@
             </intent-filter>
         </service>
 
+        <!-- 分享长图：把缓存目录里的 PNG 以 content:// 授权给其他 App。
+             只开放 cache 目录（见 res/xml/share_paths.xml），不需要存储权限。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

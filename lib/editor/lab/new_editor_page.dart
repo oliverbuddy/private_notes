@@ -26,6 +26,7 @@ import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
 import '../markdown_toolbar.dart';
 import '../markdown_view.dart';
+import '../note_image_share.dart';
 import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
@@ -1534,6 +1535,11 @@ class _NewEditorPageState extends State<NewEditorPage>
           icon: Icons.content_copy_outlined,
         ),
         const SheetAction<String>(
+          value: 'shareImage',
+          label: '分享为图片',
+          icon: Icons.share_outlined,
+        ),
+        const SheetAction<String>(
           value: 'tags',
           label: '编辑标签',
           icon: Icons.sell_outlined,
@@ -1567,6 +1573,9 @@ class _NewEditorPageState extends State<NewEditorPage>
         break;
       case 'copy':
         await _copyBody();
+        break;
+      case 'shareImage':
+        await _shareAsImage();
         break;
       case 'tags':
         await _editTags();
@@ -1765,6 +1774,26 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
     if (mounted) {
       showSnack(context, message: '已复制到剪贴板');
+    }
+  }
+
+  /// 把当前详情（实时文档内容 + 标签）渲染成一张长图并调起系统分享。
+  ///
+  /// 用实时文档而不是 `_currentNote.body`：还没落盘的修改也要出现在分享图里。
+  /// 生成期间输入法先收起，避免分享面板弹出时键盘还挂着。
+  Future<void> _shareAsImage() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    try {
+      await shareNoteAsImage(
+        markdown: serializeDocumentToXiaojiMarkdown(_document),
+        tags: _currentNote.tags,
+        created: _currentNote.created,
+        store: widget.repository.store,
+      );
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '分享失败：$error');
+      }
     }
   }
 
@@ -2708,9 +2737,19 @@ class _NewEditorPageState extends State<NewEditorPage>
         // 段落间距收紧（默认 24 太散，手机端要紧凑）。
         // 12 与列表项上下 2 形成「段落明显断开、列表行内轻微呼吸」的层级，
         // 而不是所有块都用同一个大间距（那样看起来每一行都散着）。
+        //
+        // 正文行距：只覆盖 paragraph 的 height（1.7 → 1.6），16 号字下
+        // 行盒从 27.2 收到 25.6，接近语雀/Notion 移动端的 1.6，长文
+        // 连续阅读不再「一行一行散着」。TextStyle.merge 只覆盖非空字段，
+        // 字号/字距/颜色仍从 BlockSelector.all 级联。
+        //
+        // 标题（1.3/1.35）、引用（AppQuote.height）、代码块（卡片规格）、
+        // 列表行都各自有行高来源，不受这条影响 —— 用户明确要求
+        // 「不要影响其他的行间距」。
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.textStyle: const TextStyle(height: 1.6),
             Styles.padding: const CascadingPadding.only(top: 12),
           },
         ),
@@ -3704,6 +3743,10 @@ class _LabListItemComponentBuilder implements ComponentBuilder {
         underlines: componentViewModel.createUnderlines(),
         inlineWidgetBuilders: componentViewModel.inlineWidgetBuilders,
         indentCalculator: AppListMarker.width,
+        // 层级用符号区分（• → ◦ → ▪），与阅读态渲染器 [MarkdownBlockView]
+        // 的无序列表完全同一套；官方默认各层都画同一个实心点，子列表
+        // 只能靠缩进辨认。参考 Notion / 语雀 / 微信做法。
+        dotBuilder: _buildUnorderedListDot,
       );
     }
     if (componentViewModel is OrderedListItemComponentViewModel) {
@@ -3726,6 +3769,39 @@ class _LabListItemComponentBuilder implements ComponentBuilder {
     }
     return null;
   }
+}
+
+/// 无序列表记号：按缩进层级换符号（• → ◦ → ▪）。
+///
+/// 与阅读态渲染器 [MarkdownBlockView] 的 `_bulletGlyph` 同一套符号，
+/// 详情页与主页摘要看起来一致。官方默认各层都画同一个 4dp 实心圆，
+/// 嵌套子列表只能靠缩进辨认（Notion / 语雀 / 微信都会换符号）。
+///
+/// 用 [TextStyle] 原样继承正文行高（不改 height），记号的基线因此与
+/// 首行文字对齐；外层容器已按正文行盒高度约束并右对齐。
+Widget _buildUnorderedListDot(
+  BuildContext context,
+  UnorderedListItemComponent component,
+) {
+  final TextStyle textStyle = component.styleBuilder(
+    component.text.getAllAttributionsAt(0).toSet(),
+  );
+  final String glyph = switch (component.indent) {
+    0 => '•',
+    1 => '◦',
+    _ => '▪',
+  };
+  return Align(
+    alignment: Alignment.centerRight,
+    child: Padding(
+      // 与官方默认记号相同的右侧留白，正文起点不受影响。
+      padding: const EdgeInsets.only(right: 10),
+      child: Text(
+        glyph,
+        style: textStyle.copyWith(color: AppColors.of(context).tertiary),
+      ),
+    ),
+  );
 }
 
 /// 分隔线渲染接管：颜色写死是 super_editor 的缺口（见 componentBuilders
@@ -3937,16 +4013,19 @@ class _VersionHistorySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    return SafeArea(
-      top: false,
-      child: Container(
-        margin: const EdgeInsets.only(top: 90),
-        decoration: BoxDecoration(
-          color: colors.page,
-          borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(AppRadius.sheet),
-          ),
+    return Container(
+      margin: const EdgeInsets.only(top: 90),
+      decoration: BoxDecoration(
+        color: colors.page,
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.sheet),
         ),
+      ),
+      // SafeArea 放在卡片内部：底色一直铺到屏幕最底部（含手势指示器
+      // 区域），内容再按底部 insets 避开手势条。之前 SafeArea 包在
+      // 卡片外面，手势条位置会漏出一条透明缝（看着像没适配）。
+      child: SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4058,18 +4137,19 @@ class _VersionPreviewSheet extends StatelessWidget {
     final List<String> blocks = (locked || note == null)
         ? const <String>[]
         : note!.body.split(RegExp(r'\n{2,}'));
-    return SafeArea(
-      top: false,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Container(
-          margin: const EdgeInsets.only(top: 70),
-          decoration: BoxDecoration(
-            color: colors.page,
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(AppRadius.sheet),
-            ),
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Container(
+        margin: const EdgeInsets.only(top: 70),
+        decoration: BoxDecoration(
+          color: colors.page,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
           ),
+        ),
+        // 与历史版本列表同一处理：SafeArea 放进卡片里，底色铺到屏幕底部。
+        child: SafeArea(
+          top: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

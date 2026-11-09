@@ -17,3 +17,14 @@ Future<bool> saveImageToGallery(String absolutePath) async {
   );
   return result?['savedToGallery'] == true;
 }
+
+/// 调起系统分享面板，把本地图片分享到其他 App。
+///
+/// 原生侧用 FileProvider 生成 `content://` 授权 URI，不需要存储权限，
+/// 也不引入第三方分享插件。
+Future<void> shareImageFile(String absolutePath) async {
+  await const MethodChannel('xiaoji/native').invokeMethod<void>(
+    'shareImage',
+    <String, Object?>{'path': absolutePath},
+  );
+}

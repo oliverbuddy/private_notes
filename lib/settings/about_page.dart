@@ -186,11 +186,7 @@ class _AboutPageState extends State<AboutPage> {
   Future<void> _copyContactEmail() async {
     await Clipboard.setData(const ClipboardData(text: _contactEmail));
     if (mounted) {
-      showSnack(
-        context,
-        message: '邮箱已复制',
-        duration: const Duration(seconds: 3),
-      );
+      showSnack(context, message: '邮箱已复制');
     }
   }
 

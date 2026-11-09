@@ -1071,11 +1071,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showSnack(String text) {
-    showSnack(
-      context,
-      message: text,
-      duration: const Duration(seconds: 3),
-    );
+    showSnack(context, message: text);
   }
 }
 

@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -89,6 +90,7 @@ class MainActivity : FlutterActivity() {
                         result,
                     )
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
+                    "shareImage" -> shareImage(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
                     "appInfo" -> appInfo(result)
                     "consumeSharedContent" -> {
@@ -220,6 +222,39 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: Exception) {
             result.error("save_failed", e.message ?: "保存失败", null)
+        }
+    }
+
+    /**
+     * 调起系统分享面板，把生成好的分享长图发给其他 App。
+     *
+     * 图片在应用缓存目录里，通过 FileProvider 换成 content:// 授权 URI，
+     * 只授予读取权限、不需要存储权限；系统分享面板会列出所有能收图片的 App。
+     */
+    private fun shareImage(path: String?, result: MethodChannel.Result) {
+        if (path.isNullOrBlank()) {
+            result.error("bad_args", "缺少图片路径", null)
+            return
+        }
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            result.error("missing_file", "图片文件不存在", null)
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(send, "分享小记")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(chooser)
+            result.success(true)
+        } catch (error: Exception) {
+            Log.w("XiaojiShare", "分享图片失败", error)
+            result.error("share_failed", error.message ?: "分享失败", null)
         }
     }
 

@@ -37,7 +37,9 @@ class MarkdownBlockView extends StatelessWidget {
     final colors = AppColors.of(context);
     final base = TextStyle(
       fontSize: baseSize,
-      height: 1.7,
+      // 正文行距统一 1.6（与详情编辑器一致的「主流方案」）：
+      // 16 号字行盒 25.6，长文阅读不松散，列表摘要与分享长图同源。
+      height: 1.6,
       color: colors.text,
       fontWeight: AppWeight.regular,
     );
