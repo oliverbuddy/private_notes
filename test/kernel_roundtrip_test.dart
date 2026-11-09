@@ -426,4 +426,30 @@ void main() {
     final doc = deserializeXiaojiMarkdown(body);
     expect(serializeDocumentToXiaojiMarkdown(doc), body);
   });
+
+  test('表格后的段落不会被吞进表格（空行哨兵不能紧贴表格）', () {
+    // 回归：空行被替换成哨兵（非空文本行）后，管道表格会把它和后续正文
+    // 一起当成表格行，存盘后原文丢失。
+    const String body = '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n'
+        '表格后面的正文';
+    final doc = deserializeXiaojiMarkdown(body);
+
+    final TableBlockNode table = doc.whereType<TableBlockNode>().single;
+    expect(table.rowCount, 2, reason: '表头 + 1 行数据，不能再吞正文');
+    expect(
+      doc.whereType<ParagraphNode>().any(
+            (ParagraphNode n) => n.text.toPlainText() == '表格后面的正文',
+          ),
+      isTrue,
+      reason: '表格后的正文必须是独立段落',
+    );
+
+    final String back = serializeDocumentToXiaojiMarkdown(doc);
+    expect(back, contains('表格后面的正文'));
+    expect(back, contains('| 苹果 | 3 |'));
+
+    // 再解析一次，结构稳定。
+    final MutableDocument again = deserializeXiaojiMarkdown(back);
+    expect(again.whereType<TableBlockNode>().single.rowCount, 2);
+  });
 }

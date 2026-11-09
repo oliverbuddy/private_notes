@@ -37,6 +37,53 @@ void main() {
       expect(md, contains('2. 第二步'));
     });
 
+    test('嵌套列表保留层级（两空格缩进）', () {
+      final String md = htmlToMarkdown(
+        '<ul><li><p>一级</p>'
+        '<ul><li><p>二级</p>'
+        '<ol><li>三级</li></ol>'
+        '</li></ul>'
+        '</li><li><p>同级</p></li></ul>',
+      );
+      expect(md, contains('- 一级'));
+      expect(md, contains('  - 二级'));
+      expect(md, contains('    1. 三级'));
+      expect(md, contains('- 同级'));
+      // 子项不能再被压成顶层
+      expect(md, isNot(contains('\n- 二级')));
+    });
+
+    test('待办列表转成 - [ ] / - [x]', () {
+      final String md = htmlToMarkdown(
+        '<ul><li><input type="checkbox" checked> 已完成</li>'
+        '<li><input type="checkbox"> 未完成</li></ul>',
+      );
+      expect(md, contains('- [x] 已完成'));
+      expect(md, contains('- [ ] 未完成'));
+    });
+
+    test('有序列表保留 start 起始编号', () {
+      final String md = htmlToMarkdown(
+        '<ol start="3"><li>第三</li><li>第四</li></ol>',
+      );
+      expect(md, contains('3. 第三'));
+      expect(md, contains('4. 第四'));
+    });
+
+    test('代码块保留语言标记', () {
+      final String md = htmlToMarkdown(
+        '<pre><code class="language-dart">void main() {}</code></pre>',
+      );
+      expect(md, contains('```dart'));
+    });
+
+    test('链接保留 title', () {
+      final String md = htmlToMarkdown(
+        '<p><a href="https://x.test" title="示例">文字</a></p>',
+      );
+      expect(md, contains('[文字](https://x.test "示例")'));
+    });
+
     test('代码块保留内容与实体', () {
       final String md = htmlToMarkdown(
         '<pre><code>if (a &lt; b &amp;&amp; c &gt; d) {}</code></pre>',

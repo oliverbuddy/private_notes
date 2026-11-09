@@ -110,6 +110,15 @@ void main() {
       expect(text.contains('```'), isFalse);
     });
 
+    test('代码内容里含 ``` 时，用加长围栏仍能正确闭合', () {
+      // 写入端在内容含 ``` 时会把围栏加长成 ````，预览必须按同长度闭合，
+      // 否则代码后半段会被当成正文。
+      final text = render('````\n```dart\nfinal x = 1;\n```\n````\n\n后文');
+      expect(text, contains('```dart'));
+      expect(text, contains('final x = 1;'));
+      expect(text, contains('后文'));
+    });
+
     test('高亮的 == 记号消失，只剩带底色的文字', () {
       final List<InlineSpan> spans = markdownSpans(
         '这是 ==重点== 内容',

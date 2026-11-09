@@ -23,8 +23,11 @@ String htmlToMarkdown(String html) {
   );
 
   // 代码块先取出来并用占位符保护：代码里的 `<` `>` 不能被后面的「剥标签」
-  // 规则当成 HTML 标签吃掉（实测 `a < b` 会变成 `a`）。
-  final List<String> codeBlocks = <String>[];
+  // 规则当成 HTML 标签吃掉（实测 `a < b` 会变成 `a`）。语言标记从
+  // `<pre class="language-dart">` / `<code class="lang-dart">` 里取，
+  // 语雀、GitHub、Notion 复制都带这个信息，丢了会变成无语言代码块。
+  final List<({String language, String code})> codeBlocks =
+      <({String language, String code})>[];
   s = s.replaceAllMapped(
     RegExp(r'<pre[^>]*>([\s\S]*?)</pre>', caseSensitive: false),
     (Match m) {
@@ -32,7 +35,7 @@ String htmlToMarkdown(String html) {
         m.group(1)!.replaceAll(RegExp(r'<[^>]+>'), ''),
       ).trimRight();
       final String token = '\u0000CODE${codeBlocks.length}\u0000';
-      codeBlocks.add(code);
+      codeBlocks.add((language: _codeLanguage(m.group(0)!), code: code));
       return '\n\n$token\n\n';
     },
   );
@@ -110,7 +113,11 @@ String htmlToMarkdown(String html) {
   s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
   // 还原代码块占位符。
   for (int i = 0; i < codeBlocks.length; i++) {
-    s = s.replaceAll('\u0000CODE$i\u0000', '```\n${codeBlocks[i]}\n```');
+    final String language = codeBlocks[i].language;
+    s = s.replaceAll(
+      '\u0000CODE$i\u0000',
+      '```$language\n${codeBlocks[i].code}\n```',
+    );
   }
   // 还原表格占位符：表格前后留空行，GFM 表格块需要与相邻段落分开。
   for (int i = 0; i < tables.length; i++) {
@@ -238,50 +245,222 @@ String _tableSeparator(String? align) {
   };
 }
 
-/// 列表：`<ul>` 用 `- `，`<ol>` 用 `1. `。
+/// 列表：`<ul>` 用 `- `，`<ol>` 用 `1. `，嵌套层级用两空格缩进。
 ///
-/// 嵌套列表会被压平（受限于无 DOM 解析），但层级内容不会丢。
+/// 之前是全局替换 `<li>`，嵌套列表会被压成同级、且每项之间多出空行
+/// （语雀复制出来的正文几乎都是 `<ul><li><p>…` 结构）。这里改成递归：
+/// 先按同类型标签配对找出整个列表，再按「顶层 li」切分，子列表递归处理。
+/// 待办列表（`<input type="checkbox">`）转成 `- [ ]` / `- [x]`。
 String _convertLists(String html) {
-  var s = html;
-  s = s.replaceAllMapped(
-    RegExp(r'<ol\b[^>]*>([\s\S]*?)</ol>', caseSensitive: false),
-    (Match m) {
-      var index = 0;
-      final String inner = m.group(1)!.replaceAllMapped(
-        RegExp(r'<li\b[^>]*>', caseSensitive: false),
-        (_) {
-          index++;
-          return '\n$index. ';
-        },
-      );
-      return '\n$inner\n';
-    },
+  final String converted = _convertListsAtDepth(html, 0);
+  // 兜底：不在列表里的 <li>（畸形 HTML）退回为无序项。
+  return converted
+      .replaceAll(RegExp(r'<li\b[^>]*>', caseSensitive: false), '\n- ')
+      .replaceAll(RegExp(r'</li>', caseSensitive: false), '');
+}
+
+String _convertListsAtDepth(String html, int depth) {
+  final StringBuffer out = StringBuffer();
+  var cursor = 0;
+  final RegExp open = RegExp(r'<(ul|ol)\b([^>]*)>', caseSensitive: false);
+  while (true) {
+    final String rest = html.substring(cursor);
+    final Match? match = open.firstMatch(rest);
+    if (match == null) {
+      out.write(rest);
+      break;
+    }
+    final int start = cursor + match.start;
+    out.write(html.substring(cursor, start));
+    final String tag = match.group(1)!.toLowerCase();
+    final int closeStart = _matchingListClose(html, start);
+    if (closeStart < 0) {
+      out.write(html.substring(start));
+      break;
+    }
+    final int innerStart = start + match.group(0)!.length;
+    final String inner = html.substring(innerStart, closeStart);
+    out.write('\n${_listToMarkdown(inner, tag, match.group(2) ?? '', depth)}\n');
+    cursor = closeStart + '</$tag>'.length;
+  }
+  return out.toString();
+}
+
+/// 从 [openStart] 处的 `<ul>`/`<ol>` 找到配对闭合标签的起始下标。
+///
+/// 按「所有列表标签」计数（ul 里可能嵌 ol），返回 -1 表示没有闭合。
+int _matchingListClose(String html, int openStart) {
+  final RegExp token = RegExp(r'</?(?:ul|ol)\b[^>]*>', caseSensitive: false);
+  var depth = 0;
+  for (final Match m in token.allMatches(html.substring(openStart))) {
+    if (m.group(0)!.startsWith('</')) {
+      depth--;
+      if (depth == 0) {
+        return openStart + m.start;
+      }
+    } else {
+      depth++;
+    }
+  }
+  return -1;
+}
+
+/// 切出列表的「顶层 li」内容（嵌套列表内部的 li 不算）。
+List<String> _topLevelListItems(String inner) {
+  final RegExp token = RegExp(
+    r'<(?:ul|ol)\b[^>]*>|</(?:ul|ol)>|<li\b[^>]*>|</li>',
+    caseSensitive: false,
   );
-  s = s.replaceAll(RegExp(r'<ul\b[^>]*>', caseSensitive: false), '\n');
-  s = s.replaceAll(RegExp(r'</ul>', caseSensitive: false), '\n');
-  s = s.replaceAll(RegExp(r'<li\b[^>]*>', caseSensitive: false), '\n- ');
-  s = s.replaceAll(RegExp(r'</li>', caseSensitive: false), '');
-  s = s.replaceAll(RegExp(r'</ol>', caseSensitive: false), '\n');
-  return s;
+  final List<String> items = <String>[];
+  var listDepth = 0;
+  var itemStart = -1;
+  for (final Match m in token.allMatches(inner)) {
+    final String t = m.group(0)!;
+    if (t.startsWith('</')) {
+      if (t.startsWith('</li')) {
+        if (listDepth == 0 && itemStart >= 0) {
+          items.add(inner.substring(itemStart, m.start));
+          itemStart = -1;
+        }
+      } else {
+        listDepth--;
+      }
+    } else if (t.startsWith('<li')) {
+      if (listDepth == 0) {
+        itemStart = m.end;
+      }
+    } else {
+      listDepth++;
+    }
+  }
+  // 容错：没有闭合的最后一个 li 也保留内容。
+  if (listDepth == 0 && itemStart >= 0 && itemStart <= inner.length) {
+    items.add(inner.substring(itemStart));
+  }
+  return items;
+}
+
+String _listToMarkdown(String inner, String tag, String attrs, int depth) {
+  final List<String> items = _topLevelListItems(inner);
+  if (items.isEmpty) {
+    return '';
+  }
+  final bool ordered = tag == 'ol';
+  final int startNumber = int.tryParse(
+        RegExp(r'''start\s*=\s*["']?(\d+)''', caseSensitive: false)
+                .firstMatch(attrs)
+                ?.group(1) ??
+            '',
+      ) ??
+      1;
+  final String indent = '  ' * depth;
+  final List<String> lines = <String>[];
+  var number = startNumber;
+
+  for (final String item in items) {
+    // 嵌套列表从条目内容里摘出来，递归展开到下一层。
+    final RegExp nestedOpen =
+        RegExp(r'<(ul|ol)\b[^>]*>', caseSensitive: false);
+    final Match? nested = nestedOpen.firstMatch(item);
+    final String content =
+        nested == null ? item : item.substring(0, nested.start);
+    final String nestedHtml =
+        nested == null ? '' : item.substring(nested.start);
+
+    final bool isTask = RegExp(
+      r'''<input\b[^>]*type\s*=\s*["']?checkbox''',
+      caseSensitive: false,
+    ).hasMatch(content);
+    final bool checked = RegExp(
+      r'''<input\b[^>]*\bchecked\b''',
+      caseSensitive: false,
+    ).hasMatch(content);
+
+    final String text = _listItemText(content);
+    final String marker;
+    if (isTask) {
+      marker = checked ? '- [x] ' : '- [ ] ';
+    } else if (ordered) {
+      marker = '$number. ';
+      number++;
+    } else {
+      marker = '- ';
+    }
+    lines.add('$indent$marker$text');
+    if (nestedHtml.isNotEmpty) {
+      // 只去掉首尾的空白行，不能 trim —— 子列表的行首缩进就是层级本身。
+      final List<String> childLines =
+          _convertListsAtDepth(nestedHtml, depth + 1).split('\n');
+      while (childLines.isNotEmpty && childLines.first.trim().isEmpty) {
+        childLines.removeAt(0);
+      }
+      while (childLines.isNotEmpty && childLines.last.trim().isEmpty) {
+        childLines.removeLast();
+      }
+      if (childLines.isNotEmpty) {
+        lines.add(childLines.join('\n'));
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+/// 列表项文本：块级标签压成空格、保留行内样式，勾选框本身不产生文字。
+String _listItemText(String html) {
+  final String noCheckbox = html.replaceAll(
+    RegExp(r'<input\b[^>]*>', caseSensitive: false),
+    '',
+  );
+  final String noBlocks = noCheckbox
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+      .replaceAll(
+        RegExp(
+          r'</?(p|div|section|article|h[1-6]|li|ul|ol)\b[^>]*>',
+          caseSensitive: false,
+        ),
+        ' ',
+      );
+  return _decodeEntities(_inline(noBlocks).replaceAll(RegExp(r'<[^>]+>'), ''))
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+/// 代码块语言：`language-dart` / `lang-dart` / `<pre class="dart">` 均兼容。
+String _codeLanguage(String preHtml) {
+  final Match? classMatch = RegExp(
+    r'''class\s*=\s*["']([^"']*)["']''',
+    caseSensitive: false,
+  ).firstMatch(preHtml);
+  final String classes = classMatch?.group(1) ?? '';
+  final Match? lang = RegExp(
+    r'(?:language|lang)-([A-Za-z0-9_+#.-]+)',
+    caseSensitive: false,
+  ).firstMatch(classes);
+  return lang?.group(1) ?? '';
 }
 
 /// 行内样式与链接。
 String _inline(String html) {
   var s = html;
 
-  // 链接：保留文字与 href；空文字时直接给出 URL。
+  // 链接：保留文字、href 与 title；空文字时直接给出 URL。
   s = s.replaceAllMapped(
-    RegExp(
-      r'''<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)</a>''',
-      caseSensitive: false,
-    ),
+    RegExp(r'<a\b([^>]*)>([\s\S]*?)</a>', caseSensitive: false),
     (Match m) {
-      final String href = m.group(1)!.trim();
+      final String attrs = m.group(1)!;
+      final String href = (_attribute(attrs, 'href') ?? '').trim();
+      final String title = (_attribute(attrs, 'title') ?? '').trim();
       final String label = _plainText(m.group(2)!);
       if (href.isEmpty) {
         return label;
       }
-      return label.isEmpty ? href : '[$label]($href)';
+      if (label.isEmpty) {
+        return href;
+      }
+      // 小记的链接支持 title：`[文字](url "标题")`。
+      return title.isEmpty
+          ? '[$label]($href)'
+          : '[${label.replaceAll('"', r'\"')}]($href "${title.replaceAll('"', r'\"')}")';
     },
   );
 

@@ -45,8 +45,13 @@ class ClipboardReader {
 
 /// 纯文本是否具备明显的 Markdown 结构。
 ///
-/// 判定刻意保守：至少两处块级标记，或出现链接 / 图片 / 加粗 / 行内码。
-/// 普通聊天记录（只有一行以「-」开头）仍按纯文本粘贴，不会被拆成列表。
+/// 判定分两档，刻意避免误伤普通聊天文本（用户实测反馈「把聊天记录
+/// 拆成了列表」）：
+///  - **强信号**（任一命中即解析）：代码围栏、ATX 标题、setext 标题、
+///    GFM 表格、待办项、引用行、链接 / 图片 / 加粗 / 删除线 / 行内码 /
+///    高亮等行内标记；
+///  - **弱信号**（至少两处）：普通无序 / 有序列表项 —— 一行以 `-` 开头的
+///    回复仍按纯文本粘贴。
 bool looksLikeMarkdown(String text) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty) {
@@ -58,34 +63,49 @@ bool looksLikeMarkdown(String text) {
   if (_hasGfmTable(lines)) {
     return true;
   }
-  int markers = 0;
-  bool inFence = false;
-  for (final String line in lines) {
-    final String left = line.trimLeft();
-    if (left.startsWith('```')) {
-      inFence = !inFence;
-      // 代码围栏本身就是强信号，单行也按 Markdown 处理。
-      return true;
-    }
-    if (inFence) {
+
+  int listMarkers = 0;
+  for (var i = 0; i < lines.length; i++) {
+    final String left = lines[i].trimLeft();
+    if (left.isEmpty) {
       continue;
+    }
+    // 代码围栏本身就是强信号，单行也按 Markdown 处理。
+    if (left.startsWith('```') || left.startsWith('~~~')) {
+      return true;
     }
     // 标题是强信号：`## 小节` 单独出现也应当解析。
     if (RegExp(r'^#{1,6}\s').hasMatch(left)) {
       return true;
     }
-    if (RegExp(r'^>\s').hasMatch(left) ||
-        RegExp(r'^([-*+])\s').hasMatch(left) ||
-        RegExp(r'^\d+[.)]\s').hasMatch(left)) {
-      markers++;
+    // setext 标题：上一行是正文、这一行全是 = 或 -。
+    if (i > 0 &&
+        RegExp(r'^\s{0,3}(?:=+|-{2,})\s*$').hasMatch(left) &&
+        lines[i - 1].trim().isNotEmpty) {
+      return true;
+    }
+    // 待办项 `- [ ]` / `- [x]` 结构明确，单行也识别（语雀/Notion 常见）。
+    if (RegExp(r'^[-*+]\s+\[[ xX]\]\s').hasMatch(left)) {
+      return true;
+    }
+    // 引用符号 `>` 是行首独有结构，单行也识别。
+    if (RegExp(r'^>\s?').hasMatch(left)) {
+      return true;
+    }
+    if (RegExp(r'^([-*+])\s+').hasMatch(left) ||
+        RegExp(r'^\d+[.)]\s+').hasMatch(left)) {
+      listMarkers++;
     }
   }
-  if (markers >= 2) {
+  if (listMarkers >= 2) {
     return true;
   }
+  // 行内标记：出现即说明原文是 Markdown，而不是随手敲的句子。
   return RegExp(r'!\[[^\]]*\]\([^)]+\)').hasMatch(trimmed) ||
       RegExp(r'\[[^\]]+\]\([^)]+\)').hasMatch(trimmed) ||
       RegExp(r'\*\*[^*\n]+\*\*').hasMatch(trimmed) ||
+      RegExp(r'~~[^~\n]+~~').hasMatch(trimmed) ||
+      RegExp(r'==[^=\n]+==').hasMatch(trimmed) ||
       RegExp(r'`[^`\n]+`').hasMatch(trimmed);
 }
 
@@ -102,18 +122,27 @@ bool shouldTreatImeInsertAsPaste(
   String? clipboardHtml,
 }) {
   final String incoming = inserted.trim();
-  if (incoming.length < 20) {
+  if (incoming.isEmpty) {
     return false;
   }
   final String? snapshot = clipboardText?.trim();
-  if (snapshot != null &&
-      snapshot.length >= 20 &&
-      clipboardTextsMatch(incoming, snapshot)) {
-    return (clipboardHtml?.trim().isNotEmpty ?? false) ||
-        looksLikeMarkdown(incoming);
+  final bool matchesSnapshot = snapshot != null &&
+      snapshot.isNotEmpty &&
+      clipboardTextsMatch(incoming, snapshot);
+  if (matchesSnapshot) {
+    // 与当前剪贴板一致：只要带 HTML 或本身是 Markdown 就拦截。这里不再
+    // 要求 20 字以上 —— 复制一条短待办（`- [ ] 买菜`）或短标题也要识别。
+    // 误判成本很低：MarkdownPaster 解析不出内容会返回 false，回退输入法。
+    return incoming.length >= 2 &&
+        ((clipboardHtml?.trim().isNotEmpty ?? false) ||
+            looksLikeMarkdown(incoming));
   }
+  // 快照对不上（过期 / 输入法自带剪贴板）：保守一些，要求足够长。
   // 输入法的换行走 performAction，不会出现在 commitText 里；一次插入带换行
   // 基本只能是粘贴。Markdown 结构同理：逐字输入每次 delta 都很短。
+  if (incoming.length < 20) {
+    return false;
+  }
   return looksLikeMarkdown(incoming) || incoming.contains('\n');
 }
 
@@ -146,17 +175,34 @@ String? markdownFromClipboard({required String text, String? html}) {
     return null;
   }
   if (looksLikeMarkdown(plain)) {
-    return plain;
+    return normalizeRemoteImages(plain);
   }
   // Excel / 飞书 / 语雀表格复制成「纯文本」时只剩制表符分隔的行，
   // 这里按语雀「粘贴为表格」的规则自动还原成 GFM 表格。
   final String? table = tabSeparatedToMarkdown(plain);
   if (table != null) {
-    return table;
+    return normalizeRemoteImages(table);
   }
   // 从微信 / 备忘录复制出来的纯文本，项目符号常是「•」「·」而不是
   // Markdown 的「-」。这种结构明确，直接归一化成列表再解析。
-  return normalizePlainBullets(plain);
+  final String? bullets = normalizePlainBullets(plain);
+  return bullets == null ? null : normalizeRemoteImages(bullets);
+}
+
+/// 远程图片降级成普通链接。
+///
+/// 小记只渲染落盘的本地附件（`assets/<noteId>/…`）；从 GitHub / 网页
+/// 复制过来的 `![](https://…)` 直接解析成图片块会得到一张坏图。转成
+/// 链接既能保留信息，也不会破坏阅读。
+String normalizeRemoteImages(String markdown) {
+  return markdown.replaceAllMapped(
+    RegExp(r'!\[([^\]\n]*)\]\(\s*((?:https?:)?//[^)\s]+)\s*\)'),
+    (Match m) {
+      final String alt = m.group(1)!.trim();
+      final String url = m.group(2)!;
+      return '[${alt.isEmpty ? url : alt}]($url)';
+    },
+  );
 }
 
 /// 制表符分隔文本 → GFM 管道表格；不像表格时返回 null。
@@ -237,12 +283,15 @@ String? normalizePlainBullets(String text) {
   final List<String> lines = text.split('\n');
   var bullets = 0;
   final List<String> converted = lines.map((String line) {
-    final Match? match = RegExp(r'^([ \t]*)[•·‣◦]\s+').firstMatch(line);
+    // 中文输入法 / 微信复制常见全角空格缩进（U+3000），一并当作缩进。
+    final Match? match =
+        RegExp(r'^([ \t\u3000]*)[•·‣◦▪]\s+').firstMatch(line);
     if (match == null) {
       return line;
     }
     bullets++;
-    return '${match.group(1)}- ${line.substring(match.end)}';
+    final String indent = match.group(1)!.replaceAll('\u3000', '  ');
+    return '$indent- ${line.substring(match.end)}';
   }).toList();
   if (bullets < 2) {
     return null;
@@ -331,21 +380,56 @@ class MarkdownPaster {
     }
   }
 
-  /// 解析 Markdown，并去掉空行产生的哨兵空段落。
+  /// 解析 Markdown，并整理空段落。
   ///
-  /// 小记的存储格式不保留空行，空段落只会让粘贴结果多出空白；
-  /// 解析器还会在末尾补一个可编辑的哨兵段落，一并丢掉。
+  /// 空段落不能全部丢掉：粘贴「第一段 / 空行 / 第二段」时，两个段落节点
+  /// 之间如果没有空段落，序列化会写成相邻两行，下次解析就合并成**一个**
+  /// 段落（行内换行），段落间距永久丢失。这里只在「普通段落 → 普通段落」
+  /// 之间保留一个空段落，其余位置与首尾一律去掉 —— 既保住段落分隔，
+  /// 也不多出空白。
   List<DocumentNode> _parseNodes(String markdown) {
     final MutableDocument parsed = deserializeXiaojiMarkdown(markdown);
-    final List<DocumentNode> nodes = <DocumentNode>[
+    bool isBlankParagraph(DocumentNode node) =>
+        node is ParagraphNode &&
+        node.text.toPlainText().trim().isEmpty &&
+        _isPlainParagraph(node);
+
+    final List<DocumentNode> all = <DocumentNode>[
       for (int i = 0; i < parsed.nodeCount; i++) parsed.getNodeAt(i)!,
     ];
-    nodes.removeWhere(
-      (DocumentNode node) =>
-          node is ParagraphNode &&
-          node.text.toPlainText().trim().isEmpty &&
-          _isPlainParagraph(node),
-    );
+    final List<DocumentNode> nodes = <DocumentNode>[];
+    for (int i = 0; i < all.length; i++) {
+      final DocumentNode node = all[i];
+      if (!isBlankParagraph(node)) {
+        nodes.add(node);
+        continue;
+      }
+      // 开头的空段落不要。
+      if (nodes.isEmpty) {
+        continue;
+      }
+      // 找下一个非空块；结尾的空段落不要。
+      DocumentNode? next;
+      for (int j = i + 1; j < all.length; j++) {
+        if (!isBlankParagraph(all[j])) {
+          next = all[j];
+          break;
+        }
+      }
+      if (next == null) {
+        continue;
+      }
+      // 只有「普通段落 → 普通段落」才必须留空行，否则下次解析会把两段
+      // 合并成一个段落。标题/列表/代码等块之间不需要，留了反而多出空白。
+      final DocumentNode prev = nodes.last;
+      final bool needsBlank = prev is ParagraphNode &&
+          _isPlainParagraph(prev) &&
+          next is ParagraphNode &&
+          _isPlainParagraph(next);
+      if (needsBlank && !isBlankParagraph(nodes.last)) {
+        nodes.add(node);
+      }
+    }
     return nodes;
   }
 
@@ -402,6 +486,12 @@ class MarkdownPaster {
     DocumentNode? lastInserted;
     int insertAt = index + 1;
 
+    /// 普通段落之间需要空段落分隔，否则存盘重读会被合并成一段。
+    ParagraphNode separator() => ParagraphNode(
+          id: Editor.createNodeId(),
+          text: AttributedText(),
+        );
+
     if (before.toPlainText().isEmpty) {
       // 当前块会被完全替换成第一个粘贴块，不留空段落。
       requests.add(ReplaceNodeRequest(existingNodeId: node.id, newNode: first));
@@ -420,6 +510,16 @@ class MarkdownPaster {
           newNode: node.copyTextNodeWith(text: before),
         ),
       );
+      // 前半段是普通段落、粘贴块也以普通段落开头时，中间补一个空段落，
+      // 否则「前半段 + 粘贴首段」存盘后会被解析成一个段落。
+      if (first is ParagraphNode && _isPlainParagraph(first)) {
+        requests.add(
+          InsertNodeAtIndexRequest(
+            nodeIndex: insertAt++,
+            newNode: separator(),
+          ),
+        );
+      }
       for (final DocumentNode pastedNode in pasted) {
         requests.add(
           InsertNodeAtIndexRequest(nodeIndex: insertAt++, newNode: pastedNode),
@@ -431,6 +531,15 @@ class MarkdownPaster {
     late final DocumentNode caretNode;
     late final int caretOffset;
     if (after.toPlainText().isNotEmpty) {
+      // 光标后的残余文字另起一段；它和粘贴块之间同样需要空段落。
+      if (lastInserted is ParagraphNode && _isPlainParagraph(lastInserted)) {
+        requests.add(
+          InsertNodeAtIndexRequest(
+            nodeIndex: insertAt++,
+            newNode: separator(),
+          ),
+        );
+      }
       final ParagraphNode tail =
           ParagraphNode(id: Editor.createNodeId(), text: after);
       requests.add(

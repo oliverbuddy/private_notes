@@ -7,6 +7,9 @@ final RegExp _taskLinePattern = RegExp(r'^\s*[-*+]\s\[[ xX]\]\s');
 /// 普通列表行（含任务行）。
 final RegExp _listLinePattern = RegExp(r'^\s*([-*+]\s|\d+[.)]\s)');
 
+/// 管道表格行（GFM）：表格没有「空行结束」语法，相邻空行不能被哨兵替换。
+final RegExp _tableLinePattern = RegExp(r'^\s*\|');
+
 /// 解析前规范化。
 ///
 /// super_editor 的 markdown 解析器有一个实测缺陷：任务行若与前面的列表
@@ -700,11 +703,18 @@ String _protectBlankLines(String md) {
     }
     final touchesList = _listLinePattern.hasMatch(prevLine) ||
         _listLinePattern.hasMatch(nextLine);
+    // 表格同理，而且后果更严重：管道表格没有「空行结束」的语法，解析器
+    // 会一直把后续行当表格行。哨兵行是**非空文本行**，夹在表格和正文之间
+    // 会把哨兵、正文一起吞进表格（实测：表格后的链接变成表格最后一行，
+    // 存盘后原文丢失）。表格前后的空行必须保留成真正的空行。
+    final touchesTable = _tableLinePattern.hasMatch(prevLine) ||
+        _tableLinePattern.hasMatch(nextLine);
     if (!insideFence &&
         isBlank &&
         hasContentBefore &&
         hasContentAfter &&
-        !touchesList) {
+        !touchesList &&
+        !touchesTable) {
       out.add(_blankParagraphSentinel);
       continue;
     }
@@ -1100,6 +1110,10 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
       final String? table = _tableMarkdown(node);
       if (table != null) {
         write(table);
+        // 表格后面必须留一个空行：管道表格没有「空行结束」语法，紧跟着
+        // 写下一段正文，重新解析时会被当成表格的最后一行吞掉。
+        // 用 pendingBlanks 而不是立刻写，末尾表格不会多出空行。
+        pendingBlanks = 1;
       }
       continue;
     }
@@ -1141,12 +1155,13 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
         continue;
       }
       if (blockType == codeAttribution) {
-        // 代码块：围栏包裹，保留语言标记；内容里出现 ``` 时自动加长围栏，
-        // 否则片段里的一段示例代码会把围栏提前闭合、把后半段挤成正文。
-        //
-        // 解析器会给代码文本补一个结尾换行，直接按行写回会多出一行空行，
-        // 往返回合会让空行越积越多 —— 这里先去掉结尾换行。
-        final String code = plain.replaceFirst(RegExp(r'\n+$'), '');
+        // 解析器会给代码文本补一个结尾换行（实测：```\na\n``` 解析出 "a\n"），
+        // 直接按行写回会多出一行空行，往返回合会让空行越积越多。
+        // 只去掉**这一个**合成换行：用户自己在代码块末尾敲的空行要保留，
+        // 否则「围栏内回车再输入」时最后的空行存不下来。
+        final String code = plain.endsWith('\n')
+            ? plain.substring(0, plain.length - 1)
+            : plain;
         final String language =
             (node.getMetadataValue(kCodeLanguageMetadata) as String?)?.trim() ??
                 '';

@@ -88,8 +88,13 @@ List<InlineSpan> markdownSpans(
 
   final spans = <InlineSpan>[];
   final baseSize = base.fontSize ?? 17;
-  var inCodeBlock = false;
-  // 代码块可见行数：围栏行本身不占位，但底色要覆盖住代码区域。
+  // 代码围栏不是「见到 ``` 就切换」：代码内容本身可能含 ```（写入时围栏
+  // 会自动加长成 ````），见到就切换会把后半段代码渲染成正文。这里记录
+  // 开启围栏的字符与长度，只有「同字符、长度不小于开启围栏、且后面没有
+  // 其它内容」的行才算闭合 —— 与序列化器 _codeFenceFor 的规则一致。
+  String? fenceChar;
+  var fenceLength = 0;
+  final RegExp fenceLine = RegExp(r'^([`~]{3,})([^`~]*)$');
   var codeLineCount = 0;
   // 待办序号计数器：回调按「块内第几个待办」定位要翻转的行。
   var todoCounter = 0;
@@ -103,21 +108,30 @@ List<InlineSpan> markdownSpans(
     // 代码块整体等宽、带浅底，围栏本身不显示。
     // 行首尾各垫一个空格当左右留白（span 做不了 padding，这是等价做法）；
     // 空行也要有底色，否则色块中间会断开一条白缝。
-    if (line.trimLeft().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      if (!inCodeBlock && codeLineCount > 0) {
-        // 块结束：尾部补一个空行当块后间距（阅读态专属，不回写文本）。
-        spans.add(TextSpan(text: '\n', style: _codeBase(base, colors)));
-      }
-      if (inCodeBlock) {
+    final RegExpMatch? fence = fenceLine.firstMatch(line.trimLeft());
+    if (fence != null &&
+        (fenceChar == null ||
+            (fence.group(1)![0] == fenceChar &&
+                fence.group(1)!.length >= fenceLength))) {
+      final bool opening = fenceChar == null;
+      if (opening) {
+        fenceChar = fence.group(1)![0];
+        fenceLength = fence.group(1)!.length;
         codeLineCount = 0;
+      } else {
+        fenceChar = null;
+        fenceLength = 0;
+        if (codeLineCount > 0) {
+          // 块结束：尾部补一个空行当块后间距（阅读态专属，不回写文本）。
+          spans.add(TextSpan(text: '\n', style: _codeBase(base, colors)));
+        }
       }
       if (!isLast) {
         spans.add(TextSpan(text: newline, style: _codeBase(base, colors)));
       }
       continue;
     }
-    if (inCodeBlock) {
+    if (fenceChar != null) {
       codeLineCount++;
       spans.add(TextSpan(
         text: ' $line$newline',

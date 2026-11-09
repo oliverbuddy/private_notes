@@ -45,6 +45,51 @@ import 'paste_ime_decorator.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
 
+/// 编辑态的行内样式：内核默认（粗体/斜体/删除线）+ 行内码 + 高亮 + 链接。
+///
+/// 抽成纯函数是为了可单测。两处内核不认的扩展都在这里补：
+///  - `codeAttribution`：内核的 `defaultStyleBuilder` 没有这个分支，
+///    不补的话「行内码」只有模型属性、编辑态毫无视觉变化；
+///  - `highlightAttribution`：`==高亮==` 是本项目扩展。
+/// 链接则把内核默认的 lightBlue 换成应用主色，和阅读态保持一致。
+TextStyle xiaojiInlineTextStyler(
+  Set<Attribution> attributions,
+  TextStyle baseStyle, {
+  required Color textColor,
+  required Color accentColor,
+  required Color codeBackground,
+  required Color highlightBackground,
+}) {
+  TextStyle style = defaultInlineTextStyler(attributions, baseStyle);
+  // 加粗对齐阅读态的 600：中文的 700 与 600 观感差别很小，但同一篇笔记
+  // 在列表摘要里是 600、详情里是 700 时，来回切换会觉得「字重变了」。
+  if (attributions.contains(boldAttribution)) {
+    style = style.copyWith(fontWeight: AppWeight.semibold);
+  }
+  // 行内码：等宽 + 微缩 + 浅底，与阅读态（markdown_view 的 code 分支）一致。
+  if (attributions.contains(codeAttribution)) {
+    style = style.copyWith(
+      fontFamily: 'monospace',
+      fontSize: (baseStyle.fontSize ?? AppFontSize.summary) * 0.9,
+      color: textColor.withValues(alpha: 0.9),
+      backgroundColor: codeBackground,
+    );
+  }
+  // `==高亮==`：内核不认识这个属性，只在这里给它上底色。
+  if (attributions.contains(highlightAttribution)) {
+    style = style.copyWith(backgroundColor: highlightBackground);
+  }
+  // 链接：内核默认是 lightBlue，与应用的强调色不一致（阅读态用主色）。
+  if (attributions.whereType<LinkAttribution>().isNotEmpty) {
+    style = style.copyWith(
+      color: accentColor,
+      decoration: TextDecoration.underline,
+      decorationColor: accentColor,
+    );
+  }
+  return style;
+}
+
 /// M1：跑在 super_editor 内核上的并行编辑页。
 ///
 /// 编辑页的踩坑记录（来自 17 轮迭代）：
@@ -1195,14 +1240,50 @@ class _NewEditorPageState extends State<NewEditorPage>
       _showLinkSheet();
       return;
     }
+    // 没选中文字时，行内样式只能作用到「接下来输入的文字」（内核的
+    // 输入态，和 Word / Notion / 鸿蒙 RichEditor 的 typing style 同理）。
+    // 此时按钮会点亮，但正文暂时不会变化 —— 给一句提示，避免用户以为
+    // 点了没反应。
+    final bool typingStyle = _isTypingStyleCommand(command) &&
+        (_composer.selection?.isCollapsed ?? false);
     _commands.handleCommand(command);
     _refreshActiveCommands();
+    if (typingStyle) {
+      _showTypingStyleHint(command);
+    }
     // 块级 / 插入类命令是一次性结构动作：执行后立刻收面板、回键盘，
     // 用户可以马上继续输入（不用再点一次 Aa，符合「点一下就走」的直觉）。
     // 文字样式保持展开，方便连续加粗 + 斜体。
     if (_isOneShotPanelCommand(command)) {
       _closePanel(showKeyboard: true);
     }
+  }
+
+  /// 是否属于「行内样式」（可以作用于输入态而不只是选区）。
+  bool _isTypingStyleCommand(MarkdownCommand command) {
+    return switch (command) {
+      MarkdownCommand.bold ||
+      MarkdownCommand.italic ||
+      MarkdownCommand.strike ||
+      MarkdownCommand.code ||
+      MarkdownCommand.highlight =>
+        true,
+      _ => false,
+    };
+  }
+
+  /// 折叠光标下行内样式的提示文案。
+  void _showTypingStyleHint(MarkdownCommand command) {
+    final (String label, Attribution attribution) = switch (command) {
+      MarkdownCommand.bold => ('加粗', boldAttribution),
+      MarkdownCommand.italic => ('斜体', italicsAttribution),
+      MarkdownCommand.strike => ('删除线', strikethroughAttribution),
+      MarkdownCommand.code => ('行内码', codeAttribution),
+      _ => ('高亮', highlightAttribution),
+    };
+    final bool on =
+        _composer.preferences.currentAttributions.contains(attribution);
+    _showHint(on ? '已开启$label，输入的文字将生效' : '已关闭$label');
   }
 
   /// Aa 面板里「点一下就收起」的命令（结构/插入类）。
@@ -2688,6 +2769,22 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 之前写在这一层里的手机端字阶其实从未生效，真机上看到的一直是
     // 桌面排版（用户反馈的「整体偏大、Typora 感」就是这个根因）。
     return defaultStylesheet.copyWith(
+      // 行内样式必须挂在 Stylesheet 上，不能写进 StyleRule！
+      // super_editor 的 SingleColumnStylesheetStyler 合并样式时，对
+      // **非 TextStyle / 非 CascadingPadding** 的值只保留旧值（见
+      // _mergeStyles：既不是 TextStyle 也不是 CascadingPadding 时什么都不做），
+      // 而 aggregateStyles 一开始就塞了 stylesheet.inlineTextStyler。所以
+      // 写在规则里的 Styles.inlineTextStyler 会被静默丢弃 —— 这正是
+      // 「高亮 / 行内码在详情页完全没效果，列表摘要却正常」的根因。
+      inlineTextStyler: (Set<Attribution> attributions, TextStyle baseStyle) =>
+          xiaojiInlineTextStyler(
+            attributions,
+            baseStyle,
+            textColor: colors.text,
+            accentColor: colors.accent,
+            codeBackground: colors.surface2,
+            highlightBackground: colors.accentBg,
+          ),
       addRulesAfter: <StyleRule>[
         StyleRule(
           BlockSelector.all,
@@ -2715,18 +2812,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                 offset: 3,
                 capType: StrokeCap.round,
               ),
-              // `==高亮==`：内核不认识这个属性，只在这里给它上底色。
-              // 先走内核默认的行内样式（粗体/斜体/删除线/行内码/链接），
-              // 再叠加高亮，避免覆盖掉既有样式。
-              Styles.inlineTextStyler:
-                  (Set<Attribution> attributions, TextStyle baseStyle) {
-                final TextStyle style =
-                    defaultInlineTextStyler(attributions, baseStyle);
-                if (!attributions.contains(highlightAttribution)) {
-                  return style;
-                }
-                return style.copyWith(backgroundColor: colors.accentBg);
-              },
+              // 行内样式见上方 `inlineTextStyler` 参数（写在规则里会被丢弃）。
             };
           },
         ),
@@ -2844,6 +2930,48 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: colors.text,
             ),
             Styles.padding: const CascadingPadding.only(top: 14, bottom: 4),
+          },
+        ),
+        // H4–H6：内核默认样式表只写到 H3，不补的话这三档在详情页与正文
+        // 完全一样（列表摘要却按层级递减，两处看起来不是同一篇文档）。
+        // 字号已到正文下限，靠字重与颜色继续区分层级。
+        StyleRule(
+          const BlockSelector('header4'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.textStyle: TextStyle(
+              fontSize: AppFontSize.summary,
+              fontWeight: AppWeight.semibold,
+              height: 1.35,
+              leadingDistribution: TextLeadingDistribution.even,
+              color: colors.text,
+            ),
+            Styles.padding: const CascadingPadding.only(top: 12, bottom: 4),
+          },
+        ),
+        StyleRule(
+          const BlockSelector('header5'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.textStyle: TextStyle(
+              fontSize: AppFontSize.summary,
+              fontWeight: AppWeight.medium,
+              height: 1.35,
+              leadingDistribution: TextLeadingDistribution.even,
+              color: colors.text,
+            ),
+            Styles.padding: const CascadingPadding.only(top: 10, bottom: 2),
+          },
+        ),
+        StyleRule(
+          const BlockSelector('header6'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.textStyle: TextStyle(
+              fontSize: AppFontSize.summary,
+              fontWeight: AppWeight.regular,
+              height: 1.35,
+              leadingDistribution: TextLeadingDistribution.even,
+              color: colors.text.withValues(alpha: 0.72),
+            ),
+            Styles.padding: const CascadingPadding.only(top: 8, bottom: 2),
           },
         ),
         // 引用块：底色/圆角/竖条/内边距都由 [QuoteBlock] 画（见

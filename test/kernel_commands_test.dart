@@ -346,4 +346,48 @@ void main() {
       );
     }
   });
+
+  test('折叠光标下行内样式写入输入态，再点一次可取消', () {
+    editor.execute(<EditRequest>[
+      InsertNodeAtIndexRequest(
+        nodeIndex: 0,
+        newNode: ParagraphNode(
+          id: Editor.createNodeId(),
+          text: AttributedText('光标处'),
+        ),
+      ),
+    ]);
+
+    const cases = <(MarkdownCommand, Attribution)>[
+      (MarkdownCommand.bold, boldAttribution),
+      (MarkdownCommand.italic, italicsAttribution),
+      (MarkdownCommand.strike, strikethroughAttribution),
+      (MarkdownCommand.code, codeAttribution),
+      (MarkdownCommand.highlight, highlightAttribution),
+    ];
+    for (final (command, attribution) in cases) {
+      // 每个用例都从一个干净的输入态开始。
+      composer.preferences.clearStyles();
+      placeCaretAt(0, offset: 1);
+
+      commands.handleCommand(command);
+      expect(
+        composer.preferences.currentAttributions,
+        contains(attribution),
+        reason: '$command 在折叠光标下必须写入输入态，否则点了没反应',
+      );
+      expect(
+        commands.computeActiveCommands(),
+        contains(command),
+        reason: '$command 写入输入态后 Aa 按钮要能点亮',
+      );
+
+      commands.handleCommand(command);
+      expect(
+        composer.preferences.currentAttributions,
+        isNot(contains(attribution)),
+        reason: '$command 再点一次必须取消',
+      );
+    }
+  });
 }

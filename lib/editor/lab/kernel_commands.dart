@@ -63,21 +63,19 @@ class KernelCommands {
         _toggleQuote();
         break;
       case MarkdownCommand.bold:
-        ops.toggleAttributionsOnSelection(<Attribution>{boldAttribution});
+        _toggleInline(<Attribution>{boldAttribution});
         break;
       case MarkdownCommand.italic:
-        ops.toggleAttributionsOnSelection(<Attribution>{italicsAttribution});
+        _toggleInline(<Attribution>{italicsAttribution});
         break;
       case MarkdownCommand.strike:
-        ops.toggleAttributionsOnSelection(
-            <Attribution>{strikethroughAttribution});
+        _toggleInline(<Attribution>{strikethroughAttribution});
         break;
       case MarkdownCommand.code:
-        ops.toggleAttributionsOnSelection(<Attribution>{codeAttribution});
+        _toggleInline(<Attribution>{codeAttribution});
         break;
       case MarkdownCommand.highlight:
-        ops.toggleAttributionsOnSelection(
-            <Attribution>{highlightAttribution});
+        _toggleInline(<Attribution>{highlightAttribution});
         break;
       case MarkdownCommand.link:
         _applyLink();
@@ -94,6 +92,25 @@ class KernelCommands {
       case MarkdownCommand.outdent:
         _indent(false);
         break;
+    }
+  }
+
+  /// 行内样式切换。
+  ///
+  /// 折叠光标（没选中文字）时 [CommonEditorOperations.toggleAttributionsOnSelection]
+  /// 会直接返回 false —— 内核只对非空选区生效。之前用户在只有光标时点
+  /// 「加粗 / 斜体 / 删除线 / 行内码 / 高亮」毫无反应，就是这里漏了分支。
+  /// 对齐官方移动工具栏的做法：折叠光标写进 composer 的输入态，下一次
+  /// 输入的字符自动带上该样式。
+  void _toggleInline(Set<Attribution> attributions) {
+    final selection = composer.selection;
+    if (selection == null) {
+      return;
+    }
+    if (selection.isCollapsed) {
+      ops.toggleComposerAttributions(attributions);
+    } else {
+      ops.toggleAttributionsOnSelection(attributions);
     }
   }
 
@@ -542,9 +559,28 @@ class KernelCommands {
           : MarkdownCommand.bullet);
     }
 
-    // 行内格式：选区必须折叠在同一个节点里，且样式覆盖整个选区才点亮。
-    if (!selection.isCollapsed &&
-        selection.base.nodeId == selection.extent.nodeId) {
+    // 行内格式：
+    //  - 折叠光标：读 composer 的「下一次输入样式」。用户在 Aa 面板点的
+    //    加粗/斜体就写在这里，不读的话按钮不点亮、看起来像没生效；
+    //  - 展开选区：样式覆盖整个选区才点亮。
+    if (selection.isCollapsed) {
+      final Set<Attribution> input = composer.preferences.currentAttributions;
+      if (input.contains(boldAttribution)) {
+        active.add(MarkdownCommand.bold);
+      }
+      if (input.contains(italicsAttribution)) {
+        active.add(MarkdownCommand.italic);
+      }
+      if (input.contains(strikethroughAttribution)) {
+        active.add(MarkdownCommand.strike);
+      }
+      if (input.contains(codeAttribution)) {
+        active.add(MarkdownCommand.code);
+      }
+      if (input.contains(highlightAttribution)) {
+        active.add(MarkdownCommand.highlight);
+      }
+    } else if (selection.base.nodeId == selection.extent.nodeId) {
       final baseOffset =
           (selection.base.nodePosition as TextNodePosition).offset;
       final extentOffset =

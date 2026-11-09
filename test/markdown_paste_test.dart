@@ -38,6 +38,16 @@ void main() {
       expect(looksLikeMarkdown('- 只有一行短横线'), isFalse);
       expect(looksLikeMarkdown('1.5 倍速'), isFalse);
     });
+
+    test('单条待办 / 单行引用 / setext 标题都算强信号', () {
+      expect(looksLikeMarkdown('- [ ] 买菜'), isTrue);
+      expect(looksLikeMarkdown('- [x] 已完成'), isTrue);
+      expect(looksLikeMarkdown('> 一句引用'), isTrue);
+      expect(looksLikeMarkdown('标题\n===='), isTrue);
+      expect(looksLikeMarkdown('标题\n----'), isTrue);
+      expect(looksLikeMarkdown('~~删除线~~'), isTrue);
+      expect(looksLikeMarkdown('==高亮=='), isTrue);
+    });
   });
 
   group('markdownFromClipboard', () {
@@ -62,12 +72,33 @@ void main() {
       expect(md, contains('- 苹果'));
       expect(md, contains('- 香蕉'));
     });
+
+    test('纯文本里的远程图片降级成链接（本地仓库无法渲染远程图）', () {
+      final String? md = markdownFromClipboard(
+        text: '看这个 ![截图](https://x.test/a.png) 效果',
+      );
+      expect(md, isNotNull);
+      expect(md, contains('[截图](https://x.test/a.png)'));
+      expect(md, isNot(contains('![')));
+    });
+
+    test('短待办与短标题也能识别', () {
+      expect(markdownFromClipboard(text: '- [ ] 买菜'), '- [ ] 买菜');
+      expect(markdownFromClipboard(text: '# 标题'), '# 标题');
+    });
   });
 
   group('normalizePlainBullets', () {
     test('两行以上才转换', () {
       expect(normalizePlainBullets('• 一\n· 二'), '- 一\n- 二');
       expect(normalizePlainBullets('• 只有一行'), isNull);
+    });
+
+    test('全角空格缩进也当作层级', () {
+      expect(
+        normalizePlainBullets('　• 一\n　• 二'),
+        '  - 一\n  - 二',
+      );
     });
   });
 
@@ -108,6 +139,16 @@ void main() {
           text,
           clipboardText: text,
           clipboardHtml: '<p>$text</p>',
+        ),
+        isTrue,
+      );
+    });
+
+    test('与快照一致的短 Markdown（单条待办）也拦截', () {
+      expect(
+        shouldTreatImeInsertAsPaste(
+          '- [ ] 买菜',
+          clipboardText: '- [ ] 买菜',
         ),
         isTrue,
       );
@@ -266,9 +307,12 @@ void main() {
       expect((nodes[0] as ParagraphNode).text.toPlainText(), 'hello');
       expect((nodes[1] as ParagraphNode).text.toPlainText(), 'H');
       expect((nodes[2] as ParagraphNode).text.toPlainText(), 'X');
-      expect((nodes[3] as ParagraphNode).text.toPlainText(), ' world');
+      // X 和光标后的残余文字都是普通段落：中间补一个空段落，避免存盘后
+      // 被合并成一段（段落间距丢失）。
+      expect((nodes[3] as ParagraphNode).text.toPlainText(), isEmpty);
+      expect((nodes[4] as ParagraphNode).text.toPlainText(), ' world');
       final DocumentSelection selection = composer.selection!;
-      expect(selection.extent.nodeId, nodes[3].id);
+      expect(selection.extent.nodeId, nodes[4].id);
       expect(selection.extent.nodePosition, const TextNodePosition(offset: 0));
     });
 
@@ -294,6 +338,99 @@ void main() {
         node.text.hasAttributionAt(11, attribution: boldAttribution),
         isTrue,
       );
+    });
+
+    test('语雀式 HTML：嵌套列表 / 待办 / 代码语言 / 表格后正文都保留', () async {
+      placeCaretAt(0, offset: 5);
+      await MarkdownPaster(
+        editor: editor,
+        document: document,
+        composer: composer,
+        ops: ops,
+        reader: const _FakeReader(
+          ClipboardContent(
+            text: '语雀内容',
+            html: '<h2>标题</h2>'
+                '<ul>'
+                '<li><p>一级</p><ul><li><p>二级</p></li></ul></li>'
+                '<li><p>同级</p></li>'
+                '</ul>'
+                '<ul><li><input type="checkbox" checked> 已完成</li></ul>'
+                '<pre><code class="language-dart">void main() {}</code></pre>'
+                '<table><tr><th>名</th><th>值</th></tr>'
+                '<tr><td>a</td><td>1</td></tr></table>'
+                '<p>表格后的正文</p>',
+          ),
+        ),
+      ).paste();
+
+      final List<DocumentNode> nodes = _nodes(document);
+      final List<ListItemNode> bullets =
+          nodes.whereType<ListItemNode>().toList();
+      expect(bullets.map((ListItemNode n) => n.text.toPlainText()),
+          containsAll(<String>['一级', '二级', '同级']));
+      // 二级列表项必须保留缩进层级。
+      expect(bullets.any((ListItemNode n) => n.indent == 1), isTrue);
+
+      final TaskNode task = nodes.whereType<TaskNode>().single;
+      expect(task.text.toPlainText(), '已完成');
+      expect(task.isComplete, isTrue);
+
+      final ParagraphNode code = nodes
+          .whereType<ParagraphNode>()
+          .firstWhere((ParagraphNode n) =>
+              n.getMetadataValue(NodeMetadata.blockType) == codeAttribution);
+      expect(
+        code.getMetadataValue(kCodeLanguageMetadata),
+        'dart',
+      );
+
+      final TableBlockNode table = nodes.whereType<TableBlockNode>().single;
+      expect(table.rowCount, 2);
+
+      // 表格后的正文必须还是独立段落，不能被吞进表格。
+      expect(
+        nodes.whereType<ParagraphNode>().any(
+              (ParagraphNode n) => n.text.toPlainText() == '表格后的正文',
+            ),
+        isTrue,
+      );
+      expect(document.nodeCount, nodes.length);
+    });
+
+    test('多段落粘贴保留段落分隔（存盘重读仍是两段）', () async {
+      placeCaretAt(0, offset: 5);
+      await MarkdownPaster(
+        editor: editor,
+        document: document,
+        composer: composer,
+        ops: ops,
+        reader: const _FakeReader(
+          ClipboardContent(
+            text: '第一段\n\n第二段',
+            html: '<p>第一段</p><p>第二段</p>',
+          ),
+        ),
+      ).paste();
+
+      final List<DocumentNode> nodes = _nodes(document);
+      int indexOf(String text) => nodes.indexWhere(
+            (DocumentNode n) =>
+                n is ParagraphNode && n.text.toPlainText() == text,
+          );
+      final int first = indexOf('第一段');
+      final int second = indexOf('第二段');
+      expect(first, greaterThanOrEqualTo(0));
+      expect(second, first + 2, reason: '两段之间必须有一个空段落');
+
+      // 存盘再读，两段不能合并成一段。
+      final String saved = serializeDocumentToXiaojiMarkdown(document);
+      final MutableDocument again = deserializeXiaojiMarkdown(saved);
+      final List<String> texts = again
+          .whereType<ParagraphNode>()
+          .map((ParagraphNode n) => n.text.toPlainText())
+          .toList();
+      expect(texts, containsAll(<String>['第一段', '第二段']));
     });
   });
 

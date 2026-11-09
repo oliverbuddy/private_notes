@@ -303,4 +303,114 @@ void main() {
       expect(find.byType(UnknownComponent), findsNothing);
     });
   });
+
+  group('行内样式渲染（详情页）', () {
+    // 直接检查 SuperText 的 richText span：这是编辑态真正画到屏幕上的样式，
+    // 能捕获「样式表规则被静默丢弃」这类只在渲染层暴露的问题。
+    // SuperText 未由 super_editor 导出，只能用运行时类型名取 Widget 再动态读。
+    List<TextSpan> collectSpans(WidgetTester tester) {
+      final List<TextSpan> spans = <TextSpan>[];
+      void walk(InlineSpan span) {
+        if (span is TextSpan) {
+          spans.add(span);
+          for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
+            walk(child);
+          }
+        }
+      }
+
+      for (final Widget widget
+          in tester.widgetList(find.byWidgetPredicate(
+        (Widget w) => w.runtimeType.toString() == 'SuperText',
+      ))) {
+        final dynamic dynamicWidget = widget;
+        walk(dynamicWidget.richText as InlineSpan);
+      }
+      return spans;
+    }
+
+    testWidgets('==高亮== 与 `行内码` 在详情页都带样式', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_inline_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('inline', '普通 ==高亮== 与 `行内码` 内容'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final List<TextSpan> spans = collectSpans(tester);
+      final TextSpan highlight = spans.firstWhere(
+        (TextSpan s) => s.text == '高亮',
+        orElse: () => const TextSpan(),
+      );
+      expect(highlight.style?.backgroundColor, isNotNull,
+          reason: '高亮必须在详情页可见（背景色不能丢）');
+
+      final TextSpan code = spans.firstWhere(
+        (TextSpan s) => s.text == '行内码',
+        orElse: () => const TextSpan(),
+      );
+      expect(code.style?.fontFamily, 'monospace',
+          reason: '行内码必须是等宽字体');
+      expect(code.style?.backgroundColor, isNotNull,
+          reason: '行内码必须有浅底');
+    });
+
+    testWidgets('列表项里的行内样式同样生效', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_inline_list_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('inline_list', '- 项目 ==重点== 与 `码`'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final List<TextSpan> spans = collectSpans(tester);
+      final TextSpan highlight = spans.firstWhere(
+        (TextSpan s) => s.text == '重点',
+        orElse: () => const TextSpan(),
+      );
+      expect(highlight.style?.backgroundColor, isNotNull,
+          reason: '列表项里的高亮同样要渲染');
+      final TextSpan code = spans.firstWhere(
+        (TextSpan s) => s.text == '码',
+        orElse: () => const TextSpan(),
+      );
+      expect(code.style?.fontFamily, 'monospace');
+    });
+
+    testWidgets('H4–H6 与正文有层级差异（内核默认只到 H3）',
+        (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_h4_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('h4', '#### 四级标题\n\n正文内容'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final List<TextSpan> spans = collectSpans(tester);
+      final TextSpan heading = spans.firstWhere(
+        (TextSpan s) => s.text == '四级标题',
+        orElse: () => const TextSpan(),
+      );
+      final TextSpan body = spans.firstWhere(
+        (TextSpan s) => s.text == '正文内容',
+        orElse: () => const TextSpan(),
+      );
+      expect(heading.style?.fontWeight, AppWeight.semibold,
+          reason: 'H4 必须比正文更重，否则与正文无异');
+      // 正文没有显式字重（走默认 400），所以只校验它确实不是 semibold。
+      expect(body.style?.fontWeight, isNot(AppWeight.semibold));
+    });
+  });
 }
