@@ -49,6 +49,16 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
   /// 原图的逻辑宽度（像素宽 / devicePixelRatio），用于「不放大」。
   double? _naturalWidth;
 
+  /// 设备像素比。只能在 [didChangeDependencies] 之后读：图像流命中
+  /// ImageCache 时（列表缩略图已经把同一张图解码过），监听器会在
+  /// `initState` 里**同步**回调，此时读 MediaQuery 会抛
+  /// `dependOnInheritedWidgetOfExactType ... before initState completed`，
+  /// 图片直接掉进调用方的 errorBuilder（真机必现：列表有图、点进详情变占位）。
+  double? _devicePixelRatio;
+
+  /// `initState` 期间同步拿到的原始像素尺寸，等依赖就绪后再结算。
+  Size? _pendingPixelSize;
+
   ImageStream? _stream;
   ImageStreamListener? _listener;
 
@@ -56,6 +66,17 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
   void initState() {
     super.initState();
     _resolveImage();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final Size? pending = _pendingPixelSize;
+    if (pending != null) {
+      _pendingPixelSize = null;
+      _applyPixelSize(pending.width, pending.height);
+    }
   }
 
   @override
@@ -90,28 +111,44 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
         if (!mounted) {
           return;
         }
-        final int width = info.image.width;
-        final int height = math.max(1, info.image.height);
-        final double aspect = width / height;
-        if (!aspect.isFinite || aspect <= 0) {
+        final double width = info.image.width.toDouble();
+        final double height = info.image.height.toDouble();
+        // 依赖还没就绪（同步回调）：先记住像素尺寸，等 didChangeDependencies。
+        if (_devicePixelRatio == null) {
+          _pendingPixelSize = Size(width, height);
           return;
         }
-        final double dpr = MediaQuery.devicePixelRatioOf(context);
-        setState(() {
-          _aspect = aspect;
-          _naturalWidth = width / (dpr > 0 ? dpr : 1);
-        });
+        _applyPixelSize(width, height);
       },
       onError: (Object error, StackTrace? stackTrace) {
         // 解码失败交给调用方的 errorBuilder 占位，这里保持默认比例。
-        if (mounted && _aspect == null) {
-          setState(() => _aspect = 4 / 3);
+        if (!mounted || _aspect != null) {
+          return;
         }
+        if (_devicePixelRatio == null) {
+          // 同步失败：不能 setState，直接写值，紧接着的 build 会用到。
+          _aspect = 4 / 3;
+          return;
+        }
+        setState(() => _aspect = 4 / 3);
       },
     );
     stream.addListener(listener);
     _stream = stream;
     _listener = listener;
+  }
+
+  /// 用原始像素尺寸结算宽高比与逻辑宽度（需要在依赖就绪后调用）。
+  void _applyPixelSize(double pixelWidth, double pixelHeight) {
+    final double aspect = pixelWidth / math.max(1, pixelHeight);
+    if (!aspect.isFinite || aspect <= 0) {
+      return;
+    }
+    final double dpr = _devicePixelRatio ?? 1;
+    setState(() {
+      _aspect = aspect;
+      _naturalWidth = pixelWidth / (dpr > 0 ? dpr : 1);
+    });
   }
 
   @override

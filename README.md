@@ -25,9 +25,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.8.0 |
+| 版本 | 1.8.1 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 394 / 394 通过 |
+| 测试 | `flutter test` 401 / 401 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | `build/app/outputs/flutter-apk/app-release.apk`，约 42MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
@@ -292,6 +292,9 @@ flutter analyze
 flutter test
 # 只打真机 ABI（不带 --target-platform 会额外打包 x86_64，体积 55MB）
 flutter build apk --release --target-platform android-arm,android-arm64
+# 测试包（debug）同样用正式签名，可直接覆盖真机上的正式版做回归：
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 环境：Flutter 3.47.9 / Dart 3.13.7 / Android SDK 36 + build-tools 36 / JDK 18。

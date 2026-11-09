@@ -248,6 +248,17 @@ class _SummaryMarkdown extends StatelessWidget {
             remaining -= 1;
             continue;
           }
+          if (block.isCode) {
+            // 代码块交给阅读态组件渲染成整宽圆角卡片，与详情页一致。
+            children.add(
+              MarkdownBlockView(
+                text: block.text,
+                baseSize: style.fontSize ?? 16,
+              ),
+            );
+            remaining -= math.max(1, block.text.split('\n').length);
+            continue;
+          }
           if (block.isQuote) {
             children.add(_buildQuote(block.text, remaining));
             remaining -= _measureLines(
@@ -340,8 +351,7 @@ class _SummaryMarkdown extends StatelessWidget {
       return TextSpan(
         text: span.text,
         style: span.style,
-        children:
-            span.children!.map(_measurableSpan).toList(growable: false),
+        children: span.children!.map(_measurableSpan).toList(growable: false),
       );
     }
     return span;
@@ -410,11 +420,13 @@ class _SummaryMarkdown extends StatelessWidget {
     );
   }
 
-  /// 把行分成「普通行」和「连续引用行」两组，保持原始顺序。
+  /// 把行分成「普通行」「连续引用行」「代码块」三组，保持原始顺序。
   List<_SummaryBlock> _split(String text) {
     final List<_SummaryBlock> blocks = <_SummaryBlock>[];
     final List<String> lines = <String>[];
+    final List<String> codeLines = <String>[];
     bool inQuote = false;
+    bool inCode = false;
 
     void flush() {
       if (lines.isEmpty) {
@@ -427,8 +439,42 @@ class _SummaryMarkdown extends StatelessWidget {
       lines.clear();
     }
 
+    void flushCode() {
+      if (codeLines.isEmpty) {
+        return;
+      }
+      // excerptSource 可能把闭合围栏截掉：补一个，让阅读态能正确识别。
+      if (!codeLines.last.trimLeft().startsWith('```')) {
+        codeLines.add('```');
+      }
+      blocks.add(_SummaryBlock.code(codeLines.join('\n')));
+      codeLines.clear();
+      inCode = false;
+    }
+
     for (final line in text.split('\n')) {
       final String trimmedLeft = line.trimLeft();
+      // 代码块：围栏内原样收集，摘要里也渲染成整宽卡片（用户反馈列表
+      // 里代码块完全没有效果 —— 之前围栏被 excerptSource 直接删掉了）。
+      if (trimmedLeft.startsWith('```')) {
+        if (!inCode) {
+          flush();
+          inQuote = false;
+          inCode = true;
+          codeLines.add(line);
+        } else {
+          codeLines.add(line);
+          flushCode();
+        }
+        continue;
+      }
+      if (inCode) {
+        // 摘要空间有限：代码最多留 3 行，避免占满整张卡片。
+        if (codeLines.length < 4) {
+          codeLines.add(line);
+        }
+        continue;
+      }
       // 空行是块边界，同时保留为一处可见空隙：它之前的引用到此结束，
       // 之后的正文不属于引用（用户强调摘要里不能把空白行吃掉）。
       if (trimmedLeft.isEmpty) {
@@ -464,6 +510,7 @@ class _SummaryMarkdown extends StatelessWidget {
       );
     }
     flush();
+    flushCode();
     return blocks;
   }
 }
@@ -471,19 +518,29 @@ class _SummaryMarkdown extends StatelessWidget {
 class _SummaryBlock {
   const _SummaryBlock({required this.text, required this.isQuote})
       : attachmentName = null,
-        isBlank = false;
+        isBlank = false,
+        isCode = false;
 
   const _SummaryBlock.attachment(this.attachmentName)
       : text = '',
         isQuote = false,
-        isBlank = false;
+        isBlank = false,
+        isCode = false;
 
   /// 空行：渲染成一行空隙，保留用户有意留出的段落间隔。
   const _SummaryBlock.blank()
       : text = '',
         isQuote = false,
         attachmentName = null,
-        isBlank = true;
+        isBlank = true,
+        isCode = false;
+
+  /// 代码块（含围栏）：交给阅读态组件渲染成整宽卡片。
+  const _SummaryBlock.code(this.text)
+      : isQuote = false,
+        attachmentName = null,
+        isBlank = false,
+        isCode = true;
 
   final String text;
   final bool isQuote;
@@ -493,6 +550,9 @@ class _SummaryBlock {
 
   /// 是否是空行。
   final bool isBlank;
+
+  /// 是否是代码块。
+  final bool isCode;
 }
 
 class _Thumbnail extends StatelessWidget {

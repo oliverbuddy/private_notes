@@ -72,11 +72,17 @@ TextStyle xiaojiInlineTextStyler(
   }
   // 行内码：等宽 + 微缩 + 浅底，与阅读态（markdown_view 的 code 分支）一致。
   if (attributions.contains(codeAttribution)) {
+    // 代码块会把 blockType 也当作一条 attribution 传进来，而它的基础样式
+    // 已经是等宽 + 微缩过的；再乘 0.9 会变成 12.96。只有「正文里的行内码」
+    // （基础样式还不是等宽）才需要缩一档。
+    final bool alreadyCodeBlock = baseStyle.fontFamily == 'monospace';
     style = style.copyWith(
       fontFamily: 'monospace',
-      fontSize: (baseStyle.fontSize ?? AppFontSize.summary) * 0.9,
+      fontSize: alreadyCodeBlock
+          ? baseStyle.fontSize
+          : (baseStyle.fontSize ?? AppFontSize.summary) * 0.9,
       color: textColor.withValues(alpha: 0.9),
-      backgroundColor: codeBackground,
+      backgroundColor: alreadyCodeBlock ? null : codeBackground,
     );
   }
   // `==高亮==`：内核不认识这个属性，只在这里给它上底色。
@@ -2179,158 +2185,147 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncImeState(imeInset);
     // 面板/键盘交替时按当前 ime 结算锚点（工具条保持同一屏幕 Y）。
     _reconcilePanelWithKeyboard(imeInset);
-    return PopScope(
-      // 子菜单/Aa 面板展开时，侧滑先收起面板，不直接退出编辑页；
-      // 键盘可见时交给系统先收键盘（Android 默认），再侧滑才 pop。
-      canPop: !_panelExpanded,
-      onPopInvokedWithResult: (bool didPop, Object? result) {
-        if (!didPop && _panelExpanded) {
-          _closePanel(showKeyboard: false);
-        }
-      },
-      child: Scaffold(
-        backgroundColor: colors.page,
-        // 键盘避让根修的延续：视口真正缩短，编辑器视口贴键盘上沿。
-        resizeToAvoidBottomInset: true,
-        body: SafeArea(
-          bottom: false,
-          child: Stack(
-            children: <Widget>[
-              Column(
-                children: <Widget>[
-                  _buildHeader(colors),
-                  Container(height: 0.5, color: colors.dividerStrong),
-                  Expanded(
-                    // 工具条是浮层，会盖住正文底部。工具条可见时给视口
-                    // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
-                    // 上方，不再出现「最后几行被工具栏/键盘压住」。
-                    //
-                    // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
-                    // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
-                    // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
-                    // （用户反馈）。预留量每帧精确计算，所以不用动画。
-                    child: AnimatedBuilder(
-                      animation: _editing,
-                      builder: (
-                        BuildContext context,
-                        Widget? child,
-                      ) {
-                        final double panelReserve = _toolbarAnchorIme == null
-                            ? 0
-                            : math.max(_toolbarAnchorIme! - imeInset, 0);
-                        // 预留必须在「工具栏真的会盖住正文」时才有意义：
-                        //  - 键盘可见（工具条贴键盘上沿）；
-                        //  - 面板/键盘交替（工具条被锚点钉住）；
-                        //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
-                        //    冻结，工具条位置要全程不变）。
-                        // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
-                        // 选区还在、工具条已经滑走，多预留的一条就会变成页面
-                        // 底部一片「工具栏白底」的遮挡（用户反馈）。
-                        final bool reserve =
-                            imeInset > 0 || _panelTransitioning || _panelOpen;
-                        // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
-                        // 不含 safe area、也不随键盘高度变化：
-                        //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
-                        //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
-                        //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
-                        final double reserveHeight =
-                            _toolbarHeight + panelReserve;
-                        return Padding(
-                          padding: EdgeInsets.only(
-                            bottom: reserve ? reserveHeight : 0,
-                          ),
-                          child: child,
-                        );
-                      },
-                      child: Theme(
-                        // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
-                        // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
-                        // 成 accent，不动全局 app_theme。
-                        data: Theme.of(context).copyWith(
-                          checkboxTheme: CheckboxThemeData(
-                            fillColor: WidgetStateProperty.resolveWith(
-                              (states) => states.contains(WidgetState.selected)
-                                  ? colors.accent
-                                  : null,
-                            ),
-                            side:
-                                BorderSide(color: colors.tertiary, width: 1.6),
-                          ),
+    return Scaffold(
+      backgroundColor: colors.page,
+      // 键盘避让根修的延续：视口真正缩短，编辑器视口贴键盘上沿。
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: <Widget>[
+            Column(
+              children: <Widget>[
+                _buildHeader(colors),
+                Container(height: 0.5, color: colors.dividerStrong),
+                Expanded(
+                  // 工具条是浮层，会盖住正文底部。工具条可见时给视口
+                  // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
+                  // 上方，不再出现「最后几行被工具栏/键盘压住」。
+                  //
+                  // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
+                  // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
+                  // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
+                  // （用户反馈）。预留量每帧精确计算，所以不用动画。
+                  child: AnimatedBuilder(
+                    animation: _editing,
+                    builder: (
+                      BuildContext context,
+                      Widget? child,
+                    ) {
+                      final double panelReserve = _toolbarAnchorIme == null
+                          ? 0
+                          : math.max(_toolbarAnchorIme! - imeInset, 0);
+                      // 预留必须在「工具栏真的会盖住正文」时才有意义：
+                      //  - 键盘可见（工具条贴键盘上沿）；
+                      //  - 面板/键盘交替（工具条被锚点钉住）；
+                      //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
+                      //    冻结，工具条位置要全程不变）。
+                      // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
+                      // 选区还在、工具条已经滑走，多预留的一条就会变成页面
+                      // 底部一片「工具栏白底」的遮挡（用户反馈）。
+                      final bool reserve =
+                          imeInset > 0 || _panelTransitioning || _panelOpen;
+                      // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
+                      // 不含 safe area、也不随键盘高度变化：
+                      //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
+                      //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
+                      //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
+                      final double reserveHeight =
+                          _toolbarHeight + panelReserve;
+                      return Padding(
+                        padding: EdgeInsets.only(
+                          bottom: reserve ? reserveHeight : 0,
                         ),
-                        child: LayoutBuilder(
-                          builder: (
-                            BuildContext context,
-                            BoxConstraints constraints,
-                          ) {
-                            // 占位提示要和正文内容列对齐：SingleColumnLayout
-                            // 在宽度超过 maxWidth(640) 时把内容整体居中，
-                            // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
-                            // （用户反馈「提示语和光标没对齐」）。
-                            const double contentMaxWidth = 640;
-                            final bool centered =
-                                constraints.maxWidth > contentMaxWidth;
-                            final double gutter = centered
-                                ? (constraints.maxWidth - contentMaxWidth) / 2 +
-                                    AppSpace.page
-                                : AppSpace.page;
-                            return Stack(
-                              children: <Widget>[
-                                SuperEditorAndroidControlsScope(
-                                  controller: _androidControls,
-                                  child: _buildEditor(colors),
-                                ),
-                                // 空文档占位提示（新建小记时的 tip）。
-                                // 不拦截点击：点它应该像点正文一样把光标放进来。
-                                // top 12 与段落规则里的 `padding top: 12` 一致，
-                                // 文字行盒与光标起点因此完全重合。
-                                Positioned(
-                                  left: gutter,
-                                  top: 12,
-                                  right: gutter,
-                                  child: IgnorePointer(
-                                    child: ValueListenableBuilder<bool>(
-                                      valueListenable: _documentEmpty,
-                                      builder: (
-                                        BuildContext context,
-                                        bool empty,
-                                        _,
-                                      ) {
-                                        if (!empty) {
-                                          return const SizedBox.shrink();
-                                        }
-                                        return Text(
-                                          '开始记录…',
-                                          style: TextStyle(
-                                            fontSize: AppFontSize.summary,
-                                            height: 1.7,
-                                            letterSpacing: 0.3,
-                                            leadingDistribution:
-                                                TextLeadingDistribution.even,
-                                            color: colors.tertiary,
-                                          ),
-                                        );
-                                      },
-                                    ),
+                        child: child,
+                      );
+                    },
+                    child: Theme(
+                      // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
+                      // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
+                      // 成 accent，不动全局 app_theme。
+                      data: Theme.of(context).copyWith(
+                        checkboxTheme: CheckboxThemeData(
+                          fillColor: WidgetStateProperty.resolveWith(
+                            (states) => states.contains(WidgetState.selected)
+                                ? colors.accent
+                                : null,
+                          ),
+                          side: BorderSide(color: colors.tertiary, width: 1.6),
+                        ),
+                      ),
+                      child: LayoutBuilder(
+                        builder: (
+                          BuildContext context,
+                          BoxConstraints constraints,
+                        ) {
+                          // 占位提示要和正文内容列对齐：SingleColumnLayout
+                          // 在宽度超过 maxWidth(640) 时把内容整体居中，
+                          // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
+                          // （用户反馈「提示语和光标没对齐」）。
+                          const double contentMaxWidth = 640;
+                          final bool centered =
+                              constraints.maxWidth > contentMaxWidth;
+                          final double gutter = centered
+                              ? (constraints.maxWidth - contentMaxWidth) / 2 +
+                                  AppSpace.page
+                              : AppSpace.page;
+                          return Stack(
+                            children: <Widget>[
+                              SuperEditorAndroidControlsScope(
+                                controller: _androidControls,
+                                child: _buildEditor(colors),
+                              ),
+                              // 空文档占位提示（新建小记时的 tip）。
+                              // 不拦截点击：点它应该像点正文一样把光标放进来。
+                              // top 12 与段落规则里的 `padding top: 12` 一致，
+                              // 文字行盒与光标起点因此完全重合。
+                              Positioned(
+                                left: gutter,
+                                top: 12,
+                                right: gutter,
+                                child: IgnorePointer(
+                                  child: ValueListenableBuilder<bool>(
+                                    valueListenable: _documentEmpty,
+                                    builder: (
+                                      BuildContext context,
+                                      bool empty,
+                                      _,
+                                    ) {
+                                      if (!empty) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Text(
+                                        '开始记录…',
+                                        style: TextStyle(
+                                          fontSize: AppFontSize.summary,
+                                          height: 1.7,
+                                          letterSpacing: 0.3,
+                                          leadingDistribution:
+                                              TextLeadingDistribution.even,
+                                          color: colors.tertiary,
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                   ),
-                  // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
-                  _buildTagBar(colors, imeInset),
-                ],
-              ),
-              // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
-              if (_panelExpanded) _buildPanelSheet(colors, imeInset),
-              // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
-              // 挪光标（旧版实测的坑）。
-              _buildToolbar(imeInset),
-            ],
-          ),
+                ),
+                // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
+                _buildTagBar(colors, imeInset),
+              ],
+            ),
+            // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
+            if (_panelExpanded) _buildPanelSheet(colors, imeInset),
+            // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
+            // 挪光标（旧版实测的坑）。
+            _buildToolbar(imeInset),
+          ],
         ),
       ),
     );
@@ -2596,9 +2591,9 @@ class _NewEditorPageState extends State<NewEditorPage>
           // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
           // 构建器前面，用主题 divider 色重建同一个组件。
           const _LabHorizontalRuleComponentBuilder(),
-          // 代码块：整宽圆角底色。默认组件把底色挂在 TextStyle 上，只覆盖
-          // 字符本身、行尾留白（用户反馈「代码块不是整行」）。
-          const _LabCodeBlockComponentBuilder(),
+          // 代码块：官方 ParagraphComponent 外面包一层不接手势的视觉外壳
+          // （见 _LabCodeBlockComponentBuilder），光标/长按走内核原生路径。
+          _LabCodeBlockComponentBuilder(editor: _editor),
           // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
           _LabBlockquoteComponentBuilder(
             editor: _editor,
@@ -2897,23 +2892,41 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.padding: const CascadingPadding.symmetric(vertical: 8),
           },
         ),
-        // 代码块：等宽 + 字号/行高与列表摘要同源（base×0.9、1.55）。
-        // 底色由 [_LabCodeBlockComponent] 的整宽容器负责，这里不再给
-        // TextStyle 上 backgroundColor —— 那样只覆盖字符，行尾会露白。
+        // 代码块：等宽 + 字号/行高/内边距与列表摘要同源
+        // （[CodeBlockCardStyle]，两处共用一份规格）。
+        // 底色/圆角由 _LabCodeBlockComponentBuilder 的外层卡片画（整宽），
+        // 这里只负责文字本身，不能再给 TextStyle 加 backgroundColor ——
+        // 逐行字符底色会在卡片里叠出一圈毛边。
         StyleRule(
           const BlockSelector('code'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
-              fontSize: AppFontSize.summary * 0.9,
-              height: 1.55,
+              fontSize:
+                  AppFontSize.summary * CodeBlockCardStyle.fontSizeFactor,
+              height: CodeBlockCardStyle.lineHeight,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text.withValues(alpha: 0.85),
+              color: colors.text
+                  .withValues(alpha: CodeBlockCardStyle.textAlpha),
             ),
-            // 横向页边距从 BlockSelector.all 级联（16），这里只补块间呼吸；
-            // 容器内部 padding 由组件自己给，保证底色贴满内容区。
-            Styles.padding: const CascadingPadding.symmetric(vertical: 8),
+            // 横向页边距从 BlockSelector.all 级联（16），卡片与正文同宽；
+            // 卡片内边距在组件里给，这里只补块间呼吸。
+            Styles.padding: const CascadingPadding.symmetric(
+              vertical: CodeBlockCardStyle.outerGap,
+            ),
+          },
+        ),
+        // 代码块后面的块：不再叠加自己的顶部段距。
+        //
+        // 卡片外部已经有 6 的底部留白，这 6 就是「卡片与下一行」的全部间距；
+        // 下一块如果还保留正文默认的 12，合计 18，比列表摘要（卡片下方只有
+        // 6）明显发空（用户多轮反馈「详情代码块下面的间距偏大」）。
+        // 与列表摘要对齐：卡片之后只留卡片自己的 6。
+        StyleRule(
+          BlockSelector.all.after('code'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 0),
           },
         ),
         // 有序列表分层编号（1. → a. → i.），与阅读态渲染器同方案。
@@ -3297,6 +3310,125 @@ class _LabImageViewModel extends SingleColumnLayoutComponentViewModel {
   }
 }
 
+/// 代码块：官方段落 + 外层整宽圆角卡片。
+///
+/// 为什么不自建组件：单列布局的命中测试只认官方组件状态，自建的 Proxy
+/// 组件会被跳过（用户实测「点不进光标」）。所以 `componentKey` 仍然交给
+/// 官方 `ParagraphComponent`，只在外面包一层负责视觉的外壳。
+///
+/// 外壳必须**不参与命中测试**：`Container`/`DecoratedBox` 的
+/// `BoxDecoration.hitTest` 会命中自身，内容层被命中后，super_editor 垫在
+/// 内容下方的点击层（`SliverHybridStack` 里更靠下）就收不到事件 ——
+/// 整块代码块点不动、长按也选不了词（实测）。`CustomPaint` 默认不命中，
+/// 点击照常落到内核，光标/拖选/长按全部保持官方行为。
+class _LabCodeBlockComponentBuilder implements ComponentBuilder {
+  const _LabCodeBlockComponentBuilder({required this.editor});
+
+  final Editor editor;
+
+  /// ViewModel 直接复用官方构建器（含 indent / textStyleBuilder / 选区）。
+  static const ParagraphComponentBuilder _delegate =
+      ParagraphComponentBuilder();
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(
+    Document document,
+    DocumentNode node,
+  ) {
+    if (!_isCodeBlock(node)) {
+      return null;
+    }
+    return _delegate.createViewModel(document, node);
+  }
+
+  @override
+  Widget? createComponent(
+    SingleColumnDocumentComponentContext componentContext,
+    SingleColumnLayoutComponentViewModel componentViewModel,
+  ) {
+    if (componentViewModel is! ParagraphComponentViewModel) {
+      return null;
+    }
+    // 注意：createComponent 会被**所有** builder 依次调用（ViewModel 由
+    // 哪个 builder 产出都一样），所以这里必须再按节点类型判断一次，
+    // 否则所有普通段落都会套上代码块卡片（实测：整页变灰块）。
+    final DocumentNode? node =
+        editor.document.getNodeById(componentViewModel.nodeId);
+    if (!_isCodeBlock(node)) {
+      return null;
+    }
+    return _CodeBlockCard(
+      child: ParagraphComponent(
+        key: componentContext.componentKey,
+        viewModel: componentViewModel,
+      ),
+    );
+  }
+
+  static bool _isCodeBlock(DocumentNode? node) {
+    return node is ParagraphNode &&
+        node.getMetadataValue(NodeMetadata.blockType) == codeAttribution;
+  }
+}
+
+/// 代码块的视觉外壳：整宽、圆角、surface2 底色 + 内边距。
+///
+/// 只画背景、不接手势（见 [_LabCodeBlockComponentBuilder] 的注释）。
+class _CodeBlockCard extends StatelessWidget {
+  const _CodeBlockCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: <Widget>[
+        // 背景层用 IgnorePointer 包住：CustomPaint/DecoratedBox 都可能命中
+        // 自身，一旦命中，内核垫在内容下方的点击层就收不到事件（实测：
+        // 代码块整块点不动、长按选不了词）。背景层只负责画，不接手势。
+        Positioned.fill(
+          child: IgnorePointer(
+            child: CustomPaint(
+              painter: _CodeBlockCardPainter(
+                color: AppColors.of(context).surface2,
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          // 内边距与列表摘要的代码块卡片同源（[CodeBlockCardStyle]）。
+          padding: const EdgeInsets.symmetric(
+            horizontal: CodeBlockCardStyle.paddingHorizontal,
+            vertical: CodeBlockCardStyle.paddingVertical,
+          ),
+          child: child,
+        ),
+      ],
+    );
+  }
+}
+
+class _CodeBlockCardPainter extends CustomPainter {
+  const _CodeBlockCardPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Offset.zero & size,
+        const Radius.circular(AppRadius.block),
+      ),
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CodeBlockCardPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
 /// 点击「已有光标」不再切换选择工具条。
 ///
 /// super_editor 的 Android 手势在「点击落在已有 collapsed 选区」时会
@@ -3639,110 +3771,6 @@ class _LabHorizontalRuleComponentBuilder implements ComponentBuilder {
       opacity: componentViewModel.opacity,
       // 品牌色的分隔线：浅色用 6% 黑、深色用 7% 白，两种主题都贴纸感。
       color: colors.divider,
-    );
-  }
-}
-
-/// 代码块整宽渲染：只看 `blockType == code` 的段落，其余交给默认链。
-///
-/// 为什么不能继续用默认 [ParagraphComponent]：底色写在 `TextStyle` 上，
-/// 只会覆盖字符本身，每行右侧和行间都露出页面底色（用户反馈「代码块不是
-/// 整行」）。这里在文本外层铺一层铺满内容区的圆角容器，观感与语雀 /
-/// Notion 的代码块一致。
-class _LabCodeBlockComponentBuilder implements ComponentBuilder {
-  const _LabCodeBlockComponentBuilder();
-
-  /// 复用官方 builder 构造 ViewModel（方向、缩进、样式构建器等默认值），
-  /// 只接管「渲染成什么组件」这一步。
-  static const ParagraphComponentBuilder _paragraph =
-      ParagraphComponentBuilder();
-
-  @override
-  SingleColumnLayoutComponentViewModel? createViewModel(
-    Document document,
-    DocumentNode node,
-  ) {
-    if (node is! ParagraphNode ||
-        node.getMetadataValue(NodeMetadata.blockType) != codeAttribution) {
-      return null;
-    }
-    return _paragraph.createViewModel(document, node);
-  }
-
-  @override
-  Widget? createComponent(
-    SingleColumnDocumentComponentContext componentContext,
-    SingleColumnLayoutComponentViewModel componentViewModel,
-  ) {
-    // 注意：单列布局会对**每个节点**依次调用所有 builder 的
-    // createComponent（见 SingleColumnLayout 的组件构建循环），传入的是
-    // presenter 已选定的 ViewModel。所以这里必须再判断一次 blockType，
-    // 否则普通段落也会被套上代码块容器（实测空文档光标左移 12dp）。
-    if (componentViewModel is! ParagraphComponentViewModel ||
-        componentViewModel.blockType != codeAttribution) {
-      return null;
-    }
-    return _LabCodeBlockComponent(
-      key: componentContext.componentKey,
-      viewModel: componentViewModel,
-    );
-  }
-}
-
-/// 代码块容器 + 内部文本组件。
-///
-/// 用 [ProxyDocumentComponent] 把内部的 [TextComponent] 暴露给单列布局，
-/// 光标测量/选区绘制才会落在文本上（照抄官方 ParagraphComponent 的代理方式）。
-class _LabCodeBlockComponent extends StatefulWidget {
-  const _LabCodeBlockComponent({super.key, required this.viewModel});
-
-  final ParagraphComponentViewModel viewModel;
-
-  @override
-  State<_LabCodeBlockComponent> createState() => _LabCodeBlockComponentState();
-}
-
-class _LabCodeBlockComponentState extends State<_LabCodeBlockComponent>
-    with ProxyDocumentComponent<_LabCodeBlockComponent>, ProxyTextComposable {
-  final GlobalKey _textKey = GlobalKey();
-
-  @override
-  GlobalKey<State<StatefulWidget>> get childDocumentComponentKey => _textKey;
-
-  @override
-  TextComposable get childTextComposable =>
-      _textKey.currentState as TextComposable;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    final ParagraphComponentViewModel vm = widget.viewModel;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surface2,
-        borderRadius: BorderRadius.circular(AppRadius.block),
-      ),
-      // 顺应上下 8、左右 12 的代码块内边距；底色撑满内容区，文字不贴边。
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: TextComponent(
-        key: _textKey,
-        text: vm.text,
-        textDirection: vm.textDirection,
-        textAlign: vm.textAlignment,
-        textScaler: vm.textScaler,
-        maxLines: vm.maxLines,
-        overflow: vm.overflow,
-        textStyleBuilder: vm.textStyleBuilder,
-        inlineWidgetBuilders: vm.inlineWidgetBuilders,
-        // 不把 blockType 传给 TextComponent：它会把 blockType 当作一条
-        // 行内 attribution 叠加到每个字符上，代码块因此被「行内码」样式
-        // 再缩放一次（14.4 → 12.96）。代码块样式已经由 Stylesheet 给到。
-        metadata: const <String, dynamic>{},
-        textSelection: vm.selection,
-        selectionColor: vm.selectionColor,
-        highlightWhenEmpty: vm.highlightWhenEmpty,
-        underlines: vm.createUnderlines(),
-      ),
     );
   }
 }

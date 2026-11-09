@@ -45,9 +45,14 @@ class MarkdownBlockView extends StatelessWidget {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (TapUpDetails details) =>
-              onTap?.call(details.globalPosition),
+          // onTap 为空（列表摘要）时不能吞事件，否则卡片本身的点击
+          // （进入详情页）会被这层 GestureDetector 吃掉。
+          behavior: onTap == null
+              ? HitTestBehavior.deferToChild
+              : HitTestBehavior.opaque,
+          onTapUp: onTap == null
+              ? null
+              : (TapUpDetails details) => onTap!(details.globalPosition),
           child: Text.rich(
             TextSpan(
               children: markdownSpans(
@@ -307,13 +312,36 @@ List<InlineSpan> markdownSpans(
 final Map<String, List<InlineSpan>> _spansCache = <String, List<InlineSpan>>{};
 const int _spansCacheLimit = 24;
 
+/// 代码块卡片规格：详情页（编辑器）与列表摘要共用。
+///
+/// 两处原来是各写一套字面量，改一处忘一处就会「列表和详情看起来不一样」
+/// （用户多轮反馈）。统一收在这里：内边距 12/10、上下间距 6、字号 ×0.9、
+/// 行高 1.55、文字 85% 浓度 —— 详情与列表只共用这一份。
+abstract final class CodeBlockCardStyle {
+  static const double paddingHorizontal = 12;
+  static const double paddingVertical = 10;
+
+  /// 卡片与上下相邻块的间距。
+  static const double outerGap = 6;
+
+  /// 字号相对正文的缩放（正文 16 → 14.4）。
+  static const double fontSizeFactor = 0.9;
+
+  static const double lineHeight = 1.55;
+
+  /// 代码文字浓度：比正文略淡，弱化一整块等宽字。
+  static const double textAlpha = 0.85;
+}
+
 /// 代码块行样式：等宽 + 微缩。底色由调用方负责（整宽容器 / fallback 底色）。
 TextStyle _codeBase(TextStyle base, AppColors colors) {
   return base.copyWith(
     fontFamily: 'monospace',
-    fontSize: (base.fontSize ?? 17) * 0.9,
-    height: 1.55,
-    color: colors.text.withValues(alpha: 0.85),
+    fontSize: (base.fontSize ?? 17) * CodeBlockCardStyle.fontSizeFactor,
+    height: CodeBlockCardStyle.lineHeight,
+    // 与详情页同一套行盒分布，中文在卡片里的上下留白才一致。
+    leadingDistribution: TextLeadingDistribution.even,
+    color: colors.text.withValues(alpha: CodeBlockCardStyle.textAlpha),
   );
 }
 
@@ -348,8 +376,14 @@ void _appendCodeBlock(
     alignment: PlaceholderAlignment.middle,
     child: Container(
       width: width,
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.symmetric(
+        vertical: CodeBlockCardStyle.outerGap,
+      ),
+      // 内边距与详情页卡片同源（见 [CodeBlockCardStyle]）。
+      padding: const EdgeInsets.symmetric(
+        horizontal: CodeBlockCardStyle.paddingHorizontal,
+        vertical: CodeBlockCardStyle.paddingVertical,
+      ),
       decoration: BoxDecoration(
         color: colors.surface2,
         borderRadius: BorderRadius.circular(AppRadius.block),
@@ -429,15 +463,15 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
         style: style.copyWith(backgroundColor: colors.accentBg),
       ));
     } else if (tag != null) {
-      // 标签胶囊按「正文里的行内标记」处理：字号压到正文的 0.78
-      // （约 12.5），否则一个 16px 的彩色胶囊嵌在正文里会非常突兀。
-      // 左右留 4、圆角与详情胶囊一致，高度约 18dp。
-      final double tagSize = (style.fontSize ?? 17) * 0.78;
+      // 标签胶囊按「正文里的行内标记」处理：字号压到正文的 0.75
+      // （约 12），左右留 3、圆角与详情胶囊一致，高度约 17dp。
+      // 主流笔记（语雀/滴答）的标签就是这种小标记，太大会比正文还抢眼。
+      final double tagSize = (style.fontSize ?? 17) * 0.75;
       final TagTone tone = TagPalette.toneFor(tag, colors);
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.middle,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5),
           decoration: BoxDecoration(
             color: tone.background,
             borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -450,9 +484,9 @@ List<InlineSpan> _inline(String text, TextStyle style, AppColors colors) {
             '#$tag',
             style: TextStyle(
               fontSize: tagSize,
-              // 行盒压到与详情胶囊同高（20dp 上下）。
-              height: 1.15,
-              letterSpacing: 0.2,
+              // 行盒压到与详情胶囊同高（约 17dp）。
+              height: 1.1,
+              letterSpacing: 0.1,
               color: tone.foreground,
             ),
           ),
@@ -542,6 +576,13 @@ String excerptSource(String markdown, {int maxLines = 6}) {
   final out = <String>[];
   for (final line in markdown.split('\n')) {
     if (line.trimLeft().startsWith('```')) {
+      // 保留围栏：摘要也要交给 markdownSpans 渲染成代码块卡片。
+      // 之前直接 continue 掉围栏，代码行到了摘要里就变成普通正文，
+      // 列表里完全没有代码块效果（用户反馈）。
+      out.add(line);
+      if (out.length >= maxLines) {
+        break;
+      }
       continue;
     }
     // 只丢图片行。附件行 `[文件名](assets/…)` 要在摘要里显示成文件条目

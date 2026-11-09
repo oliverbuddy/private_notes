@@ -62,6 +62,15 @@ android {
     }
 
     buildTypes {
+        // 测试包（debug）也用正式签名：装到真机后能直接覆盖正式版，
+        // 不会因签名不一致装不上，方便用同一份数据做回归。
+        getByName("debug") {
+            signingConfig = if (keystoreProperties.isNotEmpty()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
         release {
             // 有签名配置时用正式密钥（本地/CI），否则退回 debug 签名兜底。
             signingConfig = if (keystoreProperties.isNotEmpty()) {

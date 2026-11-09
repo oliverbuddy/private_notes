@@ -47,7 +47,8 @@ void main() {
         .toList();
     expect(codeNodes, hasLength(1),
         reason: '围栏内回车不能把代码块拆成两个节点');
-    expect(codeNodes.single.text.toPlainText(), 'void main() {}\n\n');
+    // 解析阶段已去掉合成换行，回车只多出用户敲的那一个 `\n`。
+    expect(codeNodes.single.text.toPlainText(), 'void main() {}\n');
 
     // 往返回合只产出一对围栏，且用户敲出的空行不会丢。
     final String md = serializeDocumentToXiaojiMarkdown(document);

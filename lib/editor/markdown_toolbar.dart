@@ -348,8 +348,9 @@ class MarkdownTextStylePanel extends StatelessWidget {
     this.showTopDivider = true,
   });
 
-  /// 面板固定高度：标题/段落/结构各 56、文字行两行 110，加下留白 8×2。
-  static const double height = 294;
+  /// 面板固定高度：单行组各 54（48 卡片 + 上下各 3）、文字组两行 108
+  /// （3 + 48 + 6 + 48 + 3），加下留白 8×2 —— 所有行间距统一为 6。
+  static const double height = 286;
 
   final Set<MarkdownCommand> active;
   final ValueChanged<MarkdownCommand> onPick;
@@ -417,11 +418,11 @@ class MarkdownTextStylePanel extends StatelessWidget {
                 onPicked: onPick,
               ),
             ),
-            // 文字行两行 48 + 行距 6 + 上下各 4 = 110，与其它分组的
-            // 56（48 + 上下各 4）共用同一套上下留白，组间距才一致。
+            // 文字行两行 48 + 行距 6 + 上下各 3 = 108，与其它分组
+            // （48 + 上下各 3）共用同一套留白，行间距处处是 6。
             _PanelGroupRow(
               label: '文字',
-              height: 110,
+              height: 108,
               child: _ActionGrid(
                 items: _inlineItems,
                 columns: 3,
@@ -449,7 +450,7 @@ class _PanelGroupRow extends StatelessWidget {
   const _PanelGroupRow({
     required this.label,
     required this.child,
-    this.height = 56,
+    this.height = 54,
   });
 
   /// 分组名栏宽：两个字（12px）加一点余量，全部左缘对齐。
@@ -458,7 +459,8 @@ class _PanelGroupRow extends StatelessWidget {
   final String label;
   final Widget child;
 
-  /// 行高：Aa 面板 56（48 卡片 + 呼吸），＋ 面板传 104（大卡）。
+  /// 分组行高：Aa 面板 54（48 卡片 + 上下各 3，相邻行卡片间距 6），
+  /// 文字组两行传 108；＋ 面板传 104（大卡）。
   final double height;
 
   @override
@@ -959,7 +961,8 @@ class _FixedButton extends StatelessWidget {
         child: Icon(
           icon,
           size: size,
-          color: enabled ? colors.text.withValues(alpha: 0.72) : colors.tertiary,
+          color:
+              enabled ? colors.text.withValues(alpha: 0.72) : colors.tertiary,
         ),
       ),
     );

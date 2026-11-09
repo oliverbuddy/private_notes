@@ -50,21 +50,22 @@ abstract final class TagPalette {
       return TagTone(
         // 深色主题：半透明色相叠在卡片底上，文字提亮一档。
         background: Color.alphaBlend(
-          hue.withValues(alpha: 0.30),
+          hue.withValues(alpha: 0.22),
           colors.page,
         ),
         foreground: Color.lerp(hue, Colors.white, 0.62)!,
-        border: hue.withValues(alpha: 0.45),
+        border: hue.withValues(alpha: 0.30),
       );
     }
     return TagTone(
-      // 浅色主题：16% 色相底 + 加深文字/描边，iOS 彩色标签的常见做法。
+      // 浅色主题：10% 色相底 + 加深文字/描边。底色再淡一档（16% → 10%）
+      // 才像「行内标记」而不是按钮（用户反馈标签背景太抢眼）。
       background: Color.alphaBlend(
-        hue.withValues(alpha: 0.16),
+        hue.withValues(alpha: 0.10),
         colors.page,
       ),
       foreground: Color.lerp(hue, Colors.black, 0.30)!,
-      border: hue.withValues(alpha: 0.28),
+      border: hue.withValues(alpha: 0.18),
     );
   }
 

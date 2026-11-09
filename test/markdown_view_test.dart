@@ -160,9 +160,8 @@ void main() {
 
       final Finder code = find.text('void main() {}');
       expect(code, findsOneWidget);
-      final Finder card = find
-          .ancestor(of: code, matching: find.byType(Container))
-          .first;
+      final Finder card =
+          find.ancestor(of: code, matching: find.byType(Container)).first;
       expect(
         tester.getSize(card).width,
         closeTo(300, 1),
@@ -172,7 +171,7 @@ void main() {
   });
 
   group('标签胶囊', () {
-    test('正文里的标签字号压到正文的 0.78，避免背景过大', () {
+    test('正文里的标签字号压到正文的 0.75，避免背景过大', () {
       final List<InlineSpan> spans = markdownSpans(
         '今天 #工作 完成',
         const TextStyle(fontSize: 16),
@@ -181,7 +180,40 @@ void main() {
       final WidgetSpan tagSpan = spans.whereType<WidgetSpan>().first;
       final Container capsule = tagSpan.child as Container;
       final Text label = capsule.child! as Text;
-      expect(label.style!.fontSize, closeTo(16 * 0.78, 0.01));
+      expect(label.style!.fontSize, closeTo(16 * 0.75, 0.01));
+    });
+  });
+
+  group('列表点击代码块', () {
+    testWidgets('点代码块区域会触发卡片本身的点击', (WidgetTester tester) async {
+      var tapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: GestureDetector(
+              onTap: () => tapped = true,
+              child: const Center(
+                child: SizedBox(
+                  width: 300,
+                  child: MarkdownBlockView(
+                    text: '```\nvoid main() {}\n```',
+                    baseSize: 16,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('void main() {}'));
+      expect(
+        tapped,
+        isTrue,
+        reason: '摘要里的代码块不能吞掉点击，否则点它进不了详情页',
+      );
     });
   });
 

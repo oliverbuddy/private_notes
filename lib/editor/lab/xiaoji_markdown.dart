@@ -565,6 +565,33 @@ List<String> _collectCodeFenceLanguages(String markdown) {
   return languages;
 }
 
+/// 去掉解析器给代码块补的结尾换行。
+///
+/// 内核会把 ```\na\nb\n``` 解析成 `a\nb\n`（结尾多一个换行），渲染时
+/// 代码块永远多出一行空白（用户反馈「详情代码块最后老是自动加一行」）。
+/// 这里在解析后统一去掉**这一个**合成换行：用户自己在代码块末尾留的
+/// 空行仍然保留（`a\n\n` → `a\n`，渲染成 a + 一行空行）。
+///
+/// 与 [serializeDocumentToXiaojiMarkdown] 配套：那边不再负责删换行，
+/// 否则用户有意留的末尾空行会在保存时被吃掉。
+void _stripCodeFenceTrailingNewline(MutableDocument document) {
+  for (var i = 0; i < document.nodeCount; i++) {
+    final DocumentNode? node = document.getNodeAt(i);
+    if (node is! ParagraphNode ||
+        node.getMetadataValue(NodeMetadata.blockType) != codeAttribution) {
+      continue;
+    }
+    final String plain = node.text.toPlainText();
+    if (!plain.endsWith('\n')) {
+      continue;
+    }
+    document.replaceNodeById(
+      node.id,
+      node.copyTextNodeWith(text: node.text.copyText(0, plain.length - 1)),
+    );
+  }
+}
+
 /// 把语言标记按顺序写回代码块节点。
 void _restoreCodeFenceLanguages(
   MutableDocument document,
@@ -616,6 +643,7 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   );
   _restoreListIndents(document, specials.listIndents);
   _restoreOrderedStarts(document, orderedNumbers);
+  _stripCodeFenceTrailingNewline(document);
   _restoreCodeFenceLanguages(document, codeLanguages);
   _applyHighlights(document);
   _restoreLinkTitles(document, links.titles);
@@ -1155,19 +1183,15 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
         continue;
       }
       if (blockType == codeAttribution) {
-        // 解析器会给代码文本补一个结尾换行（实测：```\na\n``` 解析出 "a\n"），
-        // 直接按行写回会多出一行空行，往返回合会让空行越积越多。
-        // 只去掉**这一个**合成换行：用户自己在代码块末尾敲的空行要保留，
-        // 否则「围栏内回车再输入」时最后的空行存不下来。
-        final String code = plain.endsWith('\n')
-            ? plain.substring(0, plain.length - 1)
-            : plain;
+        // 解析阶段的合成换行已经在 [_stripCodeFenceTrailingNewline] 去掉，
+        // 这里不能再删：用户有意留在末尾的空行（文本以 `\n` 结尾）要原样
+        // 写回，否则「围栏内回车再退出」时那一行会丢。
         final String language =
             (node.getMetadataValue(kCodeLanguageMetadata) as String?)?.trim() ??
                 '';
-        final String fence = _codeFenceFor(code);
+        final String fence = _codeFenceFor(plain);
         write('$fence$language');
-        for (final line in code.split('\n')) {
+        for (final line in plain.split('\n')) {
           write(line);
         }
         write(fence);

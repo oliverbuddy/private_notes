@@ -61,14 +61,126 @@ EditCommand? _codeBlockNewlineHandler(Editor editor, EditRequest request) {
   }
   final basePosition = selection.base.nodePosition;
   final extentPosition = selection.extent.nodePosition;
-  if (basePosition is! TextNodePosition || extentPosition is! TextNodePosition) {
+  if (basePosition is! TextNodePosition ||
+      extentPosition is! TextNodePosition) {
     return null;
   }
+
+  // 光标停在代码块的**末尾空行**上再回车：结束代码块，这一行变回正文。
+  // 与列表项/引用「空行回车退出」一致（用户要求）。中间的空行仍按普通
+  // 换行处理，避免代码块被意外截断。
+  //
+  // 解析器补的合成换行已在 deserialize 阶段去掉，所以「末尾空行」就是
+  // 文本以单个 `\n` 结尾（`line1\n`＝第一行 + 一个空行）；光标在最后一行
+  // 末尾时文本还不带 `\n`，那时回车只是普通换行，不会误退出。
+  final int offset = extentPosition.offset;
+  final String plain = node.text.toPlainText();
+  final int lineStart =
+      offset == 0 ? 0 : plain.lastIndexOf('\n', offset - 1) + 1;
+  final bool onEmptyLastLine = offset == plain.length &&
+      plain.endsWith('\n') &&
+      plain.substring(lineStart).trim().isEmpty;
+  if (onEmptyLastLine) {
+    // 去掉末尾所有换行：退出用的那行空行不应留在代码块里。
+    int contentEnd = plain.length;
+    while (contentEnd > 0 && plain[contentEnd - 1] == '\n') {
+      contentEnd -= 1;
+    }
+    return _ExitCodeBlockCommand(
+      nodeId: node.id,
+      contentEnd: contentEnd,
+      newNodeId: request.newNodeId,
+    );
+  }
+
   return _InsertNewlineInCodeBlockCommand(
     nodeId: node.id,
     start: math.min(basePosition.offset, extentPosition.offset),
     hasSelection: !selection.isCollapsed,
   );
+}
+
+/// 结束代码块：保留上方代码内容，把末尾空行拆成普通段落。
+///
+/// 空代码块（没有内容）直接把当前节点改回正文，避免留下一个空代码框。
+class _ExitCodeBlockCommand extends EditCommand {
+  const _ExitCodeBlockCommand({
+    required this.nodeId,
+    required this.contentEnd,
+    required this.newNodeId,
+  });
+
+  final String nodeId;
+
+  /// 代码内容的结束位置（去掉末尾用于退出的那个换行）。
+  final int contentEnd;
+
+  final String newNodeId;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  String describe() => 'Exit code block - $nodeId';
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    if (contentEnd <= 0) {
+      executor
+        ..executeCommand(
+          ChangeParagraphBlockTypeCommand(
+            nodeId: nodeId,
+            blockType: paragraphAttribution,
+          ),
+        )
+        ..executeCommand(
+          ChangeSelectionCommand(
+            DocumentSelection.collapsed(
+              position: DocumentPosition(
+                nodeId: nodeId,
+                nodePosition: const TextNodePosition(offset: 0),
+              ),
+            ),
+            SelectionChangeType.placeCaret,
+            SelectionReason.userInteraction,
+          ),
+        );
+      return;
+    }
+
+    final ParagraphNode node =
+        context.document.getNodeById(nodeId)! as ParagraphNode;
+    final String trimmed = node.text.toPlainText().substring(0, contentEnd);
+    executor
+      ..executeCommand(
+        ReplaceNodeCommand(
+          existingNodeId: nodeId,
+          newNode: ParagraphNode(
+            id: node.id,
+            text: AttributedText(trimmed),
+            metadata: node.metadata,
+          ),
+        ),
+      )
+      ..executeCommand(
+        InsertNodeAfterNodeCommand(
+          existingNodeId: nodeId,
+          newNode: ParagraphNode(id: newNodeId, text: AttributedText()),
+        ),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: newNodeId,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.insertContent,
+          SelectionReason.userInteraction,
+        ),
+      );
+  }
 }
 
 /// 在代码块内插入字面换行：可选先删掉选中内容，再把光标移到换行之后。
@@ -134,7 +246,8 @@ class _InsertNewlineInCodeBlockCommand extends EditCommand {
 ///  - 有内容时回车：继续引用，新行仍是引用块；
 ///  - 空引用行再回车：退出引用，回到普通段落。
 /// 这与列表项的续行 / 退出语义一致，用户不需要记两套规则。
-EditCommand? _blockquoteContinuationHandler(Editor editor, EditRequest request) {
+EditCommand? _blockquoteContinuationHandler(
+    Editor editor, EditRequest request) {
   if (request is! InsertNewlineAtCaretRequest) {
     return null;
   }

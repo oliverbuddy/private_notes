@@ -143,6 +143,24 @@ void main() {
     expect(roundTrip(once), once);
   });
 
+  test('围栏代码块解析后不带解析器补的结尾换行，往返幂等', () {
+    const String body = '```dart\nline1\nline2\n```';
+    final ParagraphNode code =
+        deserializeXiaojiMarkdown(body).getNodeAt(0)! as ParagraphNode;
+    // 解析器会补一个结尾换行，详情页就会永远多显示一行空白（用户反馈）。
+    expect(code.text.toPlainText(), 'line1\nline2');
+    expect(roundTrip(body), body);
+  });
+
+  test('代码块末尾有意留的空行往返保留', () {
+    const String body = '```\na\n\n```';
+    final ParagraphNode code =
+        deserializeXiaojiMarkdown(body).getNodeAt(0)! as ParagraphNode;
+    // 只去掉解析器合成的那个换行：用户留的空行仍是 `a\n`。
+    expect(code.text.toPlainText(), 'a\n');
+    expect(roundTrip(body), body);
+  });
+
   test('setext 标题转成 ATX，不会把 === / --- 留在正文里', () {
     final ParagraphNode h1 =
         deserializeXiaojiMarkdown('标题\n===').getNodeAt(0)! as ParagraphNode;

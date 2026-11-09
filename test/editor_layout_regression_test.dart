@@ -12,6 +12,7 @@ import 'package:xiaoji/editor/lab/editor_request_handlers.dart';
 import 'package:xiaoji/editor/lab/list_style.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
+import 'package:xiaoji/editor/markdown_view.dart' show CodeBlockCardStyle;
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
 import 'package:xiaoji/ui/quote_block.dart';
@@ -50,7 +51,8 @@ Future<NoteRepository> _createRepository(
   return repository;
 }
 
-Widget _buildEditor(NoteRepository repository, Note note, {bool autoFocus = true}) {
+Widget _buildEditor(NoteRepository repository, Note note,
+    {bool autoFocus = true}) {
   return MaterialApp(
     theme: AppTheme.light(),
     home: NewEditorPage(
@@ -208,7 +210,8 @@ void main() {
 
       final List<double> textLefts = <double>[];
       for (final String label in <String>['无序', '有序', '待办']) {
-        final Finder textFinder = find.textContaining(label, findRichText: true);
+        final Finder textFinder =
+            find.textContaining(label, findRichText: true);
         expect(textFinder, findsWidgets, reason: '找不到列表行「$label」');
         textLefts.add(tester.getTopLeft(textFinder.first).dx);
       }
@@ -314,14 +317,14 @@ void main() {
       void walk(InlineSpan span) {
         if (span is TextSpan) {
           spans.add(span);
-          for (final InlineSpan child in span.children ?? const <InlineSpan>[]) {
+          for (final InlineSpan child
+              in span.children ?? const <InlineSpan>[]) {
             walk(child);
           }
         }
       }
 
-      for (final Widget widget
-          in tester.widgetList(find.byWidgetPredicate(
+      for (final Widget widget in tester.widgetList(find.byWidgetPredicate(
         (Widget w) => w.runtimeType.toString() == 'SuperText',
       ))) {
         final dynamic dynamicWidget = widget;
@@ -354,10 +357,8 @@ void main() {
         (TextSpan s) => s.text == '行内码',
         orElse: () => const TextSpan(),
       );
-      expect(code.style?.fontFamily, 'monospace',
-          reason: '行内码必须是等宽字体');
-      expect(code.style?.backgroundColor, isNotNull,
-          reason: '行内码必须有浅底');
+      expect(code.style?.fontFamily, 'monospace', reason: '行内码必须是等宽字体');
+      expect(code.style?.backgroundColor, isNotNull, reason: '行内码必须有浅底');
     });
 
     testWidgets('列表项里的行内样式同样生效', (WidgetTester tester) async {
@@ -386,8 +387,7 @@ void main() {
       expect(code.style?.fontFamily, 'monospace');
     });
 
-    testWidgets('H4–H6 与正文有层级差异（内核默认只到 H3）',
-        (WidgetTester tester) async {
+    testWidgets('H4–H6 与正文有层级差异（内核默认只到 H3）', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_h4_');
       await tester.pumpWidget(
@@ -414,8 +414,7 @@ void main() {
       expect(body.style?.fontWeight, isNot(AppWeight.semibold));
     });
 
-    testWidgets('代码块：字号/行高/等宽与列表摘要同源',
-        (WidgetTester tester) async {
+    testWidgets('代码块：字号/行高/等宽与列表摘要同源', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_code_style_');
       await tester.pumpWidget(
@@ -440,15 +439,18 @@ void main() {
         reason: '详情 14.4 与列表摘要 base×0.9 必须一致',
       );
       expect(style.height, 1.55, reason: '行高要与列表的 1.55 一致');
-      expect(
-        style.backgroundColor,
-        isNull,
-        reason: '底色交给整宽容器，不能再挂在 TextStyle 上（否则只覆盖字符）',
-      );
+      // 底色不再逐行画在文字上：整宽圆角卡片由组件外层 Container 提供，
+      // 文字本身必须干净（否则卡片里会叠出一圈毛边）。
+      expect(style.backgroundColor, isNull, reason: '文字本身不能逐行铺底');
+      final bool hasCard = tester
+          .widgetList<CustomPaint>(
+            find.ancestor(of: code, matching: find.byType(CustomPaint)),
+          )
+          .isNotEmpty;
+      expect(hasCard, isTrue, reason: '代码块必须有整宽圆角卡片背景');
     });
 
-    testWidgets('代码块底色铺满整行，而不是只包住文字',
-        (WidgetTester tester) async {
+    testWidgets('代码块底色与正文左缘正确', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -467,24 +469,52 @@ void main() {
 
       final Finder code =
           find.textContaining('void main()', findRichText: true);
-      // 文字左缘 = 页面边距 16 + 容器内边距 12。
+      // 文字左缘 = 页面边距 16 + 卡片内边距 12。
       expect(
         tester.getRect(code).left,
-        closeTo(AppSpace.page + AppSpace.md, 1),
+        closeTo(AppSpace.page + 12, 1),
       );
-      // 最近的一层 Container 就是代码块底色容器：宽度要撑满内容区。
-      final Finder band = find
-          .ancestor(of: code, matching: find.byType(Container))
-          .first;
       expect(
-        tester.getSize(band).width,
-        closeTo(360 - AppSpace.page * 2, 1),
-        reason: '底色容器必须铺满整行内容区（用户反馈代码块不是整行）',
+        find
+            .ancestor(of: code, matching: find.byType(CustomPaint))
+            .evaluate()
+            .isNotEmpty,
+        isTrue,
+        reason: '代码块要有整宽浅底卡片，和列表摘要一致',
       );
     });
 
-    testWidgets('代码块：点击可定位光标，代理测量不抛异常',
-        (WidgetTester tester) async {
+    testWidgets('代码块与下一行的间距与列表摘要一致', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_gap_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_gap', '```dart\ncode line\n```\n代码后面的正文'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Rect code =
+          tester.getRect(find.textContaining('code line', findRichText: true));
+      final Rect next = tester.getRect(
+        find.textContaining('代码后面的正文', findRichText: true),
+      );
+      // 卡片底部内边距 10 + 块间距 6（下一块不再叠加段距）= 6。
+      // 列表摘要里卡片下方也只有这 6，两处肉眼一致（用户多轮反馈详情偏大）。
+      expect(
+        next.top - code.bottom - CodeBlockCardStyle.paddingVertical,
+        closeTo(6, 0.5),
+      );
+    });
+
+    testWidgets('代码块：点击可定位光标，代理测量不抛异常', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -509,8 +539,140 @@ void main() {
       expect(
         tester.takeException(),
         isNull,
-        reason: '代码块用了自定义代理组件，点击定位不能抛异常',
+        reason: '点击代码块不能抛异常',
       );
+      // 清掉光标闪烁等 Ticker，避免测试结束时 Timer 仍挂着。
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     });
+
+    testWidgets('代码块：点击第三行能定位到第三行，不是只能到末尾', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_caret_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_caret', '```\nline1\nline2\nline3\n```'),
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder code = find.textContaining('line1', findRichText: true);
+      final Rect rect = tester.getRect(code);
+      // 代码块现在是 3 行（解析器不再补结尾空行）：0.8 高度落在第三行。
+      // 坐标若因外层内边距偏移，会落到别的行甚至文件末尾，这里要求
+      // 精确落在第三行区间。
+      await tester.tapAt(Offset(rect.left + 30, rect.top + rect.height * 0.8));
+      await _pumpFrames(tester, frames: 6);
+
+      final SuperEditor superEditor =
+          tester.widget<SuperEditor>(find.byType(SuperEditor));
+      final DocumentSelection? selection =
+          superEditor.editor.composer.selection;
+      expect(selection, isNotNull);
+      final TextNodePosition position =
+          selection!.extent.nodePosition as TextNodePosition;
+      expect(
+        position.offset,
+        inInclusiveRange(11, 20),
+        reason: '点击第三行应落在第三行附近，不能跳到开头或末尾',
+      );
+      // 清掉光标闪烁等 Ticker，避免测试结束时 Timer 仍挂着。
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    });
+
+    testWidgets('代码块下方的空白可以落光标，能新起一行', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_code_below_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('code_below', '```\nline1\nline2\n```'),
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder code = find.textContaining('line1', findRichText: true);
+      final Rect rect = tester.getRect(code);
+      // 代码块容器底部 padding 10 + 块间距 8：再往下是末尾的普通空段落。
+      await tester.tapAt(Offset(rect.center.dx, rect.bottom + 32));
+      await _pumpFrames(tester, frames: 6);
+
+      final SuperEditor superEditor =
+          tester.widget<SuperEditor>(find.byType(SuperEditor));
+      final DocumentSelection? selection =
+          superEditor.editor.composer.selection;
+      expect(selection, isNotNull);
+      final DocumentNode node =
+          superEditor.editor.document.getNodeById(selection!.extent.nodeId)!;
+      expect(
+        node.getMetadataValue(NodeMetadata.blockType) != codeAttribution,
+        isTrue,
+        reason: '代码块下方应是普通段落，能继续新起一行输入',
+      );
+      // 清掉光标闪烁等 Ticker，避免测试结束时 Timer 仍挂着。
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    });
+  });
+
+  test('代码块末尾空行再回车：退出代码块，末尾变成普通段落', () {
+    // ``` 内是「line1 + 空行」，光标停在末尾空行上回车。
+    final MutableDocument document = deserializeXiaojiMarkdown(
+      '```\nline1\n\n```',
+    );
+    final ParagraphNode code = document.getNodeAt(0)! as ParagraphNode;
+    expect(
+      code.getMetadataValue(NodeMetadata.blockType),
+      codeAttribution,
+    );
+
+    final MutableDocumentComposer composer = MutableDocumentComposer();
+    final Editor editor = createXiaojiEditor(
+      document: document,
+      composer: composer,
+    );
+    composer.setSelectionWithReason(
+      DocumentSelection.collapsed(
+        position: DocumentPosition(
+          nodeId: code.id,
+          nodePosition: TextNodePosition(offset: code.text.length),
+        ),
+      ),
+      SelectionReason.userInteraction,
+    );
+
+    editor.execute(<EditRequest>[
+      InsertNewlineAtCaretRequest(Editor.createNodeId()),
+    ]);
+
+    final ParagraphNode remaining = document.getNodeAt(0)! as ParagraphNode;
+    expect(
+      remaining.getMetadataValue(NodeMetadata.blockType),
+      codeAttribution,
+      reason: '上方的代码内容要保留在代码块里',
+    );
+    expect(remaining.text.toPlainText(), 'line1');
+    final ParagraphNode below = document.getNodeAt(1)! as ParagraphNode;
+    expect(
+      below.getMetadataValue(NodeMetadata.blockType),
+      isNot(codeAttribution),
+      reason: '末尾空行要变回普通段落（退出代码块）',
+    );
+    expect(below.text.toPlainText(), isEmpty);
   });
 }

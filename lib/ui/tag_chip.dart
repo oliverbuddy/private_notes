@@ -8,6 +8,10 @@ import 'tag_palette.dart';
 /// 列表卡片、详情页底部标签栏共用这一个规格：4 圆角、0.5 描边、
 /// 12 号中等字重。颜色由 [TagPalette] 按标签名稳定生成 —— 同一个标签
 /// 在列表和详情里颜色一致，不同标签颜色不同。
+///
+/// 尺寸按主流笔记（语雀/滴答）的「行内标记」规格收窄：高 20、左右 6、
+/// 底色只留很淡的一层色相 —— 之前 22 高 + 16% 色底在白卡上像按钮，
+/// 比正文还抢眼（用户反馈「标签背景太大太突兀」）。
 class TagChip extends StatelessWidget {
   const TagChip({super.key, required this.label, this.isOverflow = false});
 
@@ -21,8 +25,8 @@ class TagChip extends StatelessWidget {
     final colors = AppColors.of(context);
     final TagTone tone = TagPalette.toneFor(label, colors);
     return Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
+      height: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
         color: isOverflow ? colors.accentBg : tone.background,
         borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -42,7 +46,7 @@ class TagChip extends StatelessWidget {
           style: TextStyle(
             fontSize: AppFontSize.caption,
             height: 1,
-            letterSpacing: 0.2,
+            letterSpacing: 0.1,
             fontWeight: AppWeight.medium,
             color: isOverflow ? colors.secondary : tone.foreground,
           ),
