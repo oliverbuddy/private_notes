@@ -25,7 +25,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.8.4 |
+| 版本 | 1.8.5 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 407 / 407 通过 |
 | 静态检查 | `flutter analyze` No issues found |
