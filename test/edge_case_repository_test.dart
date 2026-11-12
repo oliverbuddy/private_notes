@@ -152,14 +152,16 @@ void main() {
 
   group('边界：排序', () {
     test('置顶优先，其余按 updated 倒序', () async {
+      // 读盘时 updated 不会早于 created（Note.decode 会夹紧），
+      // 这里的时间都要晚于 _note 默认的 created。
       await seed(<Note>[
-        _note('old', body: 'old', updated: DateTime(2026, 10, 1)),
-        _note('new', body: 'new', updated: DateTime(2026, 10, 5)),
+        _note('old', body: 'old', updated: DateTime(2026, 11, 1)),
+        _note('new', body: 'new', updated: DateTime(2026, 11, 5)),
         _note(
           'pinnedOld',
           body: 'pinned',
           pinned: true,
-          updated: DateTime(2026, 9, 1),
+          updated: DateTime(2026, 10, 31, 10),
         ),
       ]);
       expect(
@@ -170,12 +172,25 @@ void main() {
 
     test('两条都置顶时按 updated 倒序', () async {
       await seed(<Note>[
-        _note('p1', body: '1', pinned: true, updated: DateTime(2026, 10, 2)),
-        _note('p2', body: '2', pinned: true, updated: DateTime(2026, 10, 9)),
+        _note('p1', body: '1', pinned: true, updated: DateTime(2026, 11, 2)),
+        _note('p2', body: '2', pinned: true, updated: DateTime(2026, 11, 9)),
       ]);
       expect(
         repo.visibleNotes.map((note) => note.id).toList(),
         <String>['p2', 'p1'],
+      );
+    });
+
+    test('updated 相同时按 id 升序，顺序稳定', () async {
+      final DateTime same = DateTime(2026, 11, 5);
+      await seed(<Note>[
+        _note('b', body: 'b', updated: same),
+        _note('c', body: 'c', updated: same),
+        _note('a', body: 'a', updated: same),
+      ]);
+      expect(
+        repo.visibleNotes.map((note) => note.id).toList(),
+        <String>['a', 'b', 'c'],
       );
     });
   });
@@ -205,6 +220,19 @@ void main() {
       final updated = await repo.togglePin(repo.visibleNotes.single);
       expect(updated.pinned, isTrue);
       expect(repo.visibleNotes.single.pinned, isTrue);
+    });
+
+    test('togglePin 不改 updated（置顶不算内容更新）', () async {
+      final DateTime updatedAt = DateTime(2026, 11, 5, 8, 30);
+      await seed(<Note>[_note('a', body: 'x', updated: updatedAt)]);
+
+      final Note pinned = await repo.togglePin(repo.visibleNotes.single);
+      expect(pinned.pinned, isTrue);
+      expect(pinned.updated, updatedAt, reason: '置顶不能刷新「最近更新」时间');
+
+      final Note unpinned = await repo.togglePin(pinned);
+      expect(unpinned.pinned, isFalse);
+      expect(unpinned.updated, updatedAt, reason: '取消置顶也不能刷新更新时间');
     });
   });
 }

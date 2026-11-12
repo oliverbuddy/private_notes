@@ -737,4 +737,65 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 2));
   });
+
+  group('输入法组词下划线', () {
+    testWidgets('组词区用主题色 1dp 细线，不再是默认黑色 2dp',
+        (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_composing_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('composing', '你好世界'),
+          autoFocus: true,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final SuperEditor superEditor =
+          tester.widget<SuperEditor>(find.byType(SuperEditor));
+      final DocumentNode node = superEditor.editor.document.getNodeAt(0)!;
+      // 模拟语音输入/输入法候选：前两个字进入 composing region。
+      superEditor.editor.composer.setComposingRegion(
+        DocumentRange(
+          start: DocumentPosition(
+            nodeId: node.id,
+            nodePosition: const TextNodePosition(offset: 0),
+          ),
+          end: DocumentPosition(
+            nodeId: node.id,
+            nodePosition: const TextNodePosition(offset: 2),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final AppColors colors = AppColors.of(
+        tester.element(find.byType(NewEditorPage)),
+      );
+      final List<StraightUnderlineStyle> styles = <StraightUnderlineStyle>[
+        for (final TextComponent component
+            in tester.widgetList<TextComponent>(find.byType(TextComponent)))
+          for (final Underlines underline in component.underlines)
+            if (underline.style is StraightUnderlineStyle)
+              underline.style as StraightUnderlineStyle,
+      ];
+      expect(styles, isNotEmpty, reason: '组词下划线没有渲染出来');
+
+      // super_editor 的默认值是 2dp 纯黑；1dp 说明插件的样式生效了。
+      final StraightUnderlineStyle style = styles.firstWhere(
+        (StraightUnderlineStyle item) => item.thickness == 1,
+        orElse: () => styles.first,
+      );
+      expect(style.thickness, 1, reason: '组词下划线必须是 1dp 细线');
+      expect(
+        style.color,
+        colors.accent.withValues(alpha: 0.55),
+        reason: '组词下划线必须是主题色，黑色说明样式又被重置成默认值',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 2));
+    });
+  });
 }

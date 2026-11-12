@@ -101,12 +101,19 @@ class NoteRepository extends ChangeNotifier {
       if (a.pinned != b.pinned) {
         return a.pinned ? -1 : 1;
       }
+      final int byTime;
       switch (_settings.sortOrder) {
         case SortOrder.updated:
-          return b.updated.compareTo(a.updated);
+          byTime = b.updated.compareTo(a.updated);
         case SortOrder.created:
-          return b.created.compareTo(a.created);
+          byTime = b.created.compareTo(a.created);
       }
+      if (byTime != 0) {
+        return byTime;
+      }
+      // 时间戳相同的笔记（同一批导入、同一次保存）按 id 兜底：Dart 的
+      // List.sort 不稳定，没有 tie-breaker 时刷新一次顺序就可能变。
+      return a.id.compareTo(b.id);
     });
     return result;
   }
@@ -362,11 +369,13 @@ class NoteRepository extends ChangeNotifier {
     return file;
   }
 
+  /// 置顶 / 取消置顶只翻转 `pinned`，不动 `updated`。
+  ///
+  /// 旧实现会顺手把 `updated` 刷成 now：置顶后笔记跳到置顶组第一位，
+  /// 取消置顶又跳到普通列表最前，列表里时间还变成「刚刚」——置顶只是
+  /// 一种收纳操作，不该被当成内容更新（会污染「最近更新」排序）。
   Future<Note> togglePin(Note note) async {
-    final updated = note.copyWith(
-      pinned: !note.pinned,
-      updated: DateTime.now(),
-    );
+    final updated = note.copyWith(pinned: !note.pinned);
     await upsert(updated);
     return updated;
   }

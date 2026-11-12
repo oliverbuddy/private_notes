@@ -61,7 +61,14 @@ Future<T?> showXiaojiSheet<T>({
               ),
             ),
           ),
-          SizedBox(width: double.infinity, child: builder(sheetContext)),
+          // 内容区必须拿到「剩余高度」这个**有限**约束：Column 的普通子项
+          // 在主轴上是无限高度约束，内容一旦比屏幕高（小屏 + 键盘弹出）
+          // 就只能溢出，内部的滚动区也拿不到高度、无法滚动。
+          // 用 Flexible 让内容拿到 剩余空间，内容没超高时尺寸与之前完全一致。
+          Flexible(
+            child:
+                SizedBox(width: double.infinity, child: builder(sheetContext)),
+          ),
         ],
       );
     },

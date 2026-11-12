@@ -187,6 +187,11 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 文档布局的渲染入口：分享长图直接复用它，保证与详情页同一份排版。
   final GlobalKey _documentLayoutKey = GlobalKey();
 
+  /// 输入法组词下划线的样式插件（原因见文件末尾的
+  /// [_ThemedComposingUnderlinePlugin]）。
+  final _ThemedComposingUnderlinePlugin _composingUnderlinePlugin =
+      _ThemedComposingUnderlinePlugin();
+
   /// 输入法层粘贴拦截器：覆盖 Gboard 剪贴板建议这条路径。
   late final PasteImeDecorator _pasteImeDecorator;
 
@@ -2577,6 +2582,13 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Widget _buildEditor(AppColors colors) {
+    // 组词下划线跟随主题：每帧同步给插件（深色/浅色切换后也立刻正确）。
+    _composingUnderlinePlugin.style = StraightUnderlineStyle(
+      color: colors.accent.withValues(alpha: 0.55),
+      thickness: 1,
+      offset: 3,
+      capType: StrokeCap.round,
+    );
     return NotificationListener<ScrollNotification>(
       // 只用来区分「手指拖动」和「内核自动滚动」：dragDetails 只有真实
       // 拖动才会带上，ballistic / animateTo 都没有。
@@ -2590,6 +2602,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       },
       child: SuperEditor(
         editor: _editor,
+        // 组词（语音/输入法候选）下划线统一成主题色细线，见插件说明。
+        plugins: <SuperEditorPlugin>{_composingUnderlinePlugin},
         // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
         focusNode: _editorFocus,
         // 粘贴拦截：键盘粘贴与工具条粘贴走同一套 Markdown 解析。
@@ -2725,15 +2739,12 @@ class _NewEditorPageState extends State<NewEditorPage>
               // 否则媒体会通栏贴屏幕边（用户反馈「详情没有内边距」）。
               Styles.padding:
                   const CascadingPadding.symmetric(horizontal: AppSpace.page),
-              // IME 组词下划线：super_editor 默认是 2px 纯黑方头，
-              // 在手机上像一条粗黑杠（用户反馈「正在输入的文字下面有粗黑线」）。
-              // 这里换成 1dp 主色细线，保留组词提示又不抢视觉。
-              Styles.composingRegionUnderlineStyle: StraightUnderlineStyle(
-                color: colors.accent.withValues(alpha: 0.55),
-                thickness: 1,
-                offset: 3,
-                capType: StrokeCap.round,
-              ),
+              // IME 组词下划线（语音输入/候选词）不在这里配：super_editor
+              // 的 composing region 样式阶段会 `copy()` 一份组件 ViewModel，
+              // 而 `TextComponentViewModel.internalCopy()` 漏拷了
+              // `composingRegionUnderlineStyle`（0.3.0-dev.52 源码实测），
+              // 写在这条规则里的值会被重置回默认的 2dp 纯黑。改由
+              // `_ThemedComposingUnderlinePlugin` 在样式管线最末尾设置。
               // 行内样式见上方 `inlineTextStyler` 参数（写在规则里会被丢弃）。
             };
           },
@@ -4239,6 +4250,75 @@ class _VersionPreviewSheet extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 把「输入法组词下划线」改成主题色细线。
+///
+/// super_editor 默认画 2dp 纯黑方头下划线，语音输入/候选词时手机上像
+/// 一条粗黑杠（用户反馈）。直接在 stylesheet 里配
+/// `Styles.composingRegionUnderlineStyle` 不生效：内置的
+/// `SingleColumnLayoutComposingRegionStyler` 会对每个组件调用
+/// `copy()`，而 `TextComponentViewModel.internalCopy()` 没有复制
+/// `composingRegionUnderlineStyle`（0.3.0-dev.52 源码实测），样式被重置
+/// 回默认黑线。
+///
+/// 这里挂到 [SuperEditorPlugin.appendedStylePhases]（样式管线最末尾、
+/// 选区样式之后），在所有内置阶段完成后把下划线样式设回主题色。
+class _ThemedComposingUnderlinePlugin extends SuperEditorPlugin {
+  _ThemedComposingUnderlinePlugin() {
+    _phase = _ThemedComposingUnderlinePhase(this);
+  }
+
+  /// 当前主题下的下划线样式，由 `_buildEditor` 每帧同步。
+  UnderlineStyle style = const StraightUnderlineStyle();
+
+  late final _ThemedComposingUnderlinePhase _phase;
+
+  @override
+  List<SingleColumnLayoutStylePhase> get appendedStylePhases =>
+      <SingleColumnLayoutStylePhase>[_phase];
+}
+
+class _ThemedComposingUnderlinePhase extends SingleColumnLayoutStylePhase {
+  _ThemedComposingUnderlinePhase(this._plugin);
+
+  final _ThemedComposingUnderlinePlugin _plugin;
+
+  @override
+  SingleColumnLayoutViewModel style(
+    Document document,
+    SingleColumnLayoutViewModel viewModel,
+  ) {
+    final UnderlineStyle underlineStyle = _plugin.style;
+    final List<SingleColumnLayoutComponentViewModel> components =
+        viewModel.componentViewModels;
+    bool changed = false;
+    final List<SingleColumnLayoutComponentViewModel> next =
+        List<SingleColumnLayoutComponentViewModel>.generate(
+      components.length,
+      (int index) {
+        final SingleColumnLayoutComponentViewModel component = components[index];
+        if (component is! TextComponentViewModel ||
+            component.composingRegion == null) {
+          return component;
+        }
+        final SingleColumnLayoutComponentViewModel copy = component.copy();
+        if (copy is! TextComponentViewModel) {
+          return component;
+        }
+        changed = true;
+        return copy..composingRegionUnderlineStyle = underlineStyle;
+      },
+      growable: false,
+    );
+    if (!changed) {
+      return viewModel;
+    }
+    return SingleColumnLayoutViewModel(
+      padding: viewModel.padding,
+      componentViewModels: next,
     );
   }
 }
