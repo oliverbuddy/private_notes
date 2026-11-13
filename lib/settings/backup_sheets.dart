@@ -29,6 +29,9 @@ enum BackupAction {
 
   /// 从备份恢复。
   restore,
+
+  /// 导入外部 Markdown 文件（一次性、低频，和恢复同属「把外部数据拿进来」）。
+  importMarkdown,
 }
 
 /// 恢复来源里「从文件选择」的哨兵值。
@@ -141,8 +144,14 @@ Future<BackupAction?> showBackupMenu(
             ),
             _ActionRow(
               label: '从备份恢复',
-              subtitle: '合并恢复，不会删除现有笔记',
+              subtitle: '按备份条目回到快照，备份外的笔记不受影响',
               onTap: () => Navigator.of(sheetContext).pop(BackupAction.restore),
+            ),
+            _ActionRow(
+              label: '导入 Markdown 文件…',
+              subtitle: '从其它 App 导入 .md，图片不随文件搬运',
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(BackupAction.importMarkdown),
             ),
             const SizedBox(height: 8),
           ],

@@ -17,6 +17,7 @@ import '../../data/note_store.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
+import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
 import '../../ui/quote_block.dart';
@@ -116,6 +117,7 @@ class NewEditorPage extends StatefulWidget {
     required this.repository,
     required this.note,
     this.autoFocus = false,
+    this.shareOnOpen = false,
   });
 
   final NoteRepository repository;
@@ -125,8 +127,23 @@ class NewEditorPage extends StatefulWidget {
   /// （不主动弹键盘）。
   final bool autoFocus;
 
+  /// 从列表长按「分享为图片」进入时置为 true：等首帧渲染完成后自动分享，
+  /// 保证分享图取到的是详情页真实的文档布局。
+  final bool shareOnOpen;
+
   @override
   State<NewEditorPage> createState() => _NewEditorPageState();
+}
+
+/// 大纲条目：标题节点、层级与纯文本。
+///
+/// 只在一页内使用，不对外暴露；标题直接从文档解析，不额外维护结构。
+class _OutlineEntry {
+  const _OutlineEntry(this.nodeId, this.level, this.title);
+
+  final String nodeId;
+  final int level;
+  final String title;
 }
 
 class _NewEditorPageState extends State<NewEditorPage>
@@ -158,6 +175,11 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 文档是否为空（只有空段落）。空文档时显示占位提示文字。
   /// 单独用 ValueNotifier：每敲一个字都要判断，但不该重建整页。
   final ValueNotifier<bool> _documentEmpty = ValueNotifier<bool>(true);
+
+  /// 文档大纲（只取标题）。签名用于判断是否需要 setState：
+  /// 逐字输入时标题没变就不重建页面。
+  List<_OutlineEntry> _outline = const <_OutlineEntry>[];
+  String _outlineSignature = '';
 
   /// 最近一次有效选区。打开 Aa/插入面板会让编辑器失焦、选区被清空，
   /// 面板里的命令随后就找不到操作对象（实测点 H2 只有面板关闭、标题没变）。
@@ -358,6 +380,16 @@ class _NewEditorPageState extends State<NewEditorPage>
         _retryInitialFocusIfNeeded();
       });
     }
+    // 从列表长按「分享为图片」：等首帧布局完成后自动触发分享，
+    // 此时 [_documentLayoutKey] 才拿得到真实的文档渲染对象。
+    if (widget.shareOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_disposed || !mounted) {
+          return;
+        }
+        _shareAsImage();
+      });
+    }
   }
 
   /// 把光标落到第一个文本块。
@@ -447,6 +479,47 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_documentEmpty.value != empty) {
       _documentEmpty.value = empty;
     }
+    _syncOutline();
+  }
+
+  /// 刷新大纲。标题按 H1/H2/H3 的 blockType 识别（与工具条转换标题
+  /// 使用同一套 attribution），不额外存一份结构。
+  void _syncOutline() {
+    final List<_OutlineEntry> entries = <_OutlineEntry>[];
+    for (final DocumentNode node in _document) {
+      if (node is! ParagraphNode) {
+        continue;
+      }
+      final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+      final int level = blockType == header1Attribution
+          ? 1
+          : blockType == header2Attribution
+          ? 2
+          : blockType == header3Attribution
+          ? 3
+          : 0;
+      if (level == 0) {
+        continue;
+      }
+      final String title = node.text.toPlainText().trim();
+      if (title.isEmpty) {
+        continue;
+      }
+      entries.add(_OutlineEntry(node.id, level, title));
+    }
+    final String signature = entries
+        .map((_OutlineEntry entry) =>
+            '${entry.nodeId}|${entry.level}|${entry.title}')
+        .join('\n');
+    if (signature == _outlineSignature) {
+      return;
+    }
+    _outlineSignature = signature;
+    if (!mounted) {
+      _outline = entries;
+      return;
+    }
+    setState(() => _outline = entries);
   }
 
   @override
@@ -1524,53 +1597,140 @@ class _NewEditorPageState extends State<NewEditorPage>
   // 右上角「⋯」笔记操作菜单（早期版本同款：置顶/复制文本/编辑标签/删除）
   // ---------------------------------------------------------------------------
 
+  /// 顶栏「目录」：按 H1/H2/H3 列出标题，点一下跳到对应位置。
+  ///
+  /// 只在标题数 ≥ 2 时出现（见 [_buildHeader]）：两行以内的小记不需要导航，
+  /// 多出来的图标只会增加「这块是干什么的」的困惑。
+  Future<void> _showOutline() async {
+    if (_outline.isEmpty) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    final List<_OutlineEntry> entries = List<_OutlineEntry>.of(_outline);
+    final String? picked = await showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                child: Text(
+                  '目录',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.5,
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.only(top: 4, bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (var i = 0; i < entries.length; i++)
+                        InkWell(
+                          key: ValueKey<String>('outline-item-$i'),
+                          onTap: () =>
+                              Navigator.of(sheetContext).pop(entries[i].nodeId),
+                          child: Padding(
+                            // 层级用缩进表达，不额外画连线：小记的标题最多三级，
+                            // 缩进已经足够，加线条会让弹层变重。
+                            padding: EdgeInsets.fromLTRB(
+                              20 + (entries[i].level - 1) * 16.0,
+                              10,
+                              20,
+                              10,
+                            ),
+                            child: Text(
+                              entries[i].title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: entries[i].level == 1
+                                    ? AppFontSize.body
+                                    : AppFontSize.labelLg,
+                                fontWeight: entries[i].level == 1
+                                    ? AppWeight.medium
+                                    : AppWeight.regular,
+                                height: 1.4,
+                                color: entries[i].level == 1
+                                    ? colors.text
+                                    : colors.secondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    final DocumentNode? node = _document.getNodeById(picked);
+    if (node == null) {
+      return;
+    }
+    _jumpToDocumentNode(node);
+  }
+
+  /// 把光标放到目标标题开头，并把标题滚到视口上方。
+  ///
+  /// 先落光标（复用已有的 caret 机制），再按布局坐标平滑滚动；拿不到坐标时
+  /// 退回「保证光标可见」，不会出现点了没反应。
+  void _jumpToDocumentNode(DocumentNode node) {
+    final DocumentPosition position = DocumentPosition(
+      nodeId: node.id,
+      nodePosition: const TextNodePosition(offset: 0),
+    );
+    _editor.execute(<EditRequest>[
+      ChangeSelectionRequest(
+        DocumentSelection.collapsed(position: position),
+        SelectionChangeType.placeCaret,
+        SelectionReason.userInteraction,
+      ),
+    ]);
+    if (_disposed || !mounted || !_editorScroll.hasClients) {
+      return;
+    }
+    try {
+      final DocumentLayoutEditable layoutEditable =
+          _editor.context.find<DocumentLayoutEditable>(Editor.layoutKey);
+      final Rect? rect =
+          layoutEditable.documentLayout.getRectForPosition(position);
+      if (rect == null) {
+        _ensureCaretVisible(forceComfort: true);
+        return;
+      }
+      final ScrollPosition scroll = _editorScroll.position;
+      final double target = (rect.top - 12).clamp(
+        scroll.minScrollExtent,
+        scroll.maxScrollExtent,
+      );
+      _requestCaretScroll(target);
+    } catch (_) {
+      _ensureCaretVisible(forceComfort: true);
+    }
+  }
+
   Future<void> _showEditorMenu() async {
-    // 与主页长按共用同一个动作菜单组件：标题、行高、图标、分隔线、
-    // 取消按钮全部走 HarmonyOS 规范，不再各页面手写一套。
+    // 与主页长按共用同一个动作菜单组件和同一份动作定义：标题、行高、
+    // 图标、顺序、分隔线全部一致，不再各页面手写一套。
     final String? action = await showXiaojiActionSheet<String>(
       context: context,
       title: '',
-      actions: <SheetAction<String>>[
-        SheetAction<String>(
-          value: 'pin',
-          label: _currentNote.pinned ? '取消置顶' : '置顶',
-          icon: Icons.push_pin_outlined,
-          selected: _currentNote.pinned,
-        ),
-        const SheetAction<String>(
-          value: 'copy',
-          label: '复制文本',
-          icon: Icons.content_copy_outlined,
-        ),
-        const SheetAction<String>(
-          value: 'shareImage',
-          label: '分享为图片',
-          icon: Icons.share_outlined,
-        ),
-        const SheetAction<String>(
-          value: 'tags',
-          label: '编辑标签',
-          icon: Icons.sell_outlined,
-        ),
-        const SheetAction<String>(
-          value: 'history',
-          label: '历史版本',
-          icon: Icons.history_rounded,
-        ),
-        SheetAction<String>(
-          value: 'lock',
-          label: _currentNote.locked ? '取消锁定' : '锁定笔记',
-          icon: _currentNote.locked
-              ? Icons.lock_open_outlined
-              : Icons.lock_outline_rounded,
-        ),
-        const SheetAction<String>(
-          value: 'delete',
-          label: '删除',
-          icon: Icons.delete_outline_rounded,
-          destructive: true,
-        ),
-      ],
+      actions: buildNoteActions(_currentNote, detail: true),
     );
     if (action == null || !mounted) {
       return;
@@ -2566,6 +2726,14 @@ class _NewEditorPageState extends State<NewEditorPage>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                // 标题 ≥ 2 个才显示目录：短文不需要导航，少一个图标就少一分
+                // "这块是干什么的"的负担。
+                if (_outline.length >= 2)
+                  AppIconButton(
+                    icon: Icons.toc_rounded,
+                    onTap: _showOutline,
+                    tooltip: '目录',
+                  ),
                 // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
                 // 高频动作），顶栏只留笔记级操作「⋯」。
                 AppIconButton(

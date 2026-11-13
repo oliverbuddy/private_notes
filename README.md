@@ -25,9 +25,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.8.6 |
+| 版本 | 1.9.0 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 425 / 425 通过 |
+| 测试 | `flutter test` 431 / 431 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | `build/app/outputs/flutter-apk/app-release.apk`，约 42MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
@@ -47,6 +47,7 @@
 **关于页**（版本号 / 开源许可 / 联系作者 / 项目主页，设置页只留一个入口）·
 **单篇版本历史**（编辑前快照，保留 20 版 + 30 天，可预览与恢复；锁定笔记只保留密文、不提供预览）·
 **分享为图片**（直接复用详情页的渲染结果生成整篇长图：列宽/换行、表格、代码块、图片与详情完全一致，走系统分享面板）·
+**长文目录**（标题 ≥ 2 个时顶栏出现目录入口，按 H1/H2/H3 缩进，点一下跳到该标题）·
 **导入外部 Markdown**（单/多选 `.md`、`.markdown`、`.txt`，带 frontmatter 保留时间与标签，id 冲突自动换新 id）·
 **存储空间**（正文/附件/回收站/历史版本/备份/索引分类统计 + 清理未被引用的附件）
 
@@ -330,7 +331,7 @@ lib/security/app_lock_gate.dart               应用锁闸门（锁屏覆盖所�
 lib/security/security_service.dart            系统凭证 / Keystore 加解密 / FLAG_SECURE
 lib/security/pin_pad.dart                     PIN 点阵 + 应用内数字键盘（绕开 IME）
 lib/security/unlock.dart                      身份验证 / PIN 弹层
-lib/settings/settings_page.dart               外观 / 安全 / 数据（备份与恢复、回收站、标签管理）+ 关于入口
+lib/settings/settings_page.dart               外观 / 安全（应用锁二级菜单含自动锁定）/ 数据（备份与恢复、回收站、存储空间）+ 关于入口
 lib/settings/about_page.dart                  关于页（版本 / 许可 / 联系方式 / 项目主页）
 lib/util/app_info.dart                        从已安装 APK 读取版本号与包名
 lib/settings/backup_sheets.dart               备份与恢复弹层、恢复来源选择（纯展示，动作交回页面）
@@ -391,6 +392,9 @@ docs/                                         GitHub Pages 落地页（下载 / 
 - [ ] 锁定笔记「验证后 5 分钟内免重复验证」（对齐 Apple Notes 的会话窗口）
 - [ ] 锁定笔记附件加密（整篇保护）
 - [x] 自动导出到外部目录（SAF 目录授权，每 24h，保留 3 份）
+- [x] 长文目录（标题 ≥ 2 个时出现，可跳转）
+- [x] 列表长按与详情「更多」共用同一份动作定义（含编辑标签 / 分享为图片）
+- [x] 设置页收敛：导入 Markdown 进备份弹层、标签管理回到首页标签弹层、自动锁定下沉到应用锁二级菜单
 - [x] 桌面小组件「记一条」（手机端的捕获入口）
 - [x] 搜索换 SQLite FTS5（中文单字 + 二字切词，前缀匹配）
 - [x] 存储空间分类统计 + 清理未被引用的附件

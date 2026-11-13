@@ -234,11 +234,19 @@ void main() {
       await tester.tap(find.text('设置并解锁'));
       // 写 settings.json 是真实文件 IO：fakeAsync 里要交替 runAsync 与 pump，
       // 让真实 IO 完成后再把回调冲进 fake 队列。
-      for (var i = 0; i < 10; i++) {
+      //
+      // 用「轮询到界面真的解锁」而不是固定次数：并发跑全量测试时，
+      // 写 PIN 的真实 IO 与后续 Keystore 调用都会被拖慢；只等 PIN 落盘不够，
+      // 还要等 Gate 把解锁态推到界面。
+      for (var i = 0; i < 100; i++) {
         await tester.runAsync(() async {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         });
         await tester.pump();
+        if (repository.settings.pinHash != null &&
+            find.text('小记已锁定').evaluate().isEmpty) {
+          break;
+        }
       }
 
       expect(find.text('小记已锁定'), findsNothing);

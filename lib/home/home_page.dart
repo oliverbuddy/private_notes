@@ -6,14 +6,17 @@ import '../data/note_repository.dart';
 import '../editor/block.dart';
 import '../editor/lab/image_display_size.dart';
 import '../editor/lab/new_editor_page.dart';
+import '../editor/tag_editor_sheet.dart';
 import '../security/unlock.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../settings/settings_page.dart';
+import '../settings/tags_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
 import '../ui/app_icon_button.dart';
 import '../ui/content_frame.dart';
+import '../ui/note_actions.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
@@ -144,7 +147,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openEditor(Note? note) async {
+  Future<void> _openEditor(Note? note, {bool shareOnOpen = false}) async {
     // 内核迁移收尾：全量切换到新内核编辑页（点卡片/新建/桌面快捷方式
     // 都汇聚在这里）。新建时先造好笔记对象，没有任何编辑就不会落盘，
     // 不会堆出空白笔记。
@@ -186,6 +189,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           note: effective,
           // 新建时自动聚焦并拉起输入法；点开已有小记保持浏览态。
           autoFocus: note == null,
+          shareOnOpen: shareOnOpen,
         ),
       ),
     );
@@ -203,9 +207,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _showNoteActions(Note note) async {
     // 长按是「重」手势，给一次轻震反馈，用户能确认按到了（与系统列表一致）。
     HapticFeedback.mediumImpact();
-    // 列表长按只放高频动作：置顶 / 锁定 / 删除。
-    // 复制文本、编辑标签需要先看内容再决定，留在详情页「更多」里；
-    // 两处共用的动作保持同一图标、同一顺序，删除永远是最后一项。
+    // 列表长按与详情「更多」共用同一份动作定义（图标、文案、顺序一致），
+    // 列表侧只是少了需要正文的「复制文本 / 历史版本」。
     final String firstLine =
         note.locked ? '' : plainSummary(note.body).split('\n').first.trim();
     final String menuTitle =
@@ -213,35 +216,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final action = await showXiaojiActionSheet<String>(
       context: context,
       title: menuTitle,
-      actions: <SheetAction<String>>[
-        // 菜单统一用线性图标；「已置顶」靠 selected 的主色 + 勾选表达，
-        // 不再混用实心图钉，否则同一张菜单里深浅轻重不一致。
-        SheetAction<String>(
-          value: 'pin',
-          label: note.pinned ? '取消置顶' : '置顶',
-          icon: Icons.push_pin_outlined,
-          selected: note.pinned,
-        ),
-        // 锁定笔记的正文不在内存里，这里只做加密状态切换。
-        if (note.locked)
-          const SheetAction<String>(
-            value: 'unlock',
-            label: '取消锁定',
-            icon: Icons.lock_open_outlined,
-          )
-        else
-          const SheetAction<String>(
-            value: 'lock',
-            label: '锁定笔记',
-            icon: Icons.lock_outline_rounded,
-          ),
-        const SheetAction<String>(
-          value: 'delete',
-          label: '删除',
-          icon: Icons.delete_outline_rounded,
-          destructive: true,
-        ),
-      ],
+      actions: buildNoteActions(note),
     );
     if (action == null || !mounted) {
       return;
@@ -249,13 +224,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     switch (action) {
       case 'pin':
         await _repo.togglePin(note);
+      case 'tags':
+        await _editNoteTags(note);
+      case 'shareImage':
+        // 分享图依赖详情页的真实渲染结果，先打开详情再自动触发分享。
+        await _openEditor(note, shareOnOpen: true);
       case 'lock':
-        await _lockNote(note);
-      case 'unlock':
-        await _unlockNote(note);
+        if (note.locked) {
+          await _unlockNote(note);
+        } else {
+          await _lockNote(note);
+        }
       case 'delete':
         await _confirmDelete(note);
     }
+  }
+
+  /// 从列表直接改标签：与详情页「编辑标签」同一套解析与落盘逻辑。
+  Future<void> _editNoteTags(Note note) async {
+    final String? result = await showTagEditorSheet(
+      context: context,
+      initialText: note.tags.join(', '),
+      candidates: _repo.tags,
+    );
+    if (result == null || !mounted) {
+      return;
+    }
+    // 改标签属于元信息调整，不刷新 updated：与详情页「编辑标签」保持一致，
+    // 避免只改标签就跳到「最近更新」最前。
+    await _repo.upsert(note.copyWith(tags: Note.parseTags(result)));
   }
 
   /// 从列表直接锁定：与编辑页「锁定」同一套语义（正文加密，附件不加密）。
@@ -341,9 +338,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 标题栏标签按钮 → 「按标签筛选」弹层。
   ///
   /// 点选即生效并收起弹层：筛选是个轻动作，不值得再多按一次「确定」。
-  /// 标签的改名 / 合并 / 删除统一收在「设置 → 标签管理」，这里只负责筛选。
+  /// 标签的改名 / 合并 / 删除收在这层右上角的「管理」里 —— 在哪里用就在
+  /// 哪里管，不必再绕到设置页。
   Future<void> _showTagFilterSheet() async {
-    await showXiaojiSheet<void>(
+    final bool? manage = await showXiaojiSheet<bool>(
       context: context,
       builder: (BuildContext sheetContext) {
         final colors = AppColors.of(sheetContext);
@@ -360,9 +358,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      '按标签筛选',
-                      style: AppText.caption.copyWith(color: colors.tertiary),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            '按标签筛选',
+                            style: AppText.caption.copyWith(
+                              color: colors.tertiary,
+                            ),
+                          ),
+                        ),
+                        if (tags.isNotEmpty)
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(sheetContext).pop(true),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 32),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              '管理',
+                              style: TextStyle(
+                                fontSize: AppFontSize.label,
+                                fontWeight: AppWeight.medium,
+                                color: colors.accent,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Wrap(
@@ -388,17 +414,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           ),
                       ],
                     ),
-                    if (tags.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 14),
-                      Text(
-                        '标签的改名、合并、删除在「设置 → 标签管理」里。',
-                        style: TextStyle(
-                          fontSize: AppFontSize.caption,
-                          height: 1.5,
-                          color: colors.tertiary,
-                        ),
-                      ),
-                    ],
                   ],
                 );
               },
@@ -406,6 +421,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         );
       },
+    );
+    if (manage != true || !mounted) {
+      return;
+    }
+    hideSnack(context);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => TagsPage(repository: _repo),
+      ),
     );
   }
 
@@ -1110,6 +1134,16 @@ class _EmptyState extends StatelessWidget {
               fontSize: AppFontSize.labelLg,
               height: 1.75,
               color: colors.secondary,
+            ),
+          ),
+          // 空态是唯一不打扰的"教学位"：提前告诉用户长按能做什么，
+          // 否则置顶/标签这些能力很难被自己发现。
+          Text(
+            '写下后长按可置顶、加标签',
+            style: TextStyle(
+              fontSize: AppFontSize.labelLg,
+              height: 1.75,
+              color: colors.tertiary,
             ),
           ),
         ],

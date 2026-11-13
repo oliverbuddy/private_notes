@@ -10,6 +10,7 @@ import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../security/unlock.dart';
 import '../theme/app_theme.dart';
+import '../ui/action_sheet.dart';
 import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
@@ -21,14 +22,15 @@ import '../util/date_format.dart';
 import '../util/native_zip.dart';
 import 'about_page.dart';
 import 'backup_sheets.dart';
-import 'tags_page.dart';
 import 'trash_page.dart';
 
 /// 设置页。
 ///
 /// 三组：外观、安全、数据，底部一个「关于」入口。不做云同步入口 —— 本地优先。
-/// 数据卡片只保留「备份与恢复」「回收站」「标签管理」「数据与隐私」四行：
-/// 备份的自动/手动/导出全部收进弹层，避免主界面出现多个看起来差不多的入口。
+/// 数据卡片只保留「备份与恢复」「回收站」「存储空间」「数据与隐私」四行：
+/// 备份的自动/手动/导出/导入、恢复全部收进弹层，避免主界面出现多个看起来
+/// 差不多的入口。标签管理在首页标签筛选弹层里（在哪里用就在哪里管）；
+/// 自动锁定收进「应用锁」二级菜单。
 /// 版本、许可、联系方式属于低频信息，收进独立的关于页，不打断分组节奏。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -453,17 +455,14 @@ class _SettingsPageState extends State<SettingsPage> {
                           children: <Widget>[
                             AppListRow(
                               label: '应用锁',
-                              value: settings.lockEnabled ? '已开启' : '已关闭',
+                              // 关闭时只显示状态；开启后把自动锁定时间带出来，
+                              // 用户不必点进去才知道多久锁一次。
+                              value: settings.lockEnabled
+                                  ? '已开启 · ${_autoLockLabel(settings.autoLockSeconds)}'
+                                  : '已关闭',
                               chevron: true,
-                              onTap: () => _toggleAppLock(settings),
+                              onTap: () => _openAppLockSettings(settings),
                             ),
-                            if (settings.lockEnabled)
-                              AppListRow(
-                                label: '自动锁定',
-                                value: _autoLockLabel(settings.autoLockSeconds),
-                                chevron: true,
-                                onTap: () => _pickAutoLock(settings),
-                              ),
                             AppListRow(
                               label: '锁定内容禁止截屏',
                               value: settings.secureScreen ? '开' : '关',
@@ -500,17 +499,6 @@ class _SettingsPageState extends State<SettingsPage> {
                               value: _storageLabel(),
                               chevron: true,
                               onTap: _openStorage,
-                            ),
-                            AppListRow(
-                              label: '导入 Markdown',
-                              value: _importingMarkdown ? '导入中…' : null,
-                              chevron: true,
-                              onTap: _importMarkdown,
-                            ),
-                            AppListRow(
-                              label: '标签管理',
-                              chevron: true,
-                              onTap: _openTags,
                             ),
                             AppListRow(
                               label: '数据与隐私',
@@ -771,6 +759,41 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  /// 应用锁的二级入口：开启后把「自动锁定」和「关闭应用锁」收在这里，
+  /// 顶层设置页只保留一行，避免安全分组越堆越长。
+  Future<void> _openAppLockSettings(NoteSettings settings) async {
+    if (!settings.lockEnabled) {
+      await _toggleAppLock(settings);
+      return;
+    }
+    final String? action = await showXiaojiActionSheet<String>(
+      context: context,
+      title: '应用锁',
+      actions: <SheetAction<String>>[
+        SheetAction<String>(
+          value: 'autoLock',
+          label: '自动锁定：${_autoLockLabel(settings.autoLockSeconds)}',
+          icon: Icons.timer_outlined,
+        ),
+        const SheetAction<String>(
+          value: 'disable',
+          label: '关闭应用锁',
+          icon: Icons.lock_open_outlined,
+          destructive: true,
+        ),
+      ],
+    );
+    if (action == null || !mounted) {
+      return;
+    }
+    switch (action) {
+      case 'autoLock':
+        await _pickAutoLock(settings);
+      case 'disable':
+        await _toggleAppLock(settings);
+    }
+  }
+
   Future<void> _pickAutoLock(NoteSettings settings) async {
     final int? picked = await _pickOption<int>(
       context: context,
@@ -920,6 +943,8 @@ class _SettingsPageState extends State<SettingsPage> {
         await _exportAll();
       case BackupAction.restore:
         await _restoreBackup();
+      case BackupAction.importMarkdown:
+        await _importMarkdown();
     }
   }
 
@@ -1001,15 +1026,6 @@ class _SettingsPageState extends State<SettingsPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => TrashPage(repository: repository),
-      ),
-    );
-  }
-
-  Future<void> _openTags() async {
-    hideSnack(context);
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => TagsPage(repository: repository),
       ),
     );
   }
