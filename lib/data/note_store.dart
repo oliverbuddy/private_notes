@@ -1012,45 +1012,32 @@ class NoteStore {
   /// (恢复篇数, 跳过篇数)——跳过 = md 无法解析（坏了的文件不中断整体）。
   /// zip 内路径做了 `..` 防护，防恶意压缩包越目录写文件。
   Future<(int, int)> restoreFromZip(Uint8List bytes) async {
-    final archive = ZipDecoder().decodeBytes(bytes);
-    var restored = 0;
-    var skipped = 0;
-    for (final entry in archive.files) {
-      if (!entry.isFile) {
-        continue;
-      }
-      final name = entry.name.replaceAll('\\', '/');
-      if (name.contains('..')) {
-        continue; // 路径越界防护
-      }
-      // 旧版导出包里可能带 trash/、backups/（嵌套备份）、tmp/：
-      // 里面的 .md 若被当普通笔记恢复，已删除内容就「复活」了。
-      if (_isExcludedArchivePath(name)) {
-        continue;
-      }
-      if (name.toLowerCase().endsWith('.md')) {
-        final raw = utf8.decode(entry.content as List<int>);
-        final note = Note.decode(
-          raw,
-          fallbackId: p.basenameWithoutExtension(name),
-        );
-        if (note == null) {
-          skipped += 1;
+    // 解到临时目录后走同一套恢复逻辑：内存版和文件版如果各写一份，
+    // 「附件整体替换」这类语义很容易只改了一边（曾经就漏过）。
+    final Directory temp =
+        await Directory.systemTemp.createTemp('xiaoji_restore_');
+    try {
+      final Archive archive = ZipDecoder().decodeBytes(bytes);
+      for (final ArchiveFile entry in archive.files) {
+        if (!entry.isFile) {
           continue;
         }
-        await saveNote(note, keepHistory: false);
-        restored += 1;
-      } else if (name.startsWith('assets/')) {
-        final relative = name.substring('assets/'.length);
-        if (relative.isEmpty) {
-          continue;
+        final String name = entry.name.replaceAll('\\', '/');
+        if (name.contains('..')) {
+          continue; // 路径越界防护
         }
-        final target = File(p.join(assetsDir.path, relative));
+        final File target = File(p.join(temp.path, name));
         await target.parent.create(recursive: true);
         await target.writeAsBytes(entry.content as List<int>);
       }
+      return await _restoreFromDirectory(temp);
+    } finally {
+      try {
+        await temp.delete(recursive: true);
+      } catch (_) {
+        // 临时目录清理失败不影响恢复结果。
+      }
     }
-    return (restored, skipped);
   }
 
   /// 从**文件路径**恢复（原生流式解压，避免把整个 zip 读进内存）。
@@ -1069,9 +1056,19 @@ class NoteStore {
   }
 
   /// 把解压目录按「.md 平铺 + assets/」结构合并进当前 store。
+  ///
+  /// 恢复语义是「回到备份时的状态」：备份里出现的每一条笔记，
+  /// 其附件目录整体替换（先删后写），避免正文里已经删掉的旧图片
+  /// 在恢复后继续残留；备份里没有的本地笔记保持不动。
+  ///
+  /// 顺序上必须先解析完所有 `.md` 再处理附件：zip 条目顺序不可控，
+  /// 只有先知道「哪些笔记这次被恢复了」，才能安全地清空它们的附件目录。
   Future<(int, int)> _restoreFromDirectory(Directory directory) async {
     var restored = 0;
     var skipped = 0;
+    final Set<String> restoredIds = <String>{};
+    final Map<String, File> pendingAssets = <String, File>{};
+
     await for (final entity
         in directory.list(recursive: true, followLinks: false)) {
       if (entity is! File) {
@@ -1085,32 +1082,64 @@ class NoteStore {
         continue;
       }
       if (name.startsWith('assets/')) {
-        final relative = name.substring('assets/'.length);
-        if (relative.isEmpty) {
+        pendingAssets[name] = entity;
+        continue;
+      }
+      if (!name.toLowerCase().endsWith('.md')) {
+        continue;
+      }
+      try {
+        final raw = await entity.readAsString();
+        final note = Note.decode(
+          raw,
+          fallbackId: p.basenameWithoutExtension(name),
+        );
+        if (note == null) {
+          skipped += 1;
           continue;
         }
-        final target = File(p.join(assetsDir.path, relative));
-        await target.parent.create(recursive: true);
-        await entity.copy(target.path);
-      } else if (name.toLowerCase().endsWith('.md')) {
-        try {
-          final raw = await entity.readAsString();
-          final note = Note.decode(
-            raw,
-            fallbackId: p.basenameWithoutExtension(name),
-          );
-          if (note == null) {
-            skipped += 1;
-          } else {
-            await saveNote(note, keepHistory: false);
-            restored += 1;
-          }
-        } catch (_) {
-          skipped += 1;
-        }
+        await saveNote(note, keepHistory: false);
+        restoredIds.add(note.id);
+        restored += 1;
+      } catch (_) {
+        skipped += 1;
       }
     }
+
+    // 只替换「本次恢复了正文」的笔记附件；正文没恢复成功时保守合并，
+    // 宁可留下旧图，也不把用户本地的附件清掉。
+    final Set<String> replaced = <String>{};
+    for (final MapEntry<String, File> entry in pendingAssets.entries) {
+      final relative = entry.key.substring('assets/'.length);
+      final noteId = relative.split('/').first;
+      if (noteId.isEmpty) {
+        continue;
+      }
+      if (restoredIds.contains(noteId) && replaced.add(noteId)) {
+        await _deleteDirectoryQuietly(assetDirectoryOf(noteId));
+      }
+      final target = File(p.join(assetsDir.path, relative));
+      await target.parent.create(recursive: true);
+      await entry.value.copy(target.path);
+    }
+    // 备份里该笔记一张附件都没有：也要清空，否则本地旧图永远留着。
+    for (final String noteId in restoredIds) {
+      if (replaced.contains(noteId)) {
+        continue;
+      }
+      await _deleteDirectoryQuietly(assetDirectoryOf(noteId));
+    }
     return (restored, skipped);
+  }
+
+  Future<void> _deleteDirectoryQuietly(Directory directory) async {
+    try {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    } catch (_) {
+      // 删不掉（被占用）就保留，下次恢复或清理时再处理。
+    }
   }
 
   /// 生成导出 zip 到指定路径（原生流式压缩）。
@@ -1386,6 +1415,354 @@ class NoteStore {
       body: '${Note.lockEnvelopePrefix}$envelope',
     ));
   }
+
+  // ---------------------------------------------------------------------------
+  // 存储占用
+  // ---------------------------------------------------------------------------
+
+  /// 各分类的磁盘占用（字节）。统计失败按 0 处理，不影响页面展示。
+  Future<StorageUsage> measureStorage() async {
+    return StorageUsage(
+      notes: await _directorySize(notesDir),
+      assets: await _directorySize(assetsDir),
+      trash: await _directorySize(trashDir),
+      versions: await _directorySize(versionsDir),
+      backups: await _directorySize(backupsDir),
+      index: await _directorySize(Directory(p.join(root.path, 'index'))),
+    );
+  }
+
+  Future<int> _directorySize(Directory directory) async {
+    if (!await directory.exists()) {
+      return 0;
+    }
+    var total = 0;
+    try {
+      await for (final entity
+          in directory.list(recursive: true, followLinks: false)) {
+        if (entity is! File) {
+          continue;
+        }
+        try {
+          total += await entity.length();
+        } catch (_) {
+          // 单个文件读不到大小（并发删除等）就跳过。
+        }
+      }
+    } catch (_) {
+      // 目录被并发删除：按已统计到的为准。
+    }
+    return total;
+  }
+
+  /// 正文里对附件的引用：`assets/<noteId>/<文件名>`。
+  ///
+  /// 同时覆盖 Markdown（`![](assets/…)`）、HTML（`<img src="assets/…">`）
+  /// 和裸链接；文件名允许中文、空格（百分号编码）与常见符号。
+  static final RegExp _assetReferencePattern = RegExp(
+    r'''assets/[A-Za-z0-9._-]+/[^\s()\[\]<>"'`]+''',
+  );
+
+  /// 清理没有被任何笔记（含历史版本）引用的附件文件。
+  ///
+  /// 保护规则（宁可少删，不可错删）：
+  ///  - **锁定笔记整目录跳过**：正文是密文，解析不出引用；
+  ///  - 历史版本里引用的图片算「在用」，否则恢复旧版本会裂图；
+  ///  - 回收站目录不参与（删除时附件已整体搬过去，还能恢复）；
+  ///  - 只删 `assets/` 下一层的普通文件，不跟随符号链接。
+  Future<OrphanCleanupResult> cleanUnusedAssets() async {
+    if (!await assetsDir.exists()) {
+      return const OrphanCleanupResult(files: 0, bytes: 0, lockedSkipped: 0);
+    }
+    final referenced = <String>{};
+    final lockedIds = <String>{};
+    final bool notesScanned =
+        await _collectAssetReferences(notesDir, referenced, lockedIds);
+    final bool versionsScanned =
+        await _collectAssetReferences(versionsDir, referenced, lockedIds);
+    if (!notesScanned || !versionsScanned) {
+      // 有一次扫描不完整就无法判断「谁没被引用」，宁可这次不清。
+      return const OrphanCleanupResult(files: 0, bytes: 0, lockedSkipped: 0);
+    }
+
+    var files = 0;
+    var bytes = 0;
+    var lockedSkipped = 0;
+    try {
+      await for (final entity in assetsDir.list(followLinks: false)) {
+        if (entity is! Directory) {
+          continue;
+        }
+        final noteId = p.basename(entity.path);
+        if (lockedIds.contains(noteId)) {
+          lockedSkipped += 1;
+          continue;
+        }
+        try {
+          await for (final child in entity.list(followLinks: false)) {
+            if (child is! File) {
+              continue;
+            }
+            final relative =
+                'assets/$noteId/${p.basename(child.path)}'.replaceAll('\\', '/');
+            if (referenced.contains(relative)) {
+              continue;
+            }
+            var size = 0;
+            try {
+              size = await child.length();
+            } catch (_) {
+              // 拿不到大小也要删，只是统计不到字节数。
+            }
+            try {
+              await child.delete();
+              files += 1;
+              bytes += size;
+            } catch (_) {
+              // 单个文件删不掉（占用中）就留到下次。
+            }
+          }
+          // 目录空了顺手删掉，避免 assets/ 下堆一排空目录。
+          final rest = await entity.list(followLinks: false).toList();
+          if (rest.isEmpty) {
+            try {
+              await entity.delete();
+            } catch (_) {
+              // 忽略：下次清理再试。
+            }
+          }
+        } catch (_) {
+          // 单个笔记目录异常不影响其它目录。
+        }
+      }
+    } catch (_) {
+      // 目录被并发删除等异常：返回已清理的部分。
+    }
+    return OrphanCleanupResult(
+      files: files,
+      bytes: bytes,
+      lockedSkipped: lockedSkipped,
+    );
+  }
+
+  /// 扫描 [directory] 下所有 `.md`，把附件引用与锁定笔记 id 收集起来。
+  ///
+  /// 返回 false 表示扫描不完整（目录不可读 / 某个文件读不出来），
+  /// 调用方必须放弃这次清理 —— 少删一次没有代价，错删无法挽回。
+  Future<bool> _collectAssetReferences(
+    Directory directory,
+    Set<String> referenced,
+    Set<String> lockedIds,
+  ) async {
+    if (!await directory.exists()) {
+      return true;
+    }
+    try {
+      await for (final entity
+          in directory.list(recursive: true, followLinks: false)) {
+        if (entity is! File ||
+            !entity.path.toLowerCase().endsWith('.md')) {
+          continue;
+        }
+        final String raw;
+        try {
+          raw = await entity.readAsString();
+        } catch (_) {
+          return false;
+        }
+        final Note? note = Note.decode(
+          raw,
+          fallbackId: p.basenameWithoutExtension(entity.path),
+        );
+        if (note == null) {
+          // 解析不出 frontmatter 的文件可能是被手改坏的正文，
+          // 里面仍可能有引用：无法确认就放弃清理。
+          return false;
+        }
+        if (note.locked || note.body.startsWith(Note.lockEnvelopePrefix)) {
+          lockedIds.add(note.id);
+          continue;
+        }
+        for (final match in _assetReferencePattern.allMatches(note.body)) {
+          referenced.add(_normalizeAssetReference(match.group(0)!));
+        }
+      }
+    } catch (_) {
+      return false;
+    }
+    return true;
+  }
+
+  /// 百分号解码 + 去掉 `?query`/`#fragment`，统一成正斜杠的相对路径。
+  String _normalizeAssetReference(String raw) {
+    var value = raw.replaceAll('\\', '/');
+    final cut = value.indexOf(RegExp(r'[?#]'));
+    if (cut >= 0) {
+      value = value.substring(0, cut);
+    }
+    try {
+      value = Uri.decodeComponent(value);
+    } catch (_) {
+      // 非法百分号编码：保留原样。
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 导入外部 Markdown
+  // ---------------------------------------------------------------------------
+
+  /// 单个导入文件的上限：防止误选超大文件把内存打满。
+  static const int _maxImportFileBytes = 10 * 1024 * 1024;
+
+  /// 一次最多导入的文件数：避免用户选中整个代码仓库后卡死。
+  static const int _maxImportFiles = 200;
+
+  /// 导入外部 `.md` 文件。
+  ///
+  /// - 带 frontmatter 的按原 id/时间/标签导入；
+  /// - 不带 frontmatter 的整篇当正文，新建一条；
+  /// - id 冲突时换一个新 id（保留原创建时间），不覆盖已有笔记；
+  /// - 外来 `locked: true` 无法用本机密钥解密，跳过并计数；
+  /// - `.md` 里指向外部图片的相对路径不会自动搬运（提示里说明）。
+  Future<MarkdownImportResult> importMarkdownFiles(
+    Iterable<String> paths,
+  ) async {
+    final List<String> candidates = paths.take(_maxImportFiles).toList();
+    final Set<String> existingIds = <String>{};
+    for (final file in await _listNoteFiles()) {
+      existingIds.add(p.basenameWithoutExtension(file.path));
+    }
+    var imported = 0;
+    var skipped = 0;
+    var renamed = 0;
+    for (final path in candidates) {
+      final File file = File(path);
+      String raw;
+      try {
+        if (!await file.exists() || await file.length() > _maxImportFileBytes) {
+          skipped += 1;
+          continue;
+        }
+        raw = await file.readAsString();
+      } catch (_) {
+        skipped += 1;
+        continue;
+      }
+      if (raw.startsWith('\uFEFF')) {
+        raw = raw.substring(1);
+      }
+      Note? note = Note.decode(
+        raw,
+        fallbackId: p.basenameWithoutExtension(file.path),
+      );
+      if (note == null) {
+        final DateTime now = DateTime.now();
+        note = Note(
+          id: Note.generateId(now),
+          created: now,
+          updated: now,
+          body: raw,
+        );
+      }
+      if (note.locked ||
+          note.body.startsWith(Note.lockEnvelopePrefix)) {
+        // 别的设备加密的正文在本机解不开，导进来只会是一条「打不开」。
+        skipped += 1;
+        continue;
+      }
+      if (existingIds.contains(note.id)) {
+        var id = Note.generateId(note.updated);
+        while (existingIds.contains(id)) {
+          id = Note.generateId(note.updated);
+        }
+        note = note.copyWith(id: id);
+        renamed += 1;
+      }
+      try {
+        await saveNote(note, keepHistory: false);
+        existingIds.add(note.id);
+        imported += 1;
+      } catch (_) {
+        skipped += 1;
+      }
+    }
+    return MarkdownImportResult(
+      imported: imported,
+      skipped: skipped,
+      renamed: renamed,
+    );
+  }
+
+  Future<List<File>> _listNoteFiles() async {
+    final result = <File>[];
+    if (!await notesDir.exists()) {
+      return result;
+    }
+    await for (final entity
+        in notesDir.list(recursive: true, followLinks: false)) {
+      if (entity is File && entity.path.toLowerCase().endsWith('.md')) {
+        result.add(entity);
+      }
+    }
+    return result;
+  }
+}
+
+/// 存储占用（字节）。
+class StorageUsage {
+  const StorageUsage({
+    this.notes = 0,
+    this.assets = 0,
+    this.trash = 0,
+    this.versions = 0,
+    this.backups = 0,
+    this.index = 0,
+  });
+
+  final int notes;
+  final int assets;
+  final int trash;
+  final int versions;
+  final int backups;
+  final int index;
+
+  int get total => notes + assets + trash + versions + backups + index;
+}
+
+/// 未使用附件清理结果。
+class OrphanCleanupResult {
+  const OrphanCleanupResult({
+    required this.files,
+    required this.bytes,
+    required this.lockedSkipped,
+  });
+
+  /// 删除的文件数与释放的字节数。
+  final int files;
+  final int bytes;
+
+  /// 因为无法解析引用而整体跳过的锁定笔记目录数。
+  final int lockedSkipped;
+
+  bool get isEmpty => files == 0;
+}
+
+/// 外部 Markdown 导入结果。
+class MarkdownImportResult {
+  const MarkdownImportResult({
+    required this.imported,
+    required this.skipped,
+    required this.renamed,
+  });
+
+  final int imported;
+  final int skipped;
+
+  /// 因 id 冲突而换了新 id 的条数。
+  final int renamed;
+
+  bool get isEmpty => imported == 0;
 }
 
 /// 一个历史版本（磁盘上的一个快照文件）。

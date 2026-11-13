@@ -351,6 +351,22 @@ class NoteRepository extends ChangeNotifier {
 
   Future<void> purgeAllTrash() => _store.purgeAllTrash();
 
+  /// 存储占用统计（设置页「存储空间」用）。
+  Future<StorageUsage> measureStorage() => _store.measureStorage();
+
+  /// 清理没有被任何笔记引用的附件文件。
+  Future<OrphanCleanupResult> cleanUnusedAssets() =>
+      _store.cleanUnusedAssets();
+
+  /// 导入外部 Markdown 文件，写入后刷新列表与搜索索引。
+  Future<MarkdownImportResult> importMarkdownFiles(
+    Iterable<String> paths,
+  ) async {
+    final result = await _store.importMarkdownFiles(paths);
+    await load();
+    return result;
+  }
+
   Future<DateTime?> lastBackupTime() => _store.lastBackupTime();
 
   /// 应用私有目录里的备份列表（设置页「从备份恢复」用）。

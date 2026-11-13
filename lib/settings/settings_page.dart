@@ -65,11 +65,24 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 版本信息（从已安装的 APK 读取，异步拿，拿不到时显示占位符）。
   AppInfo? _appInfo;
 
+  /// 存储占用（异步统计；null 表示还没算出来）。
+  StorageUsage? _storage;
+
+  /// 「清理未使用附件」进行中：防止重复点击。
+  bool _cleaningAssets = false;
+
+  /// 导入 Markdown 进行中：防止重复触发文件选择。
+  bool _importingMarkdown = false;
+
+  /// 清理结果的一行反馈（显示在存储弹层里，避免被弹层挡住 SnackBar）。
+  String? _storageHint;
+
   @override
   void initState() {
     super.initState();
     _refreshLastBackup();
     _loadAppInfo();
+    _loadStorage();
     if (widget.openBackupOnStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -90,6 +103,263 @@ class _SettingsPageState extends State<SettingsPage> {
     final time = await repository.lastBackupTime();
     if (mounted) {
       setState(() => _lastBackup = time);
+    }
+  }
+
+  /// 统计各目录占用。失败时保持上一次的数据，不影响其它设置项。
+  Future<void> _loadStorage() async {
+    try {
+      final StorageUsage usage = await repository.measureStorage();
+      if (mounted) {
+        setState(() => _storage = usage);
+      }
+    } catch (_) {
+      // 忽略：目录被占用 / 权限异常时只是数字不准。
+    }
+  }
+
+  String? _storageLabel() {
+    final StorageUsage? usage = _storage;
+    if (usage == null) {
+      return '统计中…';
+    }
+    return '附件 ${_formatBytes(usage.assets)} · 回收站 '
+        '${_formatBytes(usage.trash)}';
+  }
+
+  /// 「存储空间」弹层：看分类占用 + 清理未引用附件。
+  Future<void> _openStorage() async {
+    _storageHint = null;
+    await _loadStorage();
+    if (!mounted) {
+      return;
+    }
+    final StorageUsage? initial = _storage;
+    if (initial == null) {
+      _showSnack('暂时无法统计存储空间');
+      return;
+    }
+    await showXiaojiSheet<void>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setSheetState) {
+            final AppColors colors = AppColors.of(context);
+            final StorageUsage usage = _storage ?? initial;
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+                      child: Text(
+                        '存储空间',
+                        style: AppText.sheetTitle.copyWith(color: colors.text),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+                      child: Text(
+                        '合计 ${_formatBytes(usage.total)}',
+                        style: AppText.caption.copyWith(color: colors.tertiary),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    AppListSection(
+                      children: <Widget>[
+                        AppListRow(
+                          label: '笔记正文',
+                          value: _formatBytes(usage.notes),
+                        ),
+                        AppListRow(
+                          label: '附件与图片',
+                          value: _formatBytes(usage.assets),
+                        ),
+                        AppListRow(
+                          label: '回收站',
+                          value: _formatBytes(usage.trash),
+                        ),
+                        AppListRow(
+                          label: '历史版本',
+                          value: _formatBytes(usage.versions),
+                        ),
+                        AppListRow(
+                          label: '备份',
+                          value: _formatBytes(usage.backups),
+                        ),
+                        AppListRow(
+                          label: '搜索索引',
+                          value: _formatBytes(usage.index),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(AppSpace.lg, 12, AppSpace.lg, 0),
+                      child: Text(
+                        '附件是正文里引用的图片与文件。回收站内容保留 30 天，到期自动释放。',
+                        style: AppText.caption.copyWith(color: colors.tertiary),
+                      ),
+                    ),
+                    if (_storageHint != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpace.lg, 8, AppSpace.lg, 0),
+                        child: Text(
+                          _storageHint!,
+                          style:
+                              AppText.caption.copyWith(color: colors.accent),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+                      child: AppSheetButton(
+                        label: _cleaningAssets ? '清理中…' : '清理未使用附件',
+                        background: colors.accent,
+                        foreground: colors.page,
+                        onTap: () async {
+                          if (_cleaningAssets) {
+                            return;
+                          }
+                          final bool updated = await _cleanUnusedAssets();
+                          if (updated && context.mounted) {
+                            setSheetState(() {});
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+                      child: AppSheetButton(
+                        label: '关闭',
+                        background: colors.surface2,
+                        foreground: colors.secondary,
+                        onTap: () => Navigator.of(sheetContext).pop(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 执行清理；返回 true 表示弹层里的数字需要刷新。
+  Future<bool> _cleanUnusedAssets() async {
+    final bool? confirmed = await showXiaojiConfirmSheet(
+      context: context,
+      title: '清理未使用附件？',
+      message: '只删除没有任何笔记（含历史版本）引用的图片与文件。'
+          '锁定笔记和回收站里的内容不会被清理。',
+      confirmLabel: '清理',
+    );
+    if (confirmed != true || !mounted) {
+      return false;
+    }
+    setState(() {
+      _cleaningAssets = true;
+      _storageHint = null;
+    });
+    try {
+      final OrphanCleanupResult result = await repository.cleanUnusedAssets();
+      await _loadStorage();
+      if (!mounted) {
+        return false;
+      }
+      final StringBuffer hint = StringBuffer();
+      if (result.isEmpty) {
+        hint.write('没有需要清理的附件');
+      } else {
+        hint.write('已清理 ${result.files} 个文件，释放 '
+            '${_formatBytes(result.bytes)}');
+      }
+      if (result.lockedSkipped > 0) {
+        hint.write('；跳过 ${result.lockedSkipped} 个锁定笔记目录');
+      }
+      setState(() => _storageHint = hint.toString());
+      return true;
+    } catch (error) {
+      if (mounted) {
+        setState(() => _storageHint = '清理失败：$error');
+      }
+      return true;
+    } finally {
+      if (mounted) {
+        setState(() => _cleaningAssets = false);
+      }
+    }
+  }
+
+  /// 从系统文件选择器导入外部 `.md`。
+  ///
+  /// 只读文本：Android 10+ 走 SAF 返回的临时副本，不需要申请存储权限。
+  Future<void> _importMarkdown() async {
+    if (_importingMarkdown) {
+      return;
+    }
+    FilePickerResult? picked;
+    try {
+      picked = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: <String>['md', 'markdown', 'txt'],
+      );
+    } on MissingPluginException {
+      _showSnack('当前平台不支持选择文件');
+      return;
+    } catch (error) {
+      _showSnack('无法打开文件选择器：$error');
+      return;
+    }
+    if (picked == null || !mounted) {
+      return;
+    }
+    final List<String> paths = <String>[
+      for (final PlatformFile file in picked.files)
+        if (file.path != null && file.path!.isNotEmpty) file.path!,
+    ];
+    if (paths.isEmpty) {
+      _showSnack('没有读取到可用文件');
+      return;
+    }
+    setState(() => _importingMarkdown = true);
+    try {
+      final MarkdownImportResult result =
+          await repository.importMarkdownFiles(paths);
+      await _loadStorage();
+      if (!mounted) {
+        return;
+      }
+      final List<String> parts = <String>['已导入 ${result.imported} 篇'];
+      if (result.renamed > 0) {
+        parts.add('${result.renamed} 篇因 id 重复新建');
+      }
+      if (result.skipped > 0) {
+        parts.add('跳过 ${result.skipped} 个');
+      }
+      _showSnack('${parts.join('，')}；文内图片不会自动导入');
+    } catch (error) {
+      if (mounted) {
+        _showSnack('导入失败：$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _importingMarkdown = false);
+      }
     }
   }
 
@@ -222,6 +492,20 @@ class _SettingsPageState extends State<SettingsPage> {
                               label: '回收站',
                               chevron: true,
                               onTap: _openTrash,
+                            ),
+                            // 存储只做「看」和「清」：不引入数据库维护、
+                            // 不做容量上限，避免和本地文件的直觉冲突。
+                            AppListRow(
+                              label: '存储空间',
+                              value: _storageLabel(),
+                              chevron: true,
+                              onTap: _openStorage,
+                            ),
+                            AppListRow(
+                              label: '导入 Markdown',
+                              value: _importingMarkdown ? '导入中…' : null,
+                              chevron: true,
+                              onTap: _importMarkdown,
                             ),
                             AppListRow(
                               label: '标签管理',
@@ -1133,4 +1417,21 @@ class _ExportResultSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 人类可读的字节数：B / KB / MB / GB。
+String _formatBytes(int bytes) {
+  if (bytes < 1024) {
+    return '$bytes B';
+  }
+  const List<String> units = <String>['KB', 'MB', 'GB', 'TB'];
+  double value = bytes / 1024;
+  int index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  final String text =
+      value >= 100 ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
+  return '$text ${units[index]}';
 }
