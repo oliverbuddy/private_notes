@@ -53,18 +53,21 @@ jobs:
 
           STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
+          # 安装后 Finder / 启动台显示的名字来自 .app 目录名，不是 Info.plist
+          # 的 CFBundleDisplayName：不改这一层，装完图标下面还是「xiaoji」。
+          mv "$STAGE/xiaoji.app" "$STAGE/小记.app"
           ln -s /Applications "$STAGE/Applications"
           {
             echo "小记 · macOS 安装说明"
             echo
-            echo "1. 把 xiaoji.app 拖到左侧的「应用程序」文件夹（启动后窗口标题是「小记」）。"
+            echo "1. 把「小记」拖到左侧的「应用程序」文件夹。"
             echo "2. 第一次打开会被系统拦下，因为本项目没有购买 Apple 开发者证书、未做公证："
-            echo "   - macOS 14 及更早：在「应用程序」里右键 xiaoji →「打开」→ 再点「打开」。"
+            echo "   - macOS 14 及更早：在「应用程序」里右键「小记」→「打开」→ 再点「打开」。"
             echo "   - macOS 15 及更新：双击后按提示进入「系统设置 → 隐私与安全性」，"
             echo "     在页面下方点「仍要打开」。"
             echo "   只需放行一次，之后可正常双击启动。"
             echo "3. 若提示「已损坏」：在终端执行"
-            echo "   xattr -dr com.apple.quarantine /Applications/xiaoji.app"
+            echo "   xattr -dr com.apple.quarantine /Applications/小记.app"
             echo "   然后重新打开。"
             echo
             echo "数据只保存在本机，应用不发起任何网络请求。"

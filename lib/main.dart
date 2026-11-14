@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'app/shortcuts.dart';
 import 'data/note_repository.dart';
 import 'data/note_store.dart';
+import 'editor/editor_zoom.dart';
 import 'home/home_page.dart';
 import 'models/note_settings.dart';
 import 'platform/platform_features.dart';
@@ -94,6 +95,9 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   ThemeData? _lightTheme;
   ThemeData? _darkTheme;
 
+  /// 上一次同步给窗口顶栏的明暗；只在切换时调原生，避免每帧过桥。
+  bool? _chromeDark;
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +108,18 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// 把当前主题的页面底色同步给 macOS 标题栏（Windows 暂不处理）。
+  void _syncWindowChrome(bool dark) {
+    if (!PlatformFeatures.isMacOS || _chromeDark == dark) {
+      return;
+    }
+    _chromeDark = dark;
+    final Color page = dark ? AppColors.dark.page : AppColors.light.page;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(syncDesktopWindowChrome(page));
+    });
   }
 
   @override
@@ -138,6 +154,7 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
           ThemeMode.system =>
             PlatformDispatcher.instance.platformBrightness == Brightness.dark,
         };
+        _syncWindowChrome(darkNow);
 
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: SystemUiOverlayStyle(
@@ -173,12 +190,23 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
             // 路由，编辑页/设置页这些 push 出来的页面会盖在锁屏之上 ——
             // 退后台自动锁定后回来，用户仍能看到当前页面的内容。
             // builder 包住整个 Navigator，锁屏才能盖住所有路由。
-            builder: (BuildContext context, Widget? child) => AppLockGate(
-              repository: widget.repository,
-              child: _DesktopShortcuts(
-                child: child ?? const SizedBox.shrink(),
-              ),
-            ),
+            builder: (BuildContext context, Widget? child) {
+              Widget content = child ?? const SizedBox.shrink();
+              // 桌面端字阶收紧一档（见 kDesktopTextScale）：只缩放文字，
+              // 图标与热区不变；移动端拿不到这个分支，观感与之前一致。
+              if (PlatformFeatures.isDesktop) {
+                content = MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: const TextScaler.linear(kDesktopTextScale),
+                  ),
+                  child: content,
+                );
+              }
+              return AppLockGate(
+                repository: widget.repository,
+                child: _DesktopShortcuts(child: content),
+              );
+            },
             home: HomePage(
               repository: widget.repository,
               startWithNewNote: widget.startWithNewNote,
@@ -193,7 +221,8 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
 /// 桌面端全局快捷键。
 ///
 /// - ⌘N / Ctrl+N：新建小记（手机上没有的日常动作）；
-/// - F11、⌃⌘F：切换全屏（Windows 习惯 / macOS 系统全屏快捷键）。
+/// - F11、⌃⌘F：切换全屏（Windows 习惯 / macOS 系统全屏快捷键）；
+/// - ⌘= / ⌘- / ⌘0：缩放正文，由 [EditorZoomShortcuts] 提供。
 /// 其余（⌘W 关窗、⌘Q 退出、⌘Z 撤销）由系统与 Flutter 默认行为提供，
 /// 不再重复实现 —— 快捷键和系统习惯打架比没有更难用。
 class _DesktopShortcuts extends StatelessWidget {
@@ -206,34 +235,37 @@ class _DesktopShortcuts extends StatelessWidget {
     if (!PlatformFeatures.isDesktop) {
       return child;
     }
-    return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.keyN, meta: true): _NewNoteIntent(),
-        SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            _NewNoteIntent(),
-        SingleActivator(LogicalKeyboardKey.f11): _ToggleFullscreenIntent(),
-        SingleActivator(
-          LogicalKeyboardKey.keyF,
-          meta: true,
-          control: true,
-        ): _ToggleFullscreenIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          _NewNoteIntent: CallbackAction<_NewNoteIntent>(
-            onInvoke: (_) {
-              newNoteRequests.value++;
-              return null;
-            },
-          ),
-          _ToggleFullscreenIntent: CallbackAction<_ToggleFullscreenIntent>(
-            onInvoke: (_) {
-              toggleDesktopFullscreen();
-              return null;
-            },
-          ),
+    return EditorZoomShortcuts(
+      child: Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.keyN, meta: true):
+              _NewNoteIntent(),
+          SingleActivator(LogicalKeyboardKey.keyN, control: true):
+              _NewNoteIntent(),
+          SingleActivator(LogicalKeyboardKey.f11): _ToggleFullscreenIntent(),
+          SingleActivator(
+            LogicalKeyboardKey.keyF,
+            meta: true,
+            control: true,
+          ): _ToggleFullscreenIntent(),
         },
-        child: child,
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            _NewNoteIntent: CallbackAction<_NewNoteIntent>(
+              onInvoke: (_) {
+                newNoteRequests.value++;
+                return null;
+              },
+            ),
+            _ToggleFullscreenIntent: CallbackAction<_ToggleFullscreenIntent>(
+              onInvoke: (_) {
+                toggleDesktopFullscreen();
+                return null;
+              },
+            ),
+          },
+          child: child,
+        ),
       ),
     );
   }

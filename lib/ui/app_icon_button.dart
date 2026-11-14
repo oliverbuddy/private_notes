@@ -41,8 +41,7 @@ class AppIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
-    final Color foreground =
-        color ?? (selected ? colors.accent : colors.text);
+    final Color foreground = color ?? (selected ? colors.accent : colors.text);
 
     final Widget button = AppPressable(
       onTap: onTap,
@@ -82,10 +81,15 @@ class AppBackButton extends StatelessWidget {
     super.key,
     this.onTap,
     this.color,
+    this.hitSize = AppSize.navBar,
   });
 
   final VoidCallback? onTap;
   final Color? color;
+
+  /// 点击热区。默认 48；详情页这类「高频返回」入口传更大的值，
+  /// 避免用户只能准确点中 24vp 的箭头。
+  final double hitSize;
 
   @override
   Widget build(BuildContext context) {
@@ -94,6 +98,7 @@ class AppBackButton extends StatelessWidget {
       icon: Icons.chevron_left_rounded,
       onTap: onTap ?? () => Navigator.of(context).maybePop(),
       color: color ?? colors.text,
+      hitSize: hitSize,
       tooltip: '返回',
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import 'pressable.dart';
 
@@ -28,17 +29,53 @@ Future<T?> showXiaojiSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
 }) {
+  // 桌面端：按桌面规范用**居中对话框**，而不是从底部推上来的移动端
+  // bottom sheet（用户反馈「PC 弹窗还是移动端的逻辑」）。底部弹层的
+  // 手势暗示（下滑关闭）在鼠标场景里没有意义，还会把内容推到远离指针的
+  // 屏幕底部。移动端/平板保持原有底部弹层，观感与手势完全不变。
+  if (PlatformFeatures.isDesktop) {
+    return showDialog<T>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.32),
+      builder: (BuildContext dialogContext) {
+        final AppColors colors = AppColors.of(dialogContext);
+        return Dialog(
+          backgroundColor: colors.page,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: 48,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.block),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: kXiaojiSheetMaxWidth,
+              maxHeight: 640,
+            ),
+            // 内容可能带 TextField（重命名、改标签）或较长列表（历史版本）：
+            // 对话框高度受限，统一交给滚动区，不出现溢出条纹。
+            child: SingleChildScrollView(
+              child: builder(dialogContext),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // 平板/桌面：弹层不再铺满整屏，按手机宽度收窄并居中。
   // 弹层内容是「一列文字 + 两个按钮」，拉成 1000+ 宽后按钮会变成
   // 两条超长横条，阅读和点击都很别扭。
-  final bool wide =
-      !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
+  final bool wide = !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
   return showModalBottomSheet<T>(
     context: context,
     backgroundColor: AppColors.of(context).page,
     useSafeArea: true,
     isScrollControlled: true,
-    constraints: wide ? const BoxConstraints(maxWidth: kXiaojiSheetMaxWidth) : null,
+    constraints:
+        wide ? const BoxConstraints(maxWidth: kXiaojiSheetMaxWidth) : null,
     sheetAnimationStyle: const AnimationStyle(
       duration: AppMotion.normal,
       reverseDuration: AppMotion.normal,
@@ -138,8 +175,7 @@ Future<bool?> showXiaojiConfirmSheet({
                     child: AppSheetButton(
                       label: confirmLabel,
                       background: destructive ? colors.danger : colors.surface2,
-                      foreground:
-                          destructive ? colors.onDanger : colors.accent,
+                      foreground: destructive ? colors.onDanger : colors.accent,
                       onTap: () => Navigator.of(sheetContext).pop(true),
                     ),
                   ),

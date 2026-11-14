@@ -40,6 +40,7 @@ class NoteTileComfortable extends StatelessWidget {
     this.hiddenThumbnailCount = 0,
     this.query = '',
     this.maxSummaryLines = 5,
+    this.selected = false,
     required this.onTap,
     required this.onLongPress,
   });
@@ -56,6 +57,9 @@ class NoteTileComfortable extends StatelessWidget {
 
   /// 浏览时 5 行，搜索时压到 2 行 —— 结果多时更需要一屏看到更多条目。
   final int maxSummaryLines;
+
+  /// 桌面双栏当前打开的笔记：主流桌面笔记都会在列表里高亮。
+  final bool selected;
 
   final VoidCallback onTap;
   final VoidCallback onLongPress;
@@ -80,7 +84,7 @@ class NoteTileComfortable extends StatelessWidget {
       // 外层间距由列表负责（含卡间 12），这里只做卡片本体。
       child: DecoratedBox(
         decoration: ShapeDecoration(
-          color: colors.page,
+          color: selected ? colors.accentBg : colors.page,
           shape: AppShape.continuous(AppRadius.card),
           shadows: AppShadow.card,
         ),

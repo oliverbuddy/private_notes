@@ -27,12 +27,15 @@ class NoteTileCompact extends StatelessWidget {
     this.thumbnailPaths = const <String>[],
     this.imageCount = 0,
     this.hasAttachment = false,
+    this.selected = false,
     required this.onTap,
     required this.onLongPress,
   });
-
   final Note note;
   final String query;
+
+  /// 桌面双栏当前打开的笔记：行底色 + 左侧主色条。
+  final bool selected;
 
   /// 最多取第一张，紧凑档只放一个 40dp 的方块。
   final List<String> thumbnailPaths;
@@ -72,71 +75,78 @@ class NoteTileCompact extends StatelessWidget {
             : null;
     final bool leadMedia = media != null && summary.isEmpty;
 
-    return AppPressable(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
-      onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
-      // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
-      pressedColor: AppPress.overlay(context),
-      pressedOpacity: 1,
-      pressedScale: 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpace.page,
-          vertical: 12,
-        ),
-        child: Row(
-          children: <Widget>[
-            if (note.pinned)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.push_pin_rounded,
-                    size: AppIcon.badge, color: colors.accent),
-              ),
-            if (note.locked)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child:
-                    Icon(Icons.lock_outline_rounded,
-                        size: AppIcon.badge, color: colors.secondary),
-              ),
-            if (leadMedia) ...<Widget>[
-              media,
-              const SizedBox(width: 10),
-            ],
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  children: highlightSpans(
-                    // 有图片/附件时不再写「（无正文）」：与舒适档一致，
-                    // 右侧的缩略图本身就是内容。
-                    text: summary.isEmpty
-                        ? ((thumbnailPaths.isEmpty && !hasAttachment)
-                            ? '（无正文）'
-                            : '')
-                        : summary,
-                    query: query,
-                    style: summary.isEmpty
-                        ? style.copyWith(color: colors.secondary)
-                        : style,
-                    highlightColor: colors.searchHit,
-                  ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: selected ? colors.accentBg : Colors.transparent,
+        border: selected
+            ? Border(left: BorderSide(color: colors.accent, width: 2))
+            : null,
+      ),
+      child: AppPressable(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
+        onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
+        // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
+        pressedColor: AppPress.overlay(context),
+        pressedOpacity: 1,
+        pressedScale: 1,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpace.page,
+            vertical: 12,
+          ),
+          child: Row(
+            children: <Widget>[
+              if (note.pinned)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(Icons.push_pin_rounded,
+                      size: AppIcon.badge, color: colors.accent),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              if (note.locked)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(Icons.lock_outline_rounded,
+                      size: AppIcon.badge, color: colors.secondary),
+                ),
+              if (leadMedia) ...<Widget>[
+                media,
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: highlightSpans(
+                      // 有图片/附件时不再写「（无正文）」：与舒适档一致，
+                      // 右侧的缩略图本身就是内容。
+                      text: summary.isEmpty
+                          ? ((thumbnailPaths.isEmpty && !hasAttachment)
+                              ? '（无正文）'
+                              : '')
+                          : summary,
+                      query: query,
+                      style: summary.isEmpty
+                          ? style.copyWith(color: colors.secondary)
+                          : style,
+                      highlightColor: colors.searchHit,
+                    ),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            if (!leadMedia && media != null) ...<Widget>[
-              const SizedBox(width: 10),
-              media,
+              if (!leadMedia && media != null) ...<Widget>[
+                const SizedBox(width: 10),
+                media,
+              ],
+              const SizedBox(width: 12),
+              Text(
+                formatListTime(note.updated),
+                style: AppText.meta.copyWith(color: colors.secondary),
+              ),
             ],
-            const SizedBox(width: 12),
-            Text(
-              formatListTime(note.updated),
-              style: AppText.meta.copyWith(color: colors.secondary),
-            ),
-          ],
+          ),
         ),
       ),
     );

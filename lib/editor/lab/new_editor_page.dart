@@ -32,12 +32,14 @@ import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
 import '../markdown_toolbar.dart';
 import '../markdown_view.dart';
+import '../editor_zoom.dart';
 import '../note_image_share.dart';
 import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
 import '../../util/date_format.dart' show formatEditorTime, formatFileSize;
 import 'selection_toolbar.dart';
+import 'table_cell_editor.dart';
 import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
 import 'caret_overlay.dart';
@@ -46,6 +48,7 @@ import 'image_display_size.dart';
 import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'markdown_paste.dart';
+import 'markdown_inline.dart';
 import 'markdown_shortcut.dart';
 import 'paste_ime_decorator.dart';
 import 'task_component.dart';
@@ -226,6 +229,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// Markdown 快捷输入兜底是否已排队（每帧最多检查一次）。
   bool _shortcutScheduled = false;
 
+  /// 行内 Markdown（`**粗**` / `` `码` `` / 链接）识别是否已排队。
+  bool _inlineScheduled = false;
+
   /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
   bool _draggingFiles = false;
 
@@ -381,6 +387,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       onPaste: _handleImePaste,
     );
     _editorFocus.addListener(_onEditorFocusChanged);
+    editorZoom.addListener(_onZoomChanged);
     // 桌面硬件键：粘贴走 Markdown 解析、空列表回车显式退出列表。
     if (PlatformFeatures.isDesktop) {
       HardwareKeyboard.instance.addHandler(_desktopKeyHandler);
@@ -402,6 +409,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         _syncHistoryButtons();
         _syncDocumentEmpty();
         _scheduleMarkdownShortcut();
+        _scheduleInlineMarkdown();
       }),
     );
     // 选区变化：块级激活态跟着光标所在行走，只需要监听 composer。
@@ -590,6 +598,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     _canRedo.dispose();
     _documentEmpty.dispose();
     _editorFocus.removeListener(_onEditorFocusChanged);
+    editorZoom.removeListener(_onZoomChanged);
     if (PlatformFeatures.isDesktop) {
       HardwareKeyboard.instance.removeHandler(_desktopKeyHandler);
     }
@@ -2087,6 +2096,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  /// 正文缩放变化：重建样式表。
+  void _onZoomChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   /// 缓存剪贴板内容（纯文本 + HTML），供 IME 粘贴识别使用。
   ///
   /// Android 10+ 只有持有窗口焦点的应用才能读剪贴板：`resumed` 回调触发时
@@ -2379,6 +2395,64 @@ class _NewEditorPageState extends State<NewEditorPage>
     });
   }
 
+  /// 手动输入的 Markdown 行内标记识别是否已排队。
+  ///
+  /// 与块级快捷输入不同，行内样式**全平台**都识别：手机用户同样会手打
+  /// `**粗体**`，把能力只留给工具条会让同一段文本在两端观感不同。
+  void _scheduleInlineMarkdown() {
+    if (_inlineScheduled || _disposed) {
+      return;
+    }
+    _inlineScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _inlineScheduled = false;
+      _applyInlineMarkdown();
+    });
+  }
+
+  /// 光标前刚闭合的行内标记 → 真样式（规则见 [matchInlineMarkdown]）。
+  ///
+  /// 只在「光标紧跟在闭合标记之后」时改写，且代码块内不识别（那里的
+  /// 反引号/星号是代码本身）。一次 `execute` 内完成「打样式 + 删标记 +
+  /// 挪光标」，用户看到的效果就是一敲完即时成型。
+  void _applyInlineMarkdown() {
+    if (_disposed || !mounted) {
+      return;
+    }
+    // 组词期间不碰文档，否则输入法下一次提交会把改写覆盖回去。
+    if (_composer.composingRegion.value != null) {
+      return;
+    }
+    final DocumentSelection? selection = _composer.selection;
+    if (selection == null || !selection.isCollapsed) {
+      return;
+    }
+    if (selection.base.nodeId != selection.extent.nodeId) {
+      return;
+    }
+    final DocumentNode? node = _document.getNodeById(selection.extent.nodeId);
+    if (node is! ParagraphNode) {
+      return;
+    }
+    if (node.getMetadataValue(NodeMetadata.blockType) == codeAttribution) {
+      return;
+    }
+    final NodePosition position = selection.extent.nodePosition;
+    if (position is! TextNodePosition) {
+      return;
+    }
+    final List<EditRequest>? requests = inlineMarkdownRequests(
+      nodeId: node.id,
+      text: node.text.toPlainText(),
+      caret: position.offset,
+    );
+    if (requests == null) {
+      return;
+    }
+    _editor.execute(requests);
+    _refreshActiveCommands();
+  }
+
   void _applyMarkdownShortcut() {
     if (_disposed || !mounted) {
       return;
@@ -2471,6 +2545,17 @@ class _NewEditorPageState extends State<NewEditorPage>
       return _tryExitEmptyListItem();
     }
     final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
+    if (command &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isAltPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyC) {
+      // 表格整块选中时，⌘C 直接复制表格的 Markdown。
+      final DocumentNode? node = _selectionNode();
+      if (node is TableBlockNode) {
+        unawaited(_copyTableAsMarkdown(node));
+        return true;
+      }
+    }
     if (command &&
         !keyboard.isShiftPressed &&
         !keyboard.isAltPressed &&
@@ -2850,7 +2935,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                                             'editor-placeholder',
                                           ),
                                           style: TextStyle(
-                                            fontSize: AppFontSize.summary,
+                                            fontSize: AppFontSize.summary *
+                                                editorZoom.value,
                                             height: 1.7,
                                             letterSpacing: 0.3,
                                             leadingDistribution:
@@ -3226,6 +3312,72 @@ class _NewEditorPageState extends State<NewEditorPage>
     _showHint('表格已更新');
   }
 
+  /// 桌面：双击单元格就地编辑后回写。
+  ///
+  /// 内核的表格节点不可变，这里重建整个 [TableBlockNode]：单元格 id 与
+  /// 其它单元格原样保留，只替换被编辑那一格的文本。走
+  /// [ReplaceNodeRequest] 是为了让这次修改进入撤销栈（⌘Z 可回退）。
+  void _replaceTableCell(
+    String tableId,
+    int row,
+    int column,
+    String text,
+  ) {
+    final DocumentNode? node = _document.getNodeById(tableId);
+    if (node is! TableBlockNode) {
+      return;
+    }
+    if (row < 0 ||
+        row >= node.rowCount ||
+        column < 0 ||
+        column >= node.columnCount) {
+      return;
+    }
+    final List<List<TextNode>> cells = <List<TextNode>>[];
+    for (int r = 0; r < node.rowCount; r++) {
+      final List<TextNode> nextRow = <TextNode>[];
+      for (int c = 0; c < node.columnCount; c++) {
+        final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
+        nextRow.add(
+          r == row && c == column
+              ? TextNode(
+                  id: cell.id,
+                  text: AttributedText(text),
+                  metadata: Map<String, dynamic>.from(cell.metadata),
+                )
+              : cell,
+        );
+      }
+      cells.add(nextRow);
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(
+        existingNodeId: node.id,
+        newNode: TableBlockNode(
+          id: node.id,
+          cells: cells,
+          metadata: Map<String, dynamic>.from(node.metadata),
+        ),
+      ),
+    ]);
+    // 表格节点整体重建后，内核会按「旧布局」重算一次光标；文本光标可能
+    // 停在错位的位置（用户反馈「表格编辑后光标错位」）。这里显式把选区
+    // 收敛到表格块本身：块级选中不画文本光标，下次点正文再落新位置。
+    _composer.setSelectionWithReason(
+      DocumentSelection(
+        base: DocumentPosition(
+          nodeId: node.id,
+          nodePosition: node.beginningPosition,
+        ),
+        extent: DocumentPosition(
+          nodeId: node.id,
+          nodePosition: node.endPosition,
+        ),
+      ),
+      SelectionReason.userInteraction,
+    );
+  }
+
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
   void _showAttachmentActions(
     BuildContext context,
@@ -3334,6 +3486,9 @@ class _NewEditorPageState extends State<NewEditorPage>
                 top: 0,
                 bottom: 0,
                 child: AppBackButton(
+                  // 详情页返回是高频动作：热区放到 56（默认 48），
+                  // 用户不用精确点中 24vp 的箭头（用户反馈「只有箭头有效」）。
+                  hitSize: 56,
                   onTap: () => Navigator.of(context).maybePop(),
                 ),
               ),
@@ -3481,14 +3636,30 @@ class _NewEditorPageState extends State<NewEditorPage>
             // 桌面端按真正的正文列宽（而不是窗口宽度）计算，并把单列上限
             // 放宽到 320：桌面表格再按手机的 240 封顶会显得又窄又挤，
             // 两三列表格不该出现横向滚动条。
-            _AdaptiveTableComponentBuilder(
-              availableWidth: contentWidth - AppSpace.page * 2,
-              columnMax: PlatformFeatures.isDesktop ? 320 : 240,
-              selectionColor: Color.alphaBlend(
-                colors.accent.withValues(alpha: 0.25),
-                colors.page,
+            //
+            // 桌面用自建表格组件（双击单元格就地编辑）；移动端继续用内核的
+            // 只读表格组件，交互与观感都不变。
+            if (PlatformFeatures.isDesktop)
+              EditableTableComponentBuilder(
+                availableWidth: contentWidth - AppSpace.page * 2,
+                columnMax: 320,
+                selectionColor: Color.alphaBlend(
+                  colors.accent.withValues(alpha: 0.25),
+                  colors.page,
+                ),
+                cursorColor: colors.accent,
+                editorBackground: colors.page,
+                onCellCommitted: _replaceTableCell,
+              )
+            else
+              _AdaptiveTableComponentBuilder(
+                availableWidth: contentWidth - AppSpace.page * 2,
+                columnMax: 240,
+                selectionColor: Color.alphaBlend(
+                  colors.accent.withValues(alpha: 0.25),
+                  colors.page,
+                ),
               ),
-            ),
             ...defaultComponentBuilders,
             const UnknownComponentBuilder(),
           ],
@@ -3505,6 +3676,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     final double h2Size = desktop ? 22 : AppFontSize.heading;
     final double h3Size = desktop ? 19 : AppFontSize.bodyLg;
     final double paragraphHeight = desktop ? 1.7 : 1.6;
+    final double zoom = editorZoom.value;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -3555,7 +3727,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) {
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
-                fontSize: AppFontSize.summary,
+                fontSize: AppFontSize.summary * zoom,
                 height: 1.7,
                 letterSpacing: 0.3,
                 leadingDistribution: TextLeadingDistribution.even,
@@ -3661,7 +3833,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header1'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h1Size,
+              fontSize: h1Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.3,
@@ -3675,7 +3847,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header2'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h2Size,
+              fontSize: h2Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.25,
@@ -3689,7 +3861,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header3'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h3Size,
+              fontSize: h3Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.2,
@@ -3706,7 +3878,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header4'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary,
+              fontSize: AppFontSize.summary * editorZoom.value,
               fontWeight: AppWeight.semibold,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -3719,7 +3891,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header5'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary,
+              fontSize: AppFontSize.summary * editorZoom.value,
               fontWeight: AppWeight.medium,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -3732,7 +3904,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header6'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary,
+              fontSize: AppFontSize.summary * editorZoom.value,
               fontWeight: AppWeight.regular,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -3751,7 +3923,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             final bool continuesBelow = _quoteContinuesBelow(doc, node);
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
-                fontSize: AppQuote.fontSize,
+                fontSize: AppQuote.fontSize * zoom,
                 height: AppQuote.height,
                 letterSpacing: AppQuote.letterSpacing,
                 leadingDistribution: TextLeadingDistribution.even,
@@ -3797,7 +3969,9 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
-              fontSize: AppFontSize.summary * CodeBlockCardStyle.fontSizeFactor,
+              fontSize: AppFontSize.summary *
+                  CodeBlockCardStyle.fontSizeFactor *
+                  zoom,
               height: CodeBlockCardStyle.lineHeight,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
@@ -4725,26 +4899,6 @@ TableCellDecorator _tableCellDecorator(AppColors colors) {
   };
 }
 
-/// 列宽 = 内容自适应，但每条列最多 [maxWidth]，超出的单元格内换行。
-///
-/// Flutter 自带的 `MaxColumnWidth` 是「取两个宽度的较大者」，没有封顶
-/// 语义，所以这里单独实现。
-class _CappedIntrinsicColumnWidth extends TableColumnWidth {
-  const _CappedIntrinsicColumnWidth(this.maxWidth);
-
-  final double maxWidth;
-
-  static const TableColumnWidth _intrinsic = IntrinsicColumnWidth();
-
-  @override
-  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.minIntrinsicWidth(cells, containerWidth), maxWidth);
-
-  @override
-  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.maxIntrinsicWidth(cells, containerWidth), maxWidth);
-}
-
 /// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
 ///
 /// 2~3 列表格在手机上基本一屏放下；列特别多时单列不低于 [min]，宁可
@@ -4796,7 +4950,7 @@ class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
     viewModel.selectionColor = selectionColor;
     final int columns = node.columnCount;
     if (columns > 0 && availableWidth > 0) {
-      viewModel.columnWidth = _CappedIntrinsicColumnWidth(
+      viewModel.columnWidth = CappedIntrinsicColumnWidth(
         tableColumnCap(
           availableWidth: availableWidth,
           columns: columns,

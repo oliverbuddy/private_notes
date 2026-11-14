@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
+import '../app/copyright.dart';
 import '../theme/app_theme.dart';
 import '../ui/app_icon_button.dart';
 import '../ui/app_list.dart';
@@ -162,6 +163,18 @@ class _AboutPageState extends State<AboutPage> {
             _appInfo == null ? '版本 —' : '版本 ${_appInfo!.displayVersion}',
             style: TextStyle(
                 fontSize: AppFontSize.caption, color: colors.secondary),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // 构建标识：极小、低对比，不干扰阅读，但能用来核对「这份安装包
+        // 是不是本项目的构建产物」（权属标记见 lib/app/copyright.dart）。
+        Text(
+          '构建 $xiaojiBuildTag',
+          style: TextStyle(
+            fontSize: 10,
+            height: 1.2,
+            letterSpacing: 0.2,
+            color: colors.tertiary.withValues(alpha: 0.7),
           ),
         ),
       ],

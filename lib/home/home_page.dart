@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart'
+    show HapticFeedback, KeyDownEvent, LogicalKeyboardKey;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -67,6 +68,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 恢复历史版本后强制重建右侧面板（同一 id 也要换成新文档）。
   int _paneRevision = 0;
+
+  /// 侧边栏列表焦点：桌面双栏下用 ↑ / ↓ 切换笔记。
+  final FocusNode _listFocus = FocusNode(debugLabel: 'xiaoji-list');
+
+  /// 当前选中项的位置锚点：键盘切换后把选中项滚进可视区。
+  final GlobalKey _selectedTileKey = GlobalKey();
 
   /// 是否启用双栏（桌面与平板横屏共用）。
   ///
@@ -150,6 +157,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     newNoteRequests.removeListener(_onShortcutNewNote);
     _searchController.dispose();
     _searchFocus.dispose();
+    _listFocus.dispose();
     super.dispose();
   }
 
@@ -169,6 +177,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _searchMode = false;
     });
+  }
+
+  /// Esc：只在搜索态退出搜索，浏览态不拦截（留给详情页退出编辑）。
+  void _exitSearchIfNeeded() {
+    if (_searchMode) {
+      _exitSearch();
+    }
   }
 
   Future<void> _openEditor(Note? note, {bool shareOnOpen = false}) async {
@@ -215,6 +230,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _paneNote = effective;
         _paneAutoFocus = note == null;
       });
+      // 从列表打开时把焦点留在列表：↑/↓ 可以继续切下一条（Apple Notes 习惯）。
+      if (!_searchMode) {
+        _listFocus.requestFocus();
+      }
       return;
     }
     await Navigator.of(context).push(
@@ -551,76 +570,99 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           density == ListDensity.compact ? colors.page : comfortableBg,
       body: SafeArea(
         bottom: false,
-        child: ListenableBuilder(
-          listenable: _repo,
-          builder: (BuildContext context, Widget? child) {
-            final notes = _repo.visibleNotes;
-            _maybeNotifyBackupFailure(notes.isNotEmpty);
+        child: CallbackShortcuts(
+          // 桌面习惯：⌘F / Ctrl+F 直接进搜索，Esc 退出。
+          bindings: PlatformFeatures.isDesktop
+              ? <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                      _enterSearch,
+                  const SingleActivator(
+                    LogicalKeyboardKey.keyF,
+                    control: true,
+                  ): _enterSearch,
+                  const SingleActivator(LogicalKeyboardKey.escape):
+                      _exitSearchIfNeeded,
+                }
+              : const <ShortcutActivator, VoidCallback>{},
+          child: Focus(
+            autofocus: true,
+            child: ListenableBuilder(
+              listenable: _repo,
+              builder: (BuildContext context, Widget? child) {
+                final notes = _repo.visibleNotes;
+                _maybeNotifyBackupFailure(notes.isNotEmpty);
 
-            final bool split = _splitEnabled;
-            // 双栏时列表是 340 的窄栏，本身就是「内容列」，不再套 ContentFrame；
-            // 单栏宽屏仍保持原来的限宽居中。
-            Widget framed(Widget child) =>
-                split ? child : ContentFrame(child: child);
-            final Widget listColumn = Column(
-              children: <Widget>[
-                // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
-                // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
-                framed(
-                  _searchMode
-                      ? _buildSearchBar(colors)
-                      : _buildTitleBar(colors),
-                ),
-                if (_repo.isSearching && !_repo.isLoading)
-                  framed(
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpace.page,
-                        AppSpace.xs,
-                        AppSpace.page,
-                        AppSpace.sm,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '共 ${notes.length} 条',
-                          style: TextStyle(
-                            fontSize: AppFontSize.caption,
-                            letterSpacing: 0.2,
-                            color: colors.tertiary,
+                final bool split = _splitEnabled;
+                // 双栏时列表是 340 的窄栏，本身就是「内容列」，不再套 ContentFrame；
+                // 单栏宽屏仍保持原来的限宽居中。
+                Widget framed(Widget child) =>
+                    split ? child : ContentFrame(child: child);
+                final Widget listColumn = Column(
+                  children: <Widget>[
+                    // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
+                    // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
+                    framed(
+                      _searchMode
+                          ? _buildSearchBar(colors)
+                          : _buildTitleBar(colors),
+                    ),
+                    if (_repo.isSearching && !_repo.isLoading)
+                      framed(
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpace.page,
+                            AppSpace.xs,
+                            AppSpace.page,
+                            AppSpace.sm,
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '共 ${notes.length} 条',
+                              style: TextStyle(
+                                fontSize: AppFontSize.caption,
+                                letterSpacing: 0.2,
+                                color: colors.tertiary,
+                              ),
+                            ),
                           ),
                         ),
                       ),
+                    Expanded(
+                      child: _repo.isLoading
+                          ? const Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 1.6),
+                              ),
+                            )
+                          : (notes.isEmpty
+                              ? _EmptyState(searching: _repo.isSearching)
+                              // 平板/桌面：内容限宽居中，长列表不拉满整屏。
+                              : framed(_buildList(colors, notes, density))),
                     ),
-                  ),
-                Expanded(
-                  child: _repo.isLoading
-                      ? const Center(
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 1.6),
-                          ),
-                        )
-                      : (notes.isEmpty
-                          ? _EmptyState(searching: _repo.isSearching)
-                          // 平板/桌面：内容限宽居中，长列表不拉满整屏。
-                          : framed(_buildList(colors, notes, density))),
-                ),
-              ],
-            );
-            if (!split) {
-              return listColumn;
-            }
-            // 桌面双栏：左列表 + 右正文（Apple Notes / 语雀 / Bear 形态）。
-            return Row(
-              children: <Widget>[
-                SizedBox(width: 340, child: listColumn),
-                Container(width: 0.5, color: colors.dividerStrong),
-                Expanded(child: _buildDetailPane(colors)),
-              ],
-            );
-          },
+                  ],
+                );
+                if (!split) {
+                  return listColumn;
+                }
+                // 桌面双栏：左列表 + 右正文（Apple Notes / 语雀 / Bear 形态）。
+                return Row(
+                  children: <Widget>[
+                    Focus(
+                      focusNode: _listFocus,
+                      onKeyEvent: _handleListKey,
+                      child: SizedBox(width: 340, child: listColumn),
+                    ),
+                    Container(width: 0.5, color: colors.dividerStrong),
+                    Expanded(child: _buildDetailPane(colors)),
+                  ],
+                );
+              },
+            ),
+          ),
         ),
       ),
       // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
@@ -655,6 +697,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
+  }
+
+  /// 桌面双栏：在列表上按 ↑ / ↓ 切换到上一条 / 下一条笔记。
+  ///
+  /// 走和点击同一条 [_openEditor]，所以锁定笔记的验证、未落盘内容的
+  /// 保存都复用既有逻辑，不额外维护一份「键盘专用」分支。
+  KeyEventResult _handleListKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final LogicalKeyboardKey key = event.logicalKey;
+    final bool up = key == LogicalKeyboardKey.arrowUp;
+    final bool down = key == LogicalKeyboardKey.arrowDown;
+    if (!up && !down) {
+      return KeyEventResult.ignored;
+    }
+    final List<Note> notes = _repo.visibleNotes;
+    if (notes.isEmpty) {
+      return KeyEventResult.ignored;
+    }
+    int index = notes.indexWhere((Note n) => n.id == _paneNote?.id);
+    if (index < 0) {
+      index = down ? -1 : notes.length;
+    }
+    final int next = (down ? index + 1 : index - 1).clamp(0, notes.length - 1);
+    if (next == index) {
+      return KeyEventResult.handled;
+    }
+    _openEditor(notes[next]);
+    _revealSelectedTile();
+    return KeyEventResult.handled;
+  }
+
+  /// 键盘切换后把选中项滚进可视区（长列表下否则看不到当前选的是谁）。
+  void _revealSelectedTile() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? tileContext = _selectedTileKey.currentContext;
+      if (tileContext == null || !tileContext.mounted) {
+        return;
+      }
+      Scrollable.ensureVisible(
+        tileContext,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 120),
+      );
+    });
   }
 
   /// 桌面双栏的右侧面板：空态提示或嵌入的详情页。
@@ -1065,10 +1153,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             .toList(growable: false);
 
         Widget tile;
+        final bool selected = _paneNote?.id == note.id;
         if (density == ListDensity.compact) {
           tile = NoteTileCompact(
             note: note,
             query: query,
+            selected: selected,
             // 紧凑档同样带图：右侧 40dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
@@ -1080,6 +1170,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           tile = NoteTileComfortable(
             note: note,
             query: query,
+            selected: selected,
             // 纯文字给 5 行；有图时压到 3 行，把高度让给缩略图行，
             // 避免「5 行字 + 一排图」把一张卡撑得半屏高。
             maxSummaryLines: _repo.isSearching ? 2 : (paths.isEmpty ? 5 : 3),
@@ -1088,6 +1179,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
           );
+        }
+
+        // 选中项挂一个锚点：键盘 ↑/↓ 切换后据此把它滚进可视区。
+        if (selected) {
+          tile = KeyedSubtree(key: _selectedTileKey, child: tile);
         }
 
         // 舒适档卡片化：白卡浮在微灰底上（与设置页同语言），卡与卡留 10 间距。

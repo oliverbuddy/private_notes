@@ -3,6 +3,9 @@ import 'dart:ui' show TextAffinity, TextPosition;
 
 import 'package:super_editor/super_editor.dart';
 
+import 'markdown_inline.dart';
+import 'xiaoji_markdown.dart';
+
 /// 小记内核的编辑请求拦截器。
 ///
 /// 注册在 [defaultRequestHandlers] 之前：super_editor 的处理器链是
@@ -10,6 +13,7 @@ import 'package:super_editor/super_editor.dart';
 /// 的块类型，其余请求原样交回默认链路（不复制、不重写 super_editor 逻辑）。
 final List<EditRequestHandler> xiaojiRequestHandlers =
     List<EditRequestHandler>.unmodifiable(<EditRequestHandler>[
+  _codeFenceOpeningHandler,
   _codeBlockNewlineHandler,
   _blockquoteContinuationHandler,
 ]);
@@ -37,6 +41,96 @@ Editor createXiaojiEditor({
     historyGroupingPolicy: defaultMergePolicy,
     isHistoryEnabled: isHistoryEnabled,
   );
+}
+
+/// 手打代码围栏（``` / ```dart）后回车 → 直接生成代码块。
+///
+/// 主流编辑器（Typora / Obsidian / 语雀）都是这个语义：用户手打围栏是
+/// 想写代码，不该在正文里留下一行字面量 ```。只在「整段文字就是一个
+/// 围栏」时生效，` ``` 后面还有内容的普通句子不受影响。
+/// 语言标记（```dart）会写进 [kCodeLanguageMetadata]，与工具条插入的
+/// 代码块走同一份元数据，序列化后是 ` ```dart `。
+EditCommand? _codeFenceOpeningHandler(Editor editor, EditRequest request) {
+  if (request is! InsertNewlineAtCaretRequest) {
+    return null;
+  }
+  final selection = editor.composer.selection;
+  if (selection == null || !selection.isCollapsed) {
+    return null;
+  }
+  final node = editor.document.getNodeById(selection.extent.nodeId);
+  if (node is! ParagraphNode) {
+    return null;
+  }
+  final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+  if (blockType != null && blockType != paragraphAttribution) {
+    return null;
+  }
+  final position = selection.extent.nodePosition;
+  if (position is! TextNodePosition) {
+    return null;
+  }
+  final String text = node.text.toPlainText();
+  if (position.offset != text.length) {
+    return null;
+  }
+  final String? language = matchCodeFenceOpening(text);
+  if (language == null) {
+    return null;
+  }
+  return _StartCodeBlockCommand(
+    nodeId: node.id,
+    language: language,
+  );
+}
+
+/// 把「手打的围栏段落」就地换成空代码块，光标落在块内。
+class _StartCodeBlockCommand extends EditCommand {
+  const _StartCodeBlockCommand({required this.nodeId, required this.language});
+
+  final String nodeId;
+
+  /// 围栏上写的语言；空字符串表示没写。
+  final String language;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  String describe() => 'Start code block - $nodeId';
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final ParagraphNode node =
+        context.document.getNodeById(nodeId)! as ParagraphNode;
+    executor
+      ..executeCommand(
+        ReplaceNodeCommand(
+          existingNodeId: nodeId,
+          newNode: ParagraphNode(
+            id: node.id,
+            text: AttributedText(),
+            metadata: <String, dynamic>{
+              ...node.metadata,
+              NodeMetadata.blockType: codeAttribution,
+              if (language.isNotEmpty) kCodeLanguageMetadata: language,
+            },
+          ),
+        ),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: nodeId,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.insertContent,
+          SelectionReason.userInteraction,
+        ),
+      );
+  }
 }
 
 /// 代码块（围栏）里的回车语义。

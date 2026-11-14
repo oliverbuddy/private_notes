@@ -87,6 +87,8 @@ final class XiaojiBridge {
       ])
     case "toggleFullscreen":
       toggleFullscreen(result: result)
+    case "setWindowChrome":
+      setWindowChrome(args, result: result)
     default:
       // 其余（分享导入、桌面小组件、SAF 目录等）是移动端专属能力，
       // Dart 侧已按 MissingPluginException 回退，这里明确不实现。
@@ -106,6 +108,35 @@ final class XiaojiBridge {
         return
       }
       window.toggleFullScreen(nil)
+      result(true)
+    }
+  }
+
+  /// 顶栏与应用同色。
+  ///
+  /// macOS 标题栏默认是系统灰，与应用页面（浅色纯白 / 深色近黑）并排时
+  /// 明显是两套风格。这里把标题栏透明化，并把窗口底色设成应用页面色，
+  /// 标题栏就「融进」应用；拖窗时背景也不会穿帮（底色不透明）。
+  private func setWindowChrome(_ args: [String: Any], result: @escaping FlutterResult) {
+    guard let value = args["color"] as? Int else {
+      result(false)
+      return
+    }
+    let alpha = CGFloat((value >> 24) & 0xFF) / 255.0
+    let red = CGFloat((value >> 16) & 0xFF) / 255.0
+    let green = CGFloat((value >> 8) & 0xFF) / 255.0
+    let blue = CGFloat(value & 0xFF) / 255.0
+    let color = NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+
+    DispatchQueue.main.async {
+      guard let window = NSApp.keyWindow
+        ?? NSApp.mainWindow
+        ?? NSApp.windows.first else {
+        result(false)
+        return
+      }
+      window.titlebarAppearsTransparent = true
+      window.backgroundColor = color
       result(true)
     }
   }

@@ -4,13 +4,16 @@ import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
+import 'package:xiaoji/editor/editor_zoom.dart';
 import 'package:xiaoji/editor/lab/caret_overlay.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/home/home_page.dart';
+import 'package:xiaoji/home/note_tile_comfortable.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/settings/backup_sheets.dart';
 import 'package:xiaoji/theme/app_theme.dart';
@@ -26,6 +29,16 @@ Future<void> _pumpFrames(WidgetTester tester, {int frames = 8}) async {
   for (var i = 0; i < frames; i++) {
     await tester.pump(const Duration(milliseconds: 60));
   }
+}
+
+/// 按住 ⌘ 敲一个键（桌面缩放快捷键走 Meta；Windows 的 Ctrl 分支同一份表）。
+Future<void> _pressWithMeta(
+  WidgetTester tester,
+  LogicalKeyboardKey key,
+) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  await tester.sendKeyEvent(key);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
 }
 
 void main() {
@@ -181,6 +194,15 @@ void main() {
           body: '宽屏笔记正文',
         ),
       );
+      // 第二条给「↑ / ↓ 切换笔记」用：列表需要至少两项才有下一条。
+      await store.saveNote(
+        Note(
+          id: 'n2',
+          created: DateTime(2026, 11, 2, 9),
+          updated: DateTime(2026, 11, 2, 9),
+          body: '第二条笔记正文',
+        ),
+      );
       await repository.load();
     });
 
@@ -303,6 +325,55 @@ void main() {
       // 正文嵌在右侧，列表没有消失（不是整页路由跳走）。
       expect(find.byType(NewEditorPage), findsOneWidget);
       expect(find.byType(ListView), findsWidgets);
+      // 当前打开的笔记在列表里高亮（主流桌面笔记的选中态）。
+      final NoteTileComfortable tile = tester.widget<NoteTileComfortable>(
+        find.byWidgetPredicate(
+          (Widget w) => w is NoteTileComfortable && w.note.id == 'n1',
+        ),
+      );
+      expect(tile.selected, isTrue);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('桌面双栏：↑ / ↓ 切换当前笔记', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 先点开最新一条（n2），列表随之拿到焦点。
+      await tester.tap(find.textContaining('第二条笔记正文').first);
+      await _pumpFrames(tester);
+      expect(
+        tester.widget<NewEditorPage>(find.byType(NewEditorPage)).note.id,
+        'n2',
+      );
+
+      // ↓ 切到更早的一条。
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _pumpFrames(tester);
+      expect(
+        tester.widget<NewEditorPage>(find.byType(NewEditorPage)).note.id,
+        'n1',
+      );
+
+      // ↑ 回到最新一条。
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await _pumpFrames(tester);
+      expect(
+        tester.widget<NewEditorPage>(find.byType(NewEditorPage)).note.id,
+        'n2',
+      );
+
       expect(tester.takeException(), isNull);
       debugDefaultTargetPlatformOverride = null;
     });
@@ -457,6 +528,165 @@ void main() {
       expect(tableColumnCap(availableWidth: 728, columns: 2, max: 320), 320);
       expect(tableColumnCap(availableWidth: 728, columns: 4, max: 320), 182);
       expect(tableColumnCap(availableWidth: 358, columns: 2), 179);
+    });
+
+    testWidgets('⌘= / ⌘- / ⌘0 缩放正文', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      addTearDown(resetEditorZoom);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          // 缩放快捷键挂在应用层（main.dart 的桌面快捷方式里），
+          // 这里直接包住编辑页验证「按键 → 缩放值」这条链路。
+          home: EditorZoomShortcuts(
+            child: NewEditorPage(
+              repository: repository,
+              note: Note(
+                id: 'pc-zoom',
+                created: DateTime(2026, 11, 1),
+                updated: DateTime(2026, 11, 1),
+                body: '正文缩放测试\n',
+              ),
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      final Offset textSpot =
+          tester.getTopLeft(find.byType(SuperEditor)) + const Offset(80, 120);
+      await tester.tapAt(textSpot);
+      await _pumpFrames(tester);
+      expect(editorZoom.value, 1.0);
+
+      await _pressWithMeta(tester, LogicalKeyboardKey.equal);
+      expect(editorZoom.value, closeTo(1.05, 1e-9));
+
+      await _pressWithMeta(tester, LogicalKeyboardKey.minus);
+      await _pressWithMeta(tester, LogicalKeyboardKey.minus);
+      expect(editorZoom.value, closeTo(0.95, 1e-9));
+
+      await _pressWithMeta(tester, LogicalKeyboardKey.digit0);
+      expect(editorZoom.value, 1.0);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('缩放边界：0.85–1.4，步进 0.05，⌘0 复位', () {
+      addTearDown(resetEditorZoom);
+      resetEditorZoom();
+      adjustEditorZoom(kEditorZoomStep);
+      expect(editorZoom.value, closeTo(1.05, 1e-9));
+      for (int i = 0; i < 20; i++) {
+        adjustEditorZoom(kEditorZoomStep);
+      }
+      expect(editorZoom.value, kEditorZoomMax);
+      for (int i = 0; i < 40; i++) {
+        adjustEditorZoom(-kEditorZoomStep);
+      }
+      expect(editorZoom.value, kEditorZoomMin);
+      resetEditorZoom();
+      expect(editorZoom.value, 1.0);
+    });
+
+    testWidgets('桌面表格：双击单元格就地编辑，Tab 提交并切下一格', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: NewEditorPage(
+            repository: repository,
+            note: Note(
+              id: 'pc-table',
+              created: DateTime(2026, 11, 1),
+              updated: DateTime(2026, 11, 1),
+              body: '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 单元格文字由 Text.rich 渲染，要开 findRichText 才找得到。
+      final Finder apple = find.text('苹果', findRichText: true);
+      expect(apple, findsOneWidget);
+
+      // 双击进入编辑（表格内容层是 IgnorePointer，tap 命中不到文字本身）。
+      await tester.tap(apple, warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.tap(apple, warnIfMissed: false);
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), '香蕉');
+      await _pumpFrames(tester, frames: 2);
+
+      // Tab：提交并切到下一格（数量 3），表格里已经写回「香蕉」。
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller?.text,
+        '3',
+      );
+      expect(find.text('香蕉', findRichText: true), findsOneWidget);
+
+      // Esc：取消编辑，不留在编辑态。
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsNothing);
+      // 表格重建后选区收敛到表格块：不残留错位的文本光标（用户反馈）。
+      expect(find.byKey(xiaojiCaretKey), findsNothing);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('桌面表格：单击不会进入单元格编辑（双击才进入）', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: NewEditorPage(
+            repository: repository,
+            note: Note(
+              id: 'pc-table-single-tap',
+              created: DateTime(2026, 11, 1),
+              updated: DateTime(2026, 11, 1),
+              body: '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 单击一次 + 等过双击判定窗口：不应弹出单元格编辑框。
+      // 表格内容层是 IgnorePointer（点按交给内核），tap 命中不到文字本身，
+      // 所以这里关掉 hit-test 警告。
+      await tester.tap(
+        find.text('苹果', findRichText: true),
+        warnIfMissed: false,
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsNothing);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
     });
   });
 }
