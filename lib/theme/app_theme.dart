@@ -683,10 +683,14 @@ abstract final class AppTheme {
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: c.page,
-        elevation: 0,
+        // 菜单必须有层次：桌面右键菜单浮在正文之上，elevation 为 0 时
+        // 只是一块与页面同色的方块，看不出是弹层（用户反馈「没有立体感」）。
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.24),
         surfaceTintColor: Colors.transparent,
         shape: RoundedSuperellipseBorder(
-          borderRadius: BorderRadius.circular(AppRadius.button),
+          borderRadius: BorderRadius.circular(AppRadius.block),
+          side: BorderSide(color: c.chipBorder, width: 0.5),
         ),
         textStyle: TextStyle(
           color: c.text,

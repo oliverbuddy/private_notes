@@ -71,8 +71,14 @@ Future<T?> showXiaojiSheet<T>({
             ),
             // 内容可能带 TextField（重命名、改标签）或较长列表（历史版本）：
             // 对话框高度受限，统一交给滚动区，不出现溢出条纹。
-            child: SingleChildScrollView(
-              child: builder(dialogContext),
+            //
+            // 顶部统一补 12：移动端弹层内容自带的 4vp 顶距是为了贴住抓手，
+            // 桌面没有抓手，直接用 4 会让标题顶在边框上（用户反馈）。
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: SingleChildScrollView(
+                child: builder(dialogContext),
+              ),
             ),
           ),
         );
@@ -216,7 +222,7 @@ Future<bool?> showXiaojiConfirmSheet({
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,

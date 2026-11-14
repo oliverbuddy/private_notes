@@ -233,9 +233,6 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 行内 Markdown（`**粗**` / `` `码` `` / 链接）识别是否已排队。
   bool _inlineScheduled = false;
 
-  /// 粘贴后「补齐行内标记」是否已排队（每帧最多扫一次文档）。
-  bool _inlineSweepScheduled = false;
-
   /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
   bool _draggingFiles = false;
 
@@ -2506,16 +2503,23 @@ class _NewEditorPageState extends State<NewEditorPage>
     _refreshActiveCommands();
   }
 
-  /// 粘贴后，在下一帧补齐正文里的行内标记。
+  /// 粘贴后，分几拍补齐正文里的行内标记。
+  ///
+  /// 不能只扫一次：内核默认粘贴要先异步读剪贴板再插入，插入时刻可能晚于
+  /// 第一次 post-frame；只扫一次就会「当时没渲染，重进才刷新」（用户实测）。
+  /// 这里在同一帧、200ms、600ms、1500ms 各扫一次，扫描本身无命中时是空转。
   void _scheduleInlineMarkdownSweep() {
-    if (_inlineSweepScheduled || _disposed) {
+    if (_disposed) {
       return;
     }
-    _inlineSweepScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _inlineSweepScheduled = false;
-      _sweepInlineMarkdown();
-    });
+    for (final int delay in const <int>[0, 200, 600, 1500]) {
+      Future<void>.delayed(Duration(milliseconds: delay), () {
+        if (_disposed || !mounted) {
+          return;
+        }
+        _sweepInlineMarkdown();
+      });
+    }
   }
 
   /// 把正文里残留的行内标记就地转成样式（规则见 [findAllInlineMarkdown]）。
@@ -2551,6 +2555,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           !text.contains('~') &&
           !text.contains('=') &&
           !text.contains('`') &&
+          !text.contains('_') &&
           !text.contains('[')) {
         continue;
       }
@@ -2667,13 +2672,21 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     final HardwareKeyboard keyboard = HardwareKeyboard.instance;
     final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
+    // 正文重新拿到焦点说明单元格编辑已结束（表格被替换 / 失焦提交），
+    // 这里顺手复位，避免标志卡住导致 ⌘V 一直不生效。
+    if (_editorFocus.hasFocus) {
+      _tableCellEditing = false;
+    }
 
     // 粘贴不要求编辑器焦点：点过工具条/弹层后焦点可能短暂不在正文上，
     // 这时若放给内核，它会绕过 Markdown 解析、把 `**粗体**` 原样插进正文
     // （用户反馈「粘贴的 md 标签没识别」）。只要有选区就按小记的解析走。
+    //
+    // 例外：正在编辑表格单元格时，⌘V 属于单元格输入框。
     if (command &&
         !keyboard.isShiftPressed &&
         !keyboard.isAltPressed &&
+        !_tableCellEditing &&
         event.logicalKey == LogicalKeyboardKey.keyV &&
         _composer.selection != null) {
       unawaited(_pasteFromClipboard());
@@ -2705,6 +2718,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (command &&
         !keyboard.isShiftPressed &&
         !keyboard.isAltPressed &&
+        !_tableCellEditing &&
         event.logicalKey == LogicalKeyboardKey.keyC) {
       // 表格整块选中时，⌘C 直接复制表格的 Markdown。
       final DocumentNode? node = _selectionNode();
@@ -3251,13 +3265,19 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   /// 右键把选区收成光标时，若点击仍在原选中的块内，恢复原选区。
+  ///
+  /// 菜单路由拿焦点后内核可能把选区收成光标甚至直接清空，两种情况都要能
+  /// 恢复 —— 否则用户看到的就是「右键后蓝色选中底没了」。
   void _restoreSelectionBeforeContextMenu() {
     final DocumentSelection? remembered = _rememberedSelection;
-    final DocumentSelection? current = _composer.selection;
-    if (remembered == null || current == null || !current.isCollapsed) {
+    if (remembered == null) {
       return;
     }
-    if (current.extent.nodeId != remembered.extent.nodeId) {
+    final DocumentSelection? current = _composer.selection;
+    if (current != null && !current.isCollapsed) {
+      return;
+    }
+    if (current != null && current.extent.nodeId != remembered.extent.nodeId) {
       // 右键点在别的块上：按桌面惯例把光标落到点击处。
       _rememberedSelection = null;
       return;
@@ -3273,11 +3293,6 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 主流桌面笔记都能在正文里右键；手机端没有右键，不会触发。
   /// 粘贴走与工具条一致的 Markdown 智能粘贴，而不是系统默认粘贴。
   Future<void> _showDesktopContextMenu(Offset globalPosition) async {
-    final RenderBox? overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (overlay == null) {
-      return;
-    }
     // 内核先处理了右键（把选区收成光标），这里按原选区恢复。
     _restoreSelectionBeforeContextMenu();
     final DocumentSelection? selection = _composer.selection;
@@ -3292,14 +3307,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       final int targetRow = cell?.row ?? 0;
       final int targetColumn = cell?.column ?? 0;
       final bool hasCell = cell != null;
-      final String? tableAction = await showMenu<String>(
-        context: context,
-        position: RelativeRect.fromLTRB(
-          globalPosition.dx,
-          globalPosition.dy,
-          overlay.size.width - globalPosition.dx,
-          overlay.size.height - globalPosition.dy,
-        ),
+      final String? tableAction = await _showContextMenu(
+        position: globalPosition,
         items: <PopupMenuEntry<String>>[
           const PopupMenuItem<String>(value: 'editTable', child: Text('编辑表格')),
           const PopupMenuItem<String>(
@@ -3402,14 +3411,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       }
       return;
     }
-    final String? action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        globalPosition.dx,
-        globalPosition.dy,
-        overlay.size.width - globalPosition.dx,
-        overlay.size.height - globalPosition.dy,
-      ),
+    final String? action = await _showContextMenu(
+      position: globalPosition,
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(
           value: 'copy',
@@ -3444,6 +3447,51 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     // 菜单路由会拿走焦点：关闭后交还编辑器，否则「菜单关了却打不了字」。
     _editorFocus.requestFocus();
+  }
+
+  /// 弹右键菜单：弹出后与关闭后各恢复一次原选区。
+  ///
+  /// 菜单路由会拿走焦点，SuperEditor 在焦点变化时会把选区收敛成光标 ——
+  /// 用户看到的就是「右键后蓝色选中底消失了」，接着点复制也拿不到内容。
+  /// 这里在菜单打开后的下一帧和关闭后都补一次选区，高亮与复制都保持可用。
+  Future<String?> _showContextMenu({
+    required Offset position,
+    required List<PopupMenuEntry<String>> items,
+  }) async {
+    final RenderBox? overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) {
+      return null;
+    }
+    final Future<String?> menu = showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: items,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _restoreSelectionBeforeContextMenu();
+      }
+    });
+    // 菜单路由的焦点转移发生在建帧之后，可能又把选区收成光标；这里再多补
+    // 两拍，保证菜单开着时蓝色选中底一直在。
+    for (final int delay in const <int>[120, 400]) {
+      Future<void>.delayed(Duration(milliseconds: delay), () {
+        if (mounted) {
+          _restoreSelectionBeforeContextMenu();
+        }
+      });
+    }
+    final String? action = await menu;
+    if (mounted) {
+      _restoreSelectionBeforeContextMenu();
+    }
+    return action;
   }
 
   /// 当前选区所在的块（表格右键菜单用）。
@@ -3642,6 +3690,10 @@ class _NewEditorPageState extends State<NewEditorPage>
   void _rememberTableCellPointer(String tableId, int row, int column) {
     _lastTableCell = (tableId: tableId, row: row, column: column);
   }
+
+  /// 是否正在编辑表格单元格：此时焦点在单元格输入框上，⌘C / ⌘V 必须交给
+  /// 输入框自己处理（否则会被页面拦去复制整张表 / 往正文粘贴）。
+  bool _tableCellEditing = false;
 
   /// 表格结构操作：插入 / 删除行列。
   ///
@@ -3953,6 +4005,9 @@ class _NewEditorPageState extends State<NewEditorPage>
                 onCellCommitted: _replaceTableCell,
                 onCellStructure: _mutateTable,
                 onCellPointerDown: _rememberTableCellPointer,
+                onCellEditingChanged: (bool editing) {
+                  _tableCellEditing = editing;
+                },
               )
             else
               _AdaptiveTableComponentBuilder(

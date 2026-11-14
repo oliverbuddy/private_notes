@@ -156,6 +156,21 @@ void main() {
       expect(findAllInlineMarkdown('a ** b'), isEmpty);
       expect(findAllInlineMarkdown('普通文本'), isEmpty);
       expect(findAllInlineMarkdown('**未闭合'), isEmpty);
+      // 下划线只在两侧不是单词字符时才当语法，避免误伤变量名。
+      expect(findAllInlineMarkdown('snake_case_name'), isEmpty);
+      expect(findAllInlineMarkdown('my_var_name_here'), isEmpty);
+    });
+
+    test('下划线写法 __加粗__ / _斜体_', () {
+      final List<InlineMarkdownMatch> matches =
+          findAllInlineMarkdown('前__加粗__后_斜体_');
+      expect(
+        matches.map((InlineMarkdownMatch m) => m.kind).toList(),
+        <InlineMarkdownKind>[
+          InlineMarkdownKind.bold,
+          InlineMarkdownKind.italic,
+        ],
+      );
     });
 
     test('落地：标记删除、样式生效、光标按删除量映射', () {
@@ -262,6 +277,16 @@ void main() {
       expect(isHorizontalRuleLine('--'), isFalse);
       expect(isHorizontalRuleLine('- 列表项'), isFalse);
       expect(isHorizontalRuleLine('正文'), isFalse);
+    });
+
+    test('智能连字符（– / —）也认', () {
+      // macOS / 输入法会把 -- / --- 自动替换成 en dash / em dash。
+      expect(isHorizontalRuleLine('–'), isFalse); // 只敲了两个连字符，不够长
+      expect(isHorizontalRuleLine('—-'), isTrue);
+      expect(isHorizontalRuleLine('—'), isTrue);
+      expect(isHorizontalRuleLine('——'), isTrue);
+      expect(isHorizontalRuleLine('–-'), isTrue);
+      expect(isHorizontalRuleLine('— 正文'), isFalse);
     });
 
     test('回车后变成 HorizontalRuleNode，光标落在其后的空段落', () {

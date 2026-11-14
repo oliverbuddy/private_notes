@@ -616,7 +616,7 @@ void main() {
       expect(editorZoom.value, 1.0);
     });
 
-    testWidgets('桌面表格：双击单元格就地编辑，Tab 提交并切下一格', (
+    testWidgets('桌面表格：单击单元格就地编辑，Tab 提交并切下一格', (
       WidgetTester tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -644,9 +644,9 @@ void main() {
       final Finder apple = find.text('苹果', findRichText: true);
       expect(apple, findsOneWidget);
 
-      // 双击进入编辑（表格内容层是 IgnorePointer，tap 命中不到文字本身）。
-      await tester.tap(apple, warnIfMissed: false);
-      await tester.pump(const Duration(milliseconds: 40));
+      // 单击即进入编辑（Word / 语雀 / Notion 的表格语义）：表格内容层是
+      // IgnorePointer（点按交给内核），tap 命中到表格 Listener 后按坐标
+      // 换算成行列。
       await tester.tap(apple, warnIfMissed: false);
       await _pumpFrames(tester);
       expect(find.byType(TextField), findsOneWidget);
@@ -730,7 +730,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('桌面表格：单击不会进入单元格编辑（双击才进入）', (
+    testWidgets('桌面表格：单击即进入编辑，Esc 退出', (
       WidgetTester tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -754,14 +754,16 @@ void main() {
       );
       await _pumpFrames(tester);
 
-      // 单击一次 + 等过双击判定窗口：不应弹出单元格编辑框。
-      // 表格内容层是 IgnorePointer（点按交给内核），tap 命中不到文字本身，
-      // 所以这里关掉 hit-test 警告。
+      // 单击一次即进入编辑框，单元格里的文字可以拖选 / ⌘C 复制。
       await tester.tap(
         find.text('苹果', findRichText: true),
         warnIfMissed: false,
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsOneWidget);
+
+      // Esc 退出编辑，不留下编辑框。
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _pumpFrames(tester);
       expect(find.byType(TextField), findsNothing);
       expect(tester.takeException(), isNull);

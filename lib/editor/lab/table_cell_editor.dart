@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart'
-    show kDoubleTapTimeout, kTouchSlop, kSecondaryMouseButton;
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/super_editor.dart';
@@ -128,6 +127,7 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
     this.onCellCommitted,
     this.onCellStructure,
     this.onCellPointerDown,
+    this.onCellEditingChanged,
   }) : super(fit: TableComponentFit.scroll);
 
   /// 正文内容区宽度（已扣掉页面左右页边距）。
@@ -165,6 +165,9 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
   /// 指针在单元格上按下：右键菜单需要知道「哪一行哪一列」。
   final void Function(String tableNodeId, int row, int column)?
       onCellPointerDown;
+
+  /// 单元格编辑状态变化（页面据此避免拦截 ⌘C / ⌘V，交给输入框自己处理）。
+  final ValueChanged<bool>? onCellEditingChanged;
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -205,6 +208,7 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
       onCellCommitted: onCellCommitted,
       onCellStructure: onCellStructure,
       onCellPointerDown: onCellPointerDown,
+      onCellEditingChanged: onCellEditingChanged,
     );
   }
 }
@@ -221,6 +225,7 @@ class EditableTableComponent extends StatefulWidget {
     this.onCellCommitted,
     this.onCellStructure,
     this.onCellPointerDown,
+    this.onCellEditingChanged,
   });
 
   final GlobalKey componentKey;
@@ -245,6 +250,9 @@ class EditableTableComponent extends StatefulWidget {
   final void Function(String tableNodeId, int row, int column)?
       onCellPointerDown;
 
+  /// 单元格编辑状态变化（页面据此避免拦截 ⌘C / ⌘V）。
+  final ValueChanged<bool>? onCellEditingChanged;
+
   @override
   State<EditableTableComponent> createState() => _EditableTableComponentState();
 }
@@ -260,15 +268,8 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
   bool get _editable => widget.onCellCommitted != null;
 
-  /// 每个单元格的锚点：双击时用它把指针坐标换算成「第几行第几列」。
+  /// 每个单元格的锚点：按下时用它把指针坐标换算成「第几行第几列」。
   final Map<int, GlobalKey> _cellKeys = <int, GlobalKey>{};
-
-  /// 上一次按下鼠标的时间 / 位置，用于自己判双击。
-  ///
-  /// 不用 GestureDetector.onDoubleTap：它会参与手势竞技场，把内核的
-  /// 「单击选中整表」拖慢甚至吃掉；Listener 只观察指针，不抢手势。
-  DateTime? _lastTapTime;
-  Offset? _lastTapPosition;
 
   GlobalKey _cellKey(int row, int column) {
     return _cellKeys.putIfAbsent(row * 1000 + column, () => GlobalKey());
@@ -294,24 +295,10 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     if (_editRow != null) {
       return;
     }
-    final DateTime now = DateTime.now();
-    final DateTime? lastTime = _lastTapTime;
-    final Offset? lastPosition = _lastTapPosition;
-    _lastTapTime = now;
-    _lastTapPosition = event.position;
-    if (lastTime == null || lastPosition == null) {
-      return;
-    }
-    if (now.difference(lastTime) > kDoubleTapTimeout) {
-      return;
-    }
-    if ((event.position - lastPosition).distance > kTouchSlop) {
-      return;
-    }
+    // 单击即进入编辑（Word / 语雀 / Notion 的表格都是这个语义）：
+    // 进编辑后单元格里的文字可以拖选、⌘C 复制，不再只能整表选中。
     final (int, int)? cell = _cellAt(event.position);
     if (cell != null) {
-      _lastTapTime = null;
-      _lastTapPosition = null;
       _beginEditing(cell.$1, cell.$2);
     }
   }
@@ -395,6 +382,7 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       _controller = controller;
       _focusNode = focusNode;
     });
+    widget.onCellEditingChanged?.call(true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _focusNode != focusNode) {
         return;
@@ -456,6 +444,7 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
     _resetEditing();
     setState(() {});
+    widget.onCellEditingChanged?.call(false);
 
     if (!cancel && text != original) {
       widget.onCellCommitted!(widget.viewModel.nodeId, row, column, text);

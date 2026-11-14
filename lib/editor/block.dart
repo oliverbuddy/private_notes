@@ -293,7 +293,10 @@ bool _isTableSeparatorLine(String line) {
       RegExp(r'-{3,}').hasMatch(trimmed);
 }
 
-/// 一张表 → 一行摘要：优先表头单元格，表头全空时退到第一行数据。
+/// 一张表 → 一行摘要：优先表头单元格，表头全空时取第一行有文字的数据行。
+///
+/// 表头为空是常态：工具条插入的空表头表格，用户往往直接把数据填进第一行。
+/// 旧实现只看第一行数据，第一行也空时整张表在列表里就「消失」了。
 String _tableSummaryOf(List<String> lines, int start, int end) {
   String joinCells(String line) => _splitTableCells(line.trim())
       .where((String cell) => cell.isNotEmpty)
@@ -302,8 +305,11 @@ String _tableSummaryOf(List<String> lines, int start, int end) {
   if (header.isNotEmpty) {
     return header;
   }
-  if (start + 2 < end) {
-    return joinCells(lines[start + 2]);
+  for (var row = start + 2; row < end; row++) {
+    final String text = joinCells(lines[row]);
+    if (text.isNotEmpty) {
+      return text;
+    }
   }
   return '';
 }

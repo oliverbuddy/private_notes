@@ -294,13 +294,20 @@ List<EditRequest>? inlineMarkdownRequests({
 /// 整段扫描用的合并模式：按「链接 → 行内码 → 加粗 → 删除线 → 高亮 →
 /// 斜体」的优先级排列，正则天然取最左命中且不重叠，避免 `**粗**` 被
 /// 斜体规则截胡。
+///
+/// 同时认 `__加粗__` / `_斜体_` 这两种下划线写法：内核的 Markdown 解析器
+/// 支持它们（重进笔记就会渲染），但旧版粘贴补齐只认星号，于是出现
+/// 「有些 md 标签重进才生效」。下划线要求两侧不是单词字符，避免把
+/// `snake_case_name` 误当斜体。
 final RegExp _scanPattern = RegExp(
   r'\[([^\[\]\n]+)\]\(([^()\n\s]+)\)'
   r'|`([^`\n]+)`'
   r'|\*\*([^*\n]+)\*\*'
   r'|~~([^~\n]+)~~'
   r'|==([^=\n]+)=='
-  r'|(?<!\*)\*([^*\n]+)\*(?!\*)',
+  r'|(?<!\*)\*([^*\n]+)\*(?!\*)'
+  r'|(?<![\w*])__([^_\n]+)__(?![\w*])'
+  r'|(?<![\w_])_([^_\n]+)_(?![\w_])',
 );
 
 /// 标记内容是否有效：非空、首尾不能是空白（`2 * 3 * 4` 这类不算斜体）。
@@ -353,6 +360,14 @@ List<InlineMarkdownMatch> findAllInlineMarkdown(String text) {
       kind = InlineMarkdownKind.highlight;
       length = 2;
       content = match.group(6)!;
+    } else if (match.group(8) != null) {
+      kind = InlineMarkdownKind.bold;
+      length = 2;
+      content = match.group(8)!;
+    } else if (match.group(9) != null) {
+      kind = InlineMarkdownKind.italic;
+      length = 1;
+      content = match.group(9)!;
     } else {
       kind = InlineMarkdownKind.italic;
       length = 1;
@@ -449,12 +464,35 @@ List<EditRequest>? allInlineMarkdownRequests({
 }
 
 /// 整段文本是否为分割线（`---` / `***` / `___`）；用于「回车生成分割线」。
+///
+/// 还要认「智能连字符」：macOS 与多数输入法会把连续输入的连字符自动
+/// 替换成 en dash（`–`）或 em dash（`—`），用户敲 `--` / `---` 后正文里
+/// 已经没有任何 `-`，只按 ASCII 判断会永远识别不出来（用户实测）。
+/// 破折号按视觉宽度折算：`–` = 2 个连字符，`—` / `―` = 3 个。
 bool isHorizontalRuleLine(String text) {
   final String trimmed = text.trim();
-  if (trimmed.length < 3) {
+  if (trimmed.isEmpty) {
     return false;
   }
-  return RegExp(r'^(?:-{3,}|\*{3,}|_{3,})$').hasMatch(trimmed);
+  if (RegExp(r'^(?:-{3,}|\*{3,}|_{3,})$').hasMatch(trimmed)) {
+    return true;
+  }
+  int width = 0;
+  for (final int rune in trimmed.runes) {
+    switch (rune) {
+      case 0x2D: // -
+        width += 1;
+      case 0x2013: // –
+        width += 2;
+      case 0x2014: // —
+        width += 3;
+      case 0x2015: // ―
+        width += 3;
+      default:
+        return false;
+    }
+  }
+  return width >= 3;
 }
 
 /// 代码围栏开头（` ``` ` / ` ```dart `）；用于「回车生成代码块」。

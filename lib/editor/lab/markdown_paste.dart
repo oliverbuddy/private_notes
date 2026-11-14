@@ -104,6 +104,7 @@ bool looksLikeMarkdown(String text) {
   return RegExp(r'!\[[^\]]*\]\([^)]+\)').hasMatch(trimmed) ||
       RegExp(r'\[[^\]]+\]\([^)]+\)').hasMatch(trimmed) ||
       RegExp(r'\*\*[^*\n]+\*\*').hasMatch(trimmed) ||
+      RegExp(r'__[^_\n]+__').hasMatch(trimmed) ||
       RegExp(r'~~[^~\n]+~~').hasMatch(trimmed) ||
       RegExp(r'==[^=\n]+==').hasMatch(trimmed) ||
       RegExp(r'`[^`\n]+`').hasMatch(trimmed);

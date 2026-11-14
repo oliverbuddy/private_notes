@@ -20,6 +20,7 @@ class AppPressable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
+    this.onLongPressStart,
     this.onSecondaryTap,
     this.onSecondaryTapDown,
     this.behavior = HitTestBehavior.opaque,
@@ -32,6 +33,9 @@ class AppPressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// 长按按下时的位置：桌面端长按要像右键一样把菜单锚定在指针处。
+  final void Function(LongPressStartDetails details)? onLongPressStart;
 
   /// 鼠标右键（桌面端）：主流桌面 App 用右键代替移动端的长按菜单。
   final VoidCallback? onSecondaryTap;
@@ -121,6 +125,8 @@ class _AppPressableState extends State<AppPressable> {
           behavior: widget.behavior,
           onTap: widget.enabled ? widget.onTap : null,
           onLongPress: widget.enabled ? widget.onLongPress : null,
+          onLongPressStart:
+              widget.enabled ? widget.onLongPressStart : null,
           onSecondaryTap: widget.enabled ? widget.onSecondaryTap : null,
           onSecondaryTapDown: widget.enabled ? widget.onSecondaryTapDown : null,
           child: AnimatedOpacity(
