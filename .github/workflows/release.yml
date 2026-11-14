@@ -62,7 +62,7 @@ jobs:
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
           for ABI in arm64-v8a armeabi-v7a; do
-            APK="private_notes-${VERSION}-${ABI}.apk"
+            APK="xiaoji-${VERSION}-android-${ABI}.apk"
             cp "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$APK"
             sha256sum "$APK" > "$APK.sha256"
           done
@@ -72,10 +72,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: private_notes-apk
+          name: xiaoji-apk
           path: |
-            private_notes-*.apk
-            private_notes-*.apk.sha256
+            xiaoji-*.apk
+            xiaoji-*.apk.sha256
 
       # 自己拼 Release 说明：先给安装步骤，再列本次提交。
       # 不用 generate_release_notes + append_body：后者只在「更新已有
@@ -117,5 +117,5 @@ jobs:
           name: 小记 ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
           files: |
-            private_notes-*.apk
-            private_notes-*.apk.sha256
+            xiaoji-*.apk
+            xiaoji-*.apk.sha256

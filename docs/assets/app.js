@@ -84,9 +84,9 @@
         link('[data-download-link]', apk.browser_download_url);
       }
 
-      // 桌面端：macOS 通用包、Windows x64 包。缺失时保持指向 Releases 页。
-      var mac = findAsset(assets, /-macos-universal\.zip$/i);
-      var win = findAsset(assets, /-windows-x64\.zip$/i);
+      // 桌面端：macOS 通用 DMG、Windows x64 安装器。缺失时保持指向 Releases 页。
+      var mac = findAsset(assets, /-macos-universal\.dmg$/i);
+      var win = findAsset(assets, /-windows-x64-setup\.exe$/i);
       link('[data-macos-download]', mac && mac.browser_download_url);
       link('[data-windows-download]', win && win.browser_download_url);
     })

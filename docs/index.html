@@ -61,9 +61,9 @@
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">查看源码</a>
           </div>
           <p class="hero-meta">
-            <span data-latest-version>v1.10.0</span>
+            <span data-latest-version>v1.10.1</span>
             <span data-latest-size>21.1 MB</span>
-            <span>Android 签名 APK · macOS / Windows 桌面包</span>
+            <span>Android APK · macOS DMG · Windows 安装器</span>
           </p>
         </div>
 
@@ -127,6 +127,12 @@
             <h3>明暗双主题</h3>
             <p>跟随系统，也可以手动锁定浅色或深色；底部手势导航条自动融入页面。</p>
           </article>
+
+          <article class="card">
+            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 20h6M12 16.5V20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+            <h3>桌面端也顺手</h3>
+            <p>macOS / Windows 原生窗口，宽屏内容居中限宽，<code>⌘N</code> / <code>Ctrl+N</code> 直接新建；保存与选目录走系统对话框，备份可直接写进本机文件夹。macOS 会记住窗口位置与大小。</p>
+          </article>
         </div>
       </div>
     </section>
@@ -139,8 +145,8 @@
           <p class="section-sub">手机丢了、借给别人、被 screenshot —— 笔记应该在设计上就防住，而不是寄希望于「记得加锁」。</p>
           <ul class="check-list">
             <li><strong>应用锁</strong>：系统 PIN / 图案 / 密码或指纹；退后台按「立即 / 1 分钟 / 5 分钟」自动锁定，锁屏覆盖所有页面。</li>
-            <li><strong>单篇锁定</strong>：正文 AES-256-GCM 加密，密钥存在 Android Keystore、不出设备；打开、取消锁定、删除都要重新验证。</li>
-            <li><strong>截屏保护</strong>：锁定内容禁止截屏与多任务预览，普通页面不受影响。</li>
+            <li><strong>单篇锁定</strong>：正文 AES-256-GCM 加密，密钥存在 Android Keystore / macOS Keychain / Windows DPAPI，不出设备；打开、取消锁定、删除都要重新验证。</li>
+            <li><strong>截屏保护</strong>：锁定内容禁止截屏与多任务预览，普通页面不受影响；桌面端同样在窗口层屏蔽截屏（macOS <code>sharingType</code> / Windows <code>WDA_EXCLUDEFROMCAPTURE</code>）。</li>
             <li><strong>不留后路</strong>：Release 包不申请联网权限，系统备份关闭（<code>allowBackup=false</code>）。</li>
           </ul>
         </div>
@@ -227,7 +233,7 @@ pinned: true
             <div>
               <h2>下载小记</h2>
               <p class="download-meta">
-                <span data-latest-version>v1.10.0</span>
+                <span data-latest-version>v1.10.1</span>
                 <span data-latest-date>2026-11-14</span>
                 <span data-latest-size>21.1 MB</span>
                 <span>Android 7.0+ · macOS 12+ · Windows 10+</span>
@@ -246,14 +252,14 @@ pinned: true
             </a>
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">全部版本 / 校验和</a>
           </div>
-          <p class="download-note">三个平台都在 GitHub Actions 上构建：APK 用项目签名密钥；macOS 为 ad-hoc 签名（未公证），Windows 未签名。每个 Release 附带 SHA-256 校验文件。</p>
+          <p class="download-note">三个平台都在 GitHub Actions 上构建：APK 用项目签名密钥；macOS 提供 <code>.dmg</code>（ad-hoc 签名、未公证），Windows 提供 <code>.exe</code> 安装器（未签名）。每个 Release 附带 SHA-256 校验文件。</p>
         </div>
 
         <div class="grid grid-3 download-steps">
           <article class="step">
             <span class="step-no">01</span>
             <h3>下载并安装</h3>
-            <p>Android：安装包按 CPU 架构拆开，绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>，首次可能需要允许「安装未知来源应用」。macOS：解压后把 <code>xiaoji.app</code> 拖进「应用程序」，首次打开右键 →「打开」。Windows：解压整个 zip 后运行 <code>xiaoji.exe</code>。</p>
+            <p>Android：安装包按 CPU 架构拆开，绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>，首次可能需要允许「安装未知来源应用」。macOS：打开 <code>.dmg</code>，把 <code>xiaoji.app</code> 拖进「应用程序」。Windows：运行 <code>.exe</code> 安装器，按提示完成（默认装到当前用户目录，不需要管理员权限）。</p>
           </article>
           <article class="step">
             <span class="step-no">02</span>
@@ -301,7 +307,7 @@ pinned: true
         </details>
         <details>
           <summary>macOS / Windows 打不开怎么办？</summary>
-          <p>桌面包没有购买代码签名证书。macOS 首次打开被 Gatekeeper 拦住时，右键 App →「打开」，或在终端执行 <code>xattr -dr com.apple.quarantine /Applications/xiaoji.app</code>。Windows 的 SmartScreen 提示点「更多信息 → 仍要运行」。桌面端数据同样是本地 <code>.md</code> 文件，不联网、不同步。</p>
+          <p>桌面包没有购买代码签名证书，所以系统会提示「未签名 / 无法验证开发者」，这是预期行为，包本身没有损坏。macOS 14 及更早：右键 <code>xiaoji</code> →「打开」；macOS 15 及更新：双击后到「系统设置 → 隐私与安全性」点「仍要打开」。仍提示「已损坏」时在终端执行 <code>xattr -dr com.apple.quarantine /Applications/xiaoji.app</code>。Windows 的 SmartScreen 提示点「更多信息 → 仍要运行」。桌面端数据同样是本地 <code>.md</code> 文件，不联网、不同步。</p>
         </details>
         <details>
           <summary>桌面端的备份和手机通用吗？</summary>

@@ -14,21 +14,22 @@
 
 **Android**
 
-1. 下载 `private_notes-<版本>-arm64-v8a.apk`（绝大多数手机；2016 年前的老设备用 `-armeabi-v7a`），Android 7.0+，按提示允许安装未知来源应用。
+1. 下载 `xiaoji-<版本>-android-arm64-v8a.apk`（绝大多数手机；2016 年前的老设备用 `-android-armeabi-v7a`），Android 7.0+，按提示允许安装未知来源应用。
 2. 覆盖安装即可升级，笔记与设置保留。
 3. 想自动接收更新：在 [Obtainium](https://github.com/ImranR98/Obtainium) 里添加仓库 `oliverbuddy/private_notes`。
 
 **macOS**（macOS 12+，Intel / Apple 芯片通用）
 
-1. 下载 `xiaoji-<版本>-macos-universal.zip`，解压得到 `xiaoji.app`，拖进「应用程序」。
-2. 首次打开会被 Gatekeeper 拦住（未公证）：右键 App →「打开」，或执行
+1. 下载 `xiaoji-<版本>-macos-universal.dmg`，打开后把 `xiaoji.app` 拖进「应用程序」。
+2. 首次打开会被 Gatekeeper 拦住（未公证）：macOS 14 及更早右键 App →「打开」；
+   macOS 15 及更新到「系统设置 → 隐私与安全性」点「仍要打开」。也可执行
    `xattr -dr com.apple.quarantine /Applications/xiaoji.app`。
-3. 没有 Apple 开发者账号，因此不做代码签名与公证；应用代码不含任何网络依赖，不发起网络请求。
+3. 没有 Apple 开发者账号，因此只有 ad-hoc 签名、不做公证；应用代码不含任何网络依赖，不发起网络请求。
 
 **Windows**（Windows 10/11 x64）
 
-1. 下载 `xiaoji-<版本>-windows-x64.zip`，**整个解压**到任意目录（`exe` 依赖同级的 `data/` 与 `flutter_windows.dll`，单独拷 `exe` 会起不来）。
-2. 双击 `xiaoji.exe`；SmartScreen 提示时点「更多信息 → 仍要运行」（未做代码签名）。
+1. 下载 `xiaoji-<版本>-windows-x64-setup.exe`，双击按提示安装（默认装到当前用户目录，不需要管理员权限）。
+2. 首次运行 SmartScreen 会提示「未知发布者」，点「更多信息 → 仍要运行」（安装器未做代码签名）。
 
 每个 Release 附带 `.sha256` 校验文件；Android 包由 GitHub Actions 用项目签名密钥构建，
 桌面包同样在 Actions 上构建（macOS 为 ad-hoc 签名，Windows 未签名），仓库内不含任何证书。
@@ -42,12 +43,12 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.10.0 |
+| 版本 | 1.10.1 |
 | 平台 | Android（APK）· macOS（ad-hoc 签名，未公证）· Windows（未签名）；iOS 工程未生成 |
 | 测试 | `flutter test` 449 / 449 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 21MB、`app-armeabi-v7a-release.apk` 约 19MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
-| 桌面包 | `xiaoji-<版本>-macos-universal.zip`（Intel + Apple 芯片）、`xiaoji-<版本>-windows-x64.zip` |
+| 桌面包 | `xiaoji-<版本>-macos-universal.dmg`（Intel + Apple 芯片）、`xiaoji-<版本>-windows-x64-setup.exe` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
 | 桌面验证 | Dart 层 449 测试共用（含 2000 条大库用例）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
 
@@ -81,6 +82,11 @@
 **备份与恢复单入口**（自动备份开关 + 立即备份 + 导出 + 恢复，避免并列多个相似入口）·
 **自动备份到文件夹**（SAF 目录授权，每 24h 写一份，保留最近 3 份；可选口令加密）·
 Android 系统备份已关闭（`allowBackup=false` + `data_extraction_rules`）
+
+**桌面端（macOS / Windows）**：原生窗口（macOS 记忆位置与大小，最小 560×480）·
+宽屏内容限宽居中、弹层封顶 560dp · `⌘N` / `Ctrl+N` 新建 · 保存与选目录走系统对话框 ·
+备份可直接写进本机文件夹（保留最近 3 份）· 锁定内容窗口级截屏屏蔽
+（macOS `sharingType` / Windows `WDA_EXCLUDEFROMCAPTURE`）· 密钥存 Keychain / DPAPI
 
 **明确不做**：分享链接（需服务端）· 知识库 / 生成文档 · 账号与同步
 
@@ -377,7 +383,7 @@ macos/Runner/XiaojiBridge.swift               macOS 原生通道：Keychain + Cr
 windows/runner/xiaoji_bridge.{h,cpp}          Windows 原生通道：DPAPI + BCrypt AES-GCM、XJENC1、截屏保护
 docs/                                         GitHub Pages 落地页（下载 / 截图 / 隐私说明）
 .github/workflows/release.yml                 推 v* 标签 → 构建签名 APK → Release
-.github/workflows/release-desktop.yml         推 v* 标签 → 构建 macOS / Windows 包 → Release
+.github/workflows/release-desktop.yml         推 v* 标签 → 构建 macOS DMG / Windows 安装器 → Release
 .github/workflows/pages.yml                   推 main（docs/ 变更）→ 部署落地页
 ```
 
@@ -413,8 +419,13 @@ docs/                                         GitHub Pages 落地页（下载 / 
 12. **导入 Markdown 只导正文与元信息。** `.md` 里指向图片的本地相对路径不会自动搬运，
     需要图片的话请先导入笔记，再在编辑页重新插入；带 `locked: true` 的外来笔记因本机无对应密钥会被跳过。
 13. **桌面包未做商业签名。** macOS 只有 ad-hoc 签名、没有公证，Windows 完全没有签名；
-    首次打开需按上文绕过一次系统拦截。要做正式签名，需自行准备 Apple Developer 账号或
-    Windows 代码签名证书，再按 Android 的方式放进 GitHub Secrets。
+    首次打开需按上文绕过一次系统拦截（Windows 的 SmartScreen「未知发布者」同理）。
+    这个提示只能靠付费证书消除：Apple Developer Program（$99/年）+ notarytool 公证，
+    或 Windows OV/EV 代码签名证书。拿到证书后按 Android 的方式放进 GitHub Secrets。
+
+    注意 macOS 侧不要给 ad-hoc 签名加 `--options runtime`：hardened runtime 会启用库校验，
+    而 ad-hoc 签名没有 Team ID，dyld 会以「different Team IDs」拒绝加载 `FlutterMacOS.framework`，
+    表现为双击后应用立即退出（v1.10.0 的 mac 包就是这个故障，已在 1.10.1 修正）。
 14. **桌面端系统身份验证会回退到应用 PIN。** macOS 走系统凭证（触控 ID / 登录密码）；
     Windows 暂未接入 Windows Hello，`isDeviceSecure` 恒为 false，应用锁直接用 PIN。
 15. **桌面端与移动端的入口差异**：没有系统分享面板（「分享为图片」退化为另存为）、
@@ -445,7 +456,7 @@ docs/                                         GitHub Pages 落地页（下载 / 
 - [x] 存储空间分类统计 + 清理未被引用的附件
 - [x] 导入外部 Markdown（单/多选，id 冲突自动改名）
 - [x] 备份恢复改为快照语义（附件整体替换）
-- [ ] 单篇版本历史（按编辑会话归档，保留 10 版 / 30 天）
+- [x] 单篇版本历史（按编辑会话归档，保留 20 版 + 30 天）
 - [ ] 分享扩展 / 锁屏小组件
 - [x] 桌面端（macOS / Windows）工程、原生通道与 Actions 打包
 - [x] 平板适配：解除竖屏锁定、弹层限宽、顶栏与列表同宽
