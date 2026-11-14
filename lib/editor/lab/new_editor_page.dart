@@ -25,6 +25,7 @@ import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
 import '../../ui/content_frame.dart';
+import '../../ui/desktop_menu.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
@@ -3309,48 +3310,51 @@ class _NewEditorPageState extends State<NewEditorPage>
       final bool hasCell = cell != null;
       final String? tableAction = await _showContextMenu(
         position: globalPosition,
-        items: <PopupMenuEntry<String>>[
-          const PopupMenuItem<String>(value: 'editTable', child: Text('编辑表格')),
-          const PopupMenuItem<String>(
+        entries: <DesktopMenuEntry<String>>[
+          const DesktopMenuEntry<String>(label: '编辑表格', value: 'editTable'),
+          const DesktopMenuEntry<String>(
+            label: '复制表格（Markdown）',
             value: 'copyTable',
-            child: Text('复制表格（Markdown）'),
           ),
-          const PopupMenuDivider(),
           // 行列操作与 Notion / 语雀 的右键菜单一致：就地增删，不用改源码。
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '上方插入行',
             value: 'insertRowAbove',
+            dividerBefore: true,
             enabled: hasCell,
-            child: const Text('上方插入行'),
           ),
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '下方插入行',
             value: 'insertRowBelow',
             enabled: hasCell,
-            child: const Text('下方插入行'),
           ),
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '删除本行',
             value: 'deleteRow',
             // 表头行不能删：删掉表格就没有语义基准了。
             enabled: hasCell && targetRow > 0,
-            child: const Text('删除本行'),
           ),
-          const PopupMenuDivider(),
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '左侧插入列',
             value: 'insertColumnLeft',
+            dividerBefore: true,
             enabled: hasCell,
-            child: const Text('左侧插入列'),
           ),
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '右侧插入列',
             value: 'insertColumnRight',
             enabled: hasCell,
-            child: const Text('右侧插入列'),
           ),
-          PopupMenuItem<String>(
+          DesktopMenuEntry<String>(
+            label: '删除本列',
             value: 'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
-            child: const Text('删除本列'),
           ),
-          const PopupMenuDivider(),
-          const PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
+          const DesktopMenuEntry<String>(
+            label: '粘贴',
+            value: 'paste',
+            dividerBefore: true,
+          ),
         ],
       );
       if (!mounted || tableAction == null) {
@@ -3413,20 +3417,23 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     final String? action = await _showContextMenu(
       position: globalPosition,
-      items: <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
+      entries: <DesktopMenuEntry<String>>[
+        DesktopMenuEntry<String>(
+          label: '复制',
           value: 'copy',
           enabled: hasSelection,
-          child: const Text('复制'),
         ),
-        PopupMenuItem<String>(
+        DesktopMenuEntry<String>(
+          label: '剪切',
           value: 'cut',
           enabled: hasSelection,
-          child: const Text('剪切'),
         ),
-        const PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
-        const PopupMenuDivider(),
-        const PopupMenuItem<String>(value: 'selectAll', child: Text('全选')),
+        const DesktopMenuEntry<String>(label: '粘贴', value: 'paste'),
+        const DesktopMenuEntry<String>(
+          label: '全选',
+          value: 'selectAll',
+          dividerBefore: true,
+        ),
       ],
     );
     if (!mounted || action == null) {
@@ -3449,49 +3456,20 @@ class _NewEditorPageState extends State<NewEditorPage>
     _editorFocus.requestFocus();
   }
 
-  /// 弹右键菜单：弹出后与关闭后各恢复一次原选区。
+  /// 弹右键菜单。
   ///
-  /// 菜单路由会拿走焦点，SuperEditor 在焦点变化时会把选区收敛成光标 ——
-  /// 用户看到的就是「右键后蓝色选中底消失了」，接着点复制也拿不到内容。
-  /// 这里在菜单打开后的下一帧和关闭后都补一次选区，高亮与复制都保持可用。
+  /// 用 [showDesktopMenu]（Overlay 实现）而不是 `showMenu`：后者会 push 路由
+  /// 并接管焦点，SuperEditor 在焦点变化时会收起选区 —— 用户看到的就是
+  /// 「右键后蓝色选中底消失」。Overlay 菜单不动焦点，选区原样保留。
   Future<String?> _showContextMenu({
     required Offset position,
-    required List<PopupMenuEntry<String>> items,
-  }) async {
-    final RenderBox? overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (overlay == null) {
-      return null;
-    }
-    final Future<String?> menu = showMenu<String>(
+    required List<DesktopMenuEntry<String>> entries,
+  }) {
+    return showDesktopMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        overlay.size.width - position.dx,
-        overlay.size.height - position.dy,
-      ),
-      items: items,
+      globalPosition: position,
+      entries: entries,
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _restoreSelectionBeforeContextMenu();
-      }
-    });
-    // 菜单路由的焦点转移发生在建帧之后，可能又把选区收成光标；这里再多补
-    // 两拍，保证菜单开着时蓝色选中底一直在。
-    for (final int delay in const <int>[120, 400]) {
-      Future<void>.delayed(Duration(milliseconds: delay), () {
-        if (mounted) {
-          _restoreSelectionBeforeContextMenu();
-        }
-      });
-    }
-    final String? action = await menu;
-    if (mounted) {
-      _restoreSelectionBeforeContextMenu();
-    }
-    return action;
   }
 
   /// 当前选区所在的块（表格右键菜单用）。

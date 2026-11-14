@@ -266,6 +266,9 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   TextEditingController? _controller;
   FocusNode? _focusNode;
 
+  /// 本次编辑开始的时间：用来区分「内核抢焦点」和「用户点走」。
+  DateTime _editingStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   bool get _editable => widget.onCellCommitted != null;
 
   /// 每个单元格的锚点：按下时用它把指针坐标换算成「第几行第几列」。
@@ -360,22 +363,45 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     if (!_editable) {
       return;
     }
-    if (_editRow == row && _editColumn == column) {
+    if (_editRow == row && _editColumn == column && _focusNode != null) {
+      _grabFocus();
       return;
     }
-    _resetEditing();
+    // 换格：先把上一格的输入提交掉，不能丢掉用户刚敲的内容。
+    if (_editRow != null) {
+      _commitEditing();
+      if (_editRow == row && _editColumn == column) {
+        return;
+      }
+    }
 
-    final MarkdownTableCellViewModel cell = widget.viewModel.cells[row][column];
+    final List<List<MarkdownTableCellViewModel>> cells = widget.viewModel.cells;
+    if (row < 0 || row >= cells.length) {
+      return;
+    }
+    if (column < 0 || column >= cells[row].length) {
+      return;
+    }
+    final MarkdownTableCellViewModel cell = cells[row][column];
     final TextEditingController controller =
         TextEditingController(text: cell.text.toPlainText());
     final FocusNode focusNode = FocusNode(debugLabel: 'xiaoji-table-cell');
     focusNode.addListener(() {
-      // 点到正文其它位置时提交：编辑框失焦但内容不能丢。
-      if (_focusNode == focusNode && !focusNode.hasFocus) {
-        _commitEditing();
+      if (_focusNode != focusNode || focusNode.hasFocus) {
+        return;
       }
+      // 刚开编辑的 500ms 内失焦，是内核的点击处理在抢正文焦点，不是用户
+      // 想离开；直接把焦点抢回来，否则会「一点就退出编辑」。
+      if (DateTime.now().difference(_editingStartedAt) <
+          const Duration(milliseconds: 500)) {
+        focusNode.requestFocus();
+        return;
+      }
+      // 点到别的格子 / 正文：编辑框失焦但内容不能丢。
+      _commitEditing();
     });
 
+    _editingStartedAt = DateTime.now();
     setState(() {
       _editRow = row;
       _editColumn = column;
@@ -383,17 +409,39 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       _focusNode = focusNode;
     });
     widget.onCellEditingChanged?.call(true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _focusNode != focusNode) {
+    _grabFocus();
+    // 全选原内容：点开编辑后直接输入就是「替换这一格」。
+    controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: controller.text.length,
+    );
+  }
+
+  /// 连续几帧确认焦点落在单元格输入框上。
+  ///
+  /// 首次点击时，内核的鼠标手势会在同一串事件里 requestFocus 正文，
+  /// 把刚拿到的编辑框焦点踢掉 —— 表现出来就是「点进去又刷新没了」。
+  void _grabFocus() {
+    var attempts = 0;
+    void tryFocus() {
+      if (!mounted) {
         return;
       }
-      focusNode.requestFocus();
-      // 全选原内容：双击进入编辑后直接输入就是「替换这一格」。
-      controller.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: controller.text.length,
-      );
-    });
+      final FocusNode? node = _focusNode;
+      if (node == null) {
+        return;
+      }
+      if (!node.hasFocus) {
+        node.requestFocus();
+      }
+      attempts++;
+      // 多补几帧：内核的焦点请求可能晚于本帧。
+      if (attempts < 5) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => tryFocus());
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => tryFocus());
   }
 
   /// 提交编辑。[cancel] 为真时丢弃输入。

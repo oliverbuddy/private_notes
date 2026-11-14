@@ -39,4 +39,31 @@ void main() {
   test('标题与列表记号不进摘要', () {
     expect(plainSummary('## 小节\n\n- 条目\n\n1. 编号'), '小节\n条目\n编号');
   });
+
+  test('列表预览：正文开头是表格时给出迷你表格数据', () {
+    const String body =
+        '\n| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n| 香蕉 | 5 |\n| 橙子 | 2 |';
+    final List<List<String>>? rows = tablePreviewOf(body);
+    expect(rows, isNotNull);
+    // 最多 3 行（表头 + 2 行数据），分隔行被跳过。
+    expect(rows!.length, 3);
+    expect(rows.first, <String>['名称', '数量']);
+    expect(rows[1], <String>['苹果', '3']);
+  });
+
+  test('列表预览：正文不是以表格开头时返回 null', () {
+    expect(tablePreviewOf('先写一句话\n\n| a | b |\n| --- | --- |'), isNull);
+    expect(tablePreviewOf('普通正文'), isNull);
+  });
+
+  test('列表预览：剥掉单元格里的行内标记', () {
+    const String body = '| **名称** | 数量 |\n| --- | --- |\n| 苹果 | 3 |';
+    expect(tablePreviewOf(body)!.first.first, '名称');
+  });
+
+  test('去掉开头表格后剩下的正文用于文字摘要', () {
+    const String body = '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n后面的正文';
+    expect(bodyAfterLeadingTable(body).trim(), '后面的正文');
+    expect(plainSummary(bodyAfterLeadingTable(body)), '后面的正文');
+  });
 }

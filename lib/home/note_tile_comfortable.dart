@@ -9,6 +9,7 @@ import '../models/note.dart';
 import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import '../ui/pressable.dart';
+import '../ui/note_table_preview.dart';
 import '../ui/quote_block.dart';
 import '../ui/tag_chip.dart';
 import '../util/date_format.dart';
@@ -72,7 +73,13 @@ class NoteTileComfortable extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     // 锁定笔记：正文不在内存里，列表里只显示「已锁定」，不渲染摘要。
-    final summary = note.locked ? '' : plainSummary(note.body);
+    // 正文第一块是表格时，摘要换成迷你表格预览（用户要求：列表里要看得出
+    // 是表格），文字摘要则从表格之后的正文开始。
+    final List<List<String>>? tableRows =
+        note.locked ? null : tablePreviewOf(note.body);
+    final String bodyForSummary =
+        tableRows == null ? note.body : bodyAfterLeadingTable(note.body);
+    final summary = note.locked ? '' : plainSummary(bodyForSummary);
 
     // iOS 正文 17pt / 行高 1.5。
     final summaryStyle = TextStyle(
@@ -142,49 +149,56 @@ class NoteTileComfortable extends StatelessWidget {
                         ),
                       ],
                     )
-                  else if (summary.isEmpty)
-                    // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
-                    // 多一行提示会让它看起来像空笔记。
-                    thumbnailPaths.isEmpty
-                        ? Text(
-                            '（无正文）',
-                            style:
-                                summaryStyle.copyWith(color: colors.tertiary),
-                          )
-                        : const SizedBox.shrink()
-                  // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
-                  // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
-                  // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
-                  // TextSpan 的逐行底色做不出这个形状，所以摘要也按行分组。
-                  // 只有搜索时退回纯文本，因为要按关键字高亮。
-                  else if (query.isEmpty)
-                    _SummaryMarkdown(
-                      source: excerptSource(
-                        note.body,
-                        maxLines: maxSummaryLines,
-                      ),
-                      style: summaryStyle,
-                      colors: colors,
-                      // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
-                      // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
-                      // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
-                      // 都是「同字号预览 + 标题收敛 + 行数截断」。
-                      headingBoost: 0.86,
-                      maxLines: maxSummaryLines,
-                    )
-                  else
-                    Text.rich(
-                      TextSpan(
-                        children: highlightSpans(
-                          text: summary,
-                          query: query,
-                          style: summaryStyle,
-                          highlightColor: colors.searchHit,
+                  else ...<Widget>[
+                    if (tableRows != null) ...<Widget>[
+                      NoteTablePreview(rows: tableRows),
+                      if (summary.isNotEmpty) const SizedBox(height: 10),
+                    ],
+                    if (summary.isEmpty)
+                      // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
+                      // 多一行提示会让它看起来像空笔记。
+                      thumbnailPaths.isEmpty && tableRows == null
+                          ? Text(
+                              '（无正文）',
+                              style: summaryStyle.copyWith(
+                                color: colors.tertiary,
+                              ),
+                            )
+                          : const SizedBox.shrink()
+                    // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
+                    // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
+                    // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
+                    // TextSpan 的逐行底色做不出这个形状，所以摘要也按行分组。
+                    // 只有搜索时退回纯文本，因为要按关键字高亮。
+                    else if (query.isEmpty)
+                      _SummaryMarkdown(
+                        source: excerptSource(
+                          bodyForSummary,
+                          maxLines: maxSummaryLines,
                         ),
+                        style: summaryStyle,
+                        colors: colors,
+                        // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
+                        // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
+                        // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
+                        // 都是「同字号预览 + 标题收敛 + 行数截断」。
+                        headingBoost: 0.86,
+                        maxLines: maxSummaryLines,
+                      )
+                    else
+                      Text.rich(
+                        TextSpan(
+                          children: highlightSpans(
+                            text: summary,
+                            query: query,
+                            style: summaryStyle,
+                            highlightColor: colors.searchHit,
+                          ),
+                        ),
+                        maxLines: maxSummaryLines,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: maxSummaryLines,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  ],
                   if (thumbnailPaths.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 10),
                     Row(

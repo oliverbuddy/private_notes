@@ -264,6 +264,75 @@ String plainSummary(String markdown) {
   return lines.join('\n');
 }
 
+/// 列出正文开头的表格，给列表卡片做「迷你表格」预览。
+///
+/// 只在正文第一块是 GFM 表格时返回（用户要求：详情顶部是表格，列表里要
+/// 看得出是表格，而不是一串被压平的摘要文字）。最多 3 行 × 4 列，
+/// 分隔行自动跳过，单元格里的行内标记会被剥掉。
+List<List<String>>? tablePreviewOf(String markdown) {
+  if (markdown.trim().isEmpty) {
+    return null;
+  }
+  final List<String> lines = markdown.split('\n');
+  var start = -1;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim().isEmpty) {
+      continue;
+    }
+    start = i;
+    break;
+  }
+  if (start < 0 || _tableBlockEnd(lines, start) <= start) {
+    return null;
+  }
+  final int end = _tableBlockEnd(lines, start);
+  final List<List<String>> rows = <List<String>>[];
+  for (var i = start; i < end && rows.length < 3; i++) {
+    if (i == start + 1) {
+      // 分隔行。
+      continue;
+    }
+    final List<String> rawCells = _splitTableCells(lines[i].trim());
+    // 首尾管道会产生空单元格，去掉它们；中间的空单元格保留（列要对齐）。
+    while (rawCells.isNotEmpty && rawCells.first.trim().isEmpty) {
+      rawCells.removeAt(0);
+    }
+    while (rawCells.isNotEmpty && rawCells.last.trim().isEmpty) {
+      rawCells.removeLast();
+    }
+    final List<String> cells = rawCells
+        .take(4)
+        .map((String cell) => plainSummary(cell))
+        .toList(growable: false);
+    if (cells.every((String cell) => cell.isEmpty)) {
+      continue;
+    }
+    rows.add(cells);
+  }
+  return rows.isEmpty ? null : rows;
+}
+
+/// 去掉正文开头的表格，返回剩下的正文（列表摘要用）。
+String bodyAfterLeadingTable(String markdown) {
+  final List<String> lines = markdown.split('\n');
+  var start = -1;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim().isEmpty) {
+      continue;
+    }
+    start = i;
+    break;
+  }
+  if (start < 0) {
+    return markdown;
+  }
+  final int end = _tableBlockEnd(lines, start);
+  if (end <= start) {
+    return markdown;
+  }
+  return lines.sublist(end).join('\n');
+}
+
 /// 表格块结束下标（不含）。[start] 不是「表头 + 分隔行」形态时返回 -1。
 ///
 /// 摘要是「扫一眼」用的，不引入完整的 Markdown 解析：只认 GFM 的
