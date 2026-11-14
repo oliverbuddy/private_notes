@@ -50,7 +50,7 @@
     <section class="hero">
       <div class="container hero-inner">
         <div class="hero-copy">
-          <p class="eyebrow">本地优先 · Android 7.0+ · 非商业授权</p>
+          <p class="eyebrow">本地优先 · Android / macOS / Windows · 非商业授权</p>
           <h1>你的笔记，<br>只属于你。</h1>
           <p class="lede">无账号、无网络、无同步。像便签一样快，像文件夹一样透明 —— 所有内容都是设备上的一群 <code>.md</code> 文件。</p>
           <div class="hero-actions">
@@ -63,7 +63,7 @@
           <p class="hero-meta">
             <span data-latest-version>v1.9.3</span>
             <span data-latest-size>21.1 MB</span>
-            <span>签名 APK</span>
+            <span>Android 签名 APK · macOS / Windows 桌面包</span>
           </p>
         </div>
 
@@ -230,7 +230,7 @@ pinned: true
                 <span data-latest-version>v1.9.3</span>
                 <span data-latest-date>2026-11-14</span>
                 <span data-latest-size>21.1 MB</span>
-                <span>Android 7.0+</span>
+                <span>Android 7.0+ · macOS 12+ · Windows 10+</span>
               </p>
             </div>
           </div>
@@ -238,16 +238,22 @@ pinned: true
             <a class="btn btn-primary" data-download-link href="https://github.com/oliverbuddy/private_notes/releases/latest">
               下载 APK
             </a>
+            <a class="btn btn-ghost" data-macos-download href="https://github.com/oliverbuddy/private_notes/releases/latest">
+              macOS
+            </a>
+            <a class="btn btn-ghost" data-windows-download href="https://github.com/oliverbuddy/private_notes/releases/latest">
+              Windows
+            </a>
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">全部版本 / 校验和</a>
           </div>
-          <p class="download-note">APK 由 GitHub Actions 使用项目签名密钥构建；每个 Release 附带 SHA-256 校验文件。</p>
+          <p class="download-note">三个平台都在 GitHub Actions 上构建：APK 用项目签名密钥；macOS 为 ad-hoc 签名（未公证），Windows 未签名。每个 Release 附带 SHA-256 校验文件。</p>
         </div>
 
         <div class="grid grid-3 download-steps">
           <article class="step">
             <span class="step-no">01</span>
             <h3>下载并安装</h3>
-            <p>安装包按 CPU 架构拆开：绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>。安装时首次可能需要允许「安装未知来源应用」。</p>
+            <p>Android：安装包按 CPU 架构拆开，绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>，首次可能需要允许「安装未知来源应用」。macOS：解压后把 <code>xiaoji.app</code> 拖进「应用程序」，首次打开右键 →「打开」。Windows：解压整个 zip 后运行 <code>xiaoji.exe</code>。</p>
           </article>
           <article class="step">
             <span class="step-no">02</span>
@@ -291,7 +297,15 @@ pinned: true
         </details>
         <details>
           <summary>有 iOS 版本吗？</summary>
-          <p>暂时没有。当前只提供 Android APK，iOS 工程尚未生成。</p>
+          <p>暂时没有。当前提供 Android、macOS、Windows 三个平台；iOS 需要 Apple 开发者账号做签名，工程尚未生成。</p>
+        </details>
+        <details>
+          <summary>macOS / Windows 打不开怎么办？</summary>
+          <p>桌面包没有购买代码签名证书。macOS 首次打开被 Gatekeeper 拦住时，右键 App →「打开」，或在终端执行 <code>xattr -dr com.apple.quarantine /Applications/xiaoji.app</code>。Windows 的 SmartScreen 提示点「更多信息 → 仍要运行」。桌面端数据同样是本地 <code>.md</code> 文件，不联网、不同步。</p>
+        </details>
+        <details>
+          <summary>桌面端的备份和手机通用吗？</summary>
+          <p>通用。导出的 zip / 加密 <code>.xiaoji</code> 包在三个平台之间可以直接恢复。但锁定笔记的密钥绑定本机（Android Keystore / macOS Keychain / Windows DPAPI），跨设备迁移请用「导出（含锁定笔记，明文）」后重新锁定。</p>
         </details>
         <details>
           <summary>可以商用吗？</summary>

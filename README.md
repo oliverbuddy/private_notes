@@ -4,17 +4,34 @@
 无账号、无网络、无同步 —— 内容就是一群 `.md` 文件。
 
 [官网与截图](https://oliverbuddy.github.io/private_notes/) ·
-[下载最新版 APK](https://github.com/oliverbuddy/private_notes/releases/latest) ·
+[下载](https://github.com/oliverbuddy/private_notes/releases/latest) ·
 [问题反馈](https://github.com/oliverbuddy/private_notes/issues) ·
 [讨论区](https://github.com/oliverbuddy/private_notes/discussions)
 
 ## 安装
 
-1. 从 [Releases](https://github.com/oliverbuddy/private_notes/releases/latest) 下载 `private_notes-<版本>-arm64-v8a.apk`（绝大多数手机；2016 年前的老设备用 `-armeabi-v7a`），Android 7.0+，按提示允许安装未知来源应用。
+同一份 Release 提供 Android、macOS、Windows 三个平台，按需下载。
+
+**Android**
+
+1. 下载 `private_notes-<版本>-arm64-v8a.apk`（绝大多数手机；2016 年前的老设备用 `-armeabi-v7a`），Android 7.0+，按提示允许安装未知来源应用。
 2. 覆盖安装即可升级，笔记与设置保留。
 3. 想自动接收更新：在 [Obtainium](https://github.com/ImranR98/Obtainium) 里添加仓库 `oliverbuddy/private_notes`。
 
-每个 Release 附带 `.sha256` 校验文件；安装包由 GitHub Actions 用项目签名密钥构建。
+**macOS**（macOS 12+，Intel / Apple 芯片通用）
+
+1. 下载 `xiaoji-<版本>-macos-universal.zip`，解压得到 `xiaoji.app`，拖进「应用程序」。
+2. 首次打开会被 Gatekeeper 拦住（未公证）：右键 App →「打开」，或执行
+   `xattr -dr com.apple.quarantine /Applications/xiaoji.app`。
+3. 没有 Apple 开发者账号，因此不做代码签名与公证；应用代码不含任何网络依赖，不发起网络请求。
+
+**Windows**（Windows 10/11 x64）
+
+1. 下载 `xiaoji-<版本>-windows-x64.zip`，**整个解压**到任意目录（`exe` 依赖同级的 `data/` 与 `flutter_windows.dll`，单独拷 `exe` 会起不来）。
+2. 双击 `xiaoji.exe`；SmartScreen 提示时点「更多信息 → 仍要运行」（未做代码签名）。
+
+每个 Release 附带 `.sha256` 校验文件；Android 包由 GitHub Actions 用项目签名密钥构建，
+桌面包同样在 Actions 上构建（macOS 为 ad-hoc 签名，Windows 未签名），仓库内不含任何证书。
 
 许可：[PolyForm Noncommercial 1.0.0](LICENSE)。**允许个人使用、学习、修改与分发，禁止商业使用。**
 商业授权请联系 [qiwei0727@gmail.com](mailto:qiwei0727@gmail.com?subject=%E5%B0%8F%E8%AE%B0%E5%95%86%E4%B8%9A%E6%8E%88%E6%9D%83)。
@@ -26,11 +43,13 @@
 | 项 | 值 |
 |---|---|
 | 版本 | 1.9.3 |
-| 平台 | Android（已出 APK）；iOS 工程未生成 |
+| 平台 | Android（APK）· macOS（ad-hoc 签名，未公证）· Windows（未签名）；iOS 工程未生成 |
 | 测试 | `flutter test` 440 / 440 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 21MB、`app-armeabi-v7a-release.apk` 约 19MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
+| 桌面包 | `xiaoji-<版本>-macos-universal.zip`（Intel + Apple 芯片）、`xiaoji-<版本>-windows-x64.zip` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
+| 桌面验证 | Dart 层 440 测试共用（含 2000 条大库用例）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
 
 ## 功能
 
@@ -302,9 +321,14 @@ flutter build apk --release --split-per-abi --target-platform android-arm,androi
 # 测试包（debug）同样用正式签名，可直接覆盖真机上的正式版做回归：
 flutter build apk --debug
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
+
+# 桌面端（在对应系统上执行；正式包由 GitHub Actions 构建，本地无需证书）
+flutter build macos --release     # 需要 Xcode
+flutter build windows --release   # 需要 Visual Studio「使用 C++ 的桌面开发」
 ```
 
 环境：Flutter 3.47.9 / Dart 3.13.7 / Android SDK 36 + build-tools 36 / JDK 18。
+桌面端：macOS 12+ / Windows 10+，CI 用 `macos-latest` 与 `windows-latest`。
 
 **跑测试前要清代理**，否则 `flutter_tester` 的 localhost WebSocket 会被拦：
 
@@ -339,6 +363,7 @@ lib/settings/about_page.dart                  关于页（版本 / 许可 / 联�
 lib/util/app_info.dart                        从已安装 APK 读取版本号与包名
 lib/settings/backup_sheets.dart               备份与恢复弹层、恢复来源选择（纯展示，动作交回页面）
 lib/ui/content_frame.dart                     页面内容限宽居中（平板 / PC 端复用同一断点）
+lib/platform/platform_features.dart           平台能力探测（桌面 / 移动端分支的唯一判断点）
 lib/settings/trash_page.dart                  回收站（恢复 / 彻底删除 / 清空）
 lib/ui/snack.dart                             统一底部提示（4 秒自动消失）
 lib/util/native_zip.dart                      原生流式 zip / SAF 保存
@@ -348,8 +373,11 @@ android/app/src/main/kotlin/com/xiaoji/xiaoji/{BackupBridge,SecurityBridge}.kt
                                               原生 zip / 解压 / SAF 保存与目录写回、Keyguard / Keystore / FLAG_SECURE
 android/app/src/main/kotlin/com/xiaoji/xiaoji/NewNoteWidgetProvider.kt
                                               桌面小组件「记一条」：RemoteViews + 直达编辑页的 PendingIntent
+macos/Runner/XiaojiBridge.swift               macOS 原生通道：Keychain + CryptoKit AES-GCM、XJENC1、截屏保护
+windows/runner/xiaoji_bridge.{h,cpp}          Windows 原生通道：DPAPI + BCrypt AES-GCM、XJENC1、截屏保护
 docs/                                         GitHub Pages 落地页（下载 / 截图 / 隐私说明）
 .github/workflows/release.yml                 推 v* 标签 → 构建签名 APK → Release
+.github/workflows/release-desktop.yml         推 v* 标签 → 构建 macOS / Windows 包 → Release
 .github/workflows/pages.yml                   推 main（docs/ 变更）→ 部署落地页
 ```
 
@@ -384,6 +412,20 @@ docs/                                         GitHub Pages 落地页（下载 / 
     系统最快 30 分钟刷新一次；想马上生效可重新添加一次组件。
 12. **导入 Markdown 只导正文与元信息。** `.md` 里指向图片的本地相对路径不会自动搬运，
     需要图片的话请先导入笔记，再在编辑页重新插入；带 `locked: true` 的外来笔记因本机无对应密钥会被跳过。
+13. **桌面包未做商业签名。** macOS 只有 ad-hoc 签名、没有公证，Windows 完全没有签名；
+    首次打开需按上文绕过一次系统拦截。要做正式签名，需自行准备 Apple Developer 账号或
+    Windows 代码签名证书，再按 Android 的方式放进 GitHub Secrets。
+14. **桌面端系统身份验证会回退到应用 PIN。** macOS 走系统凭证（触控 ID / 登录密码）；
+    Windows 暂未接入 Windows Hello，`isDeviceSecure` 恒为 false，应用锁直接用 PIN。
+15. **桌面端与移动端的入口差异**：没有系统分享面板（「分享为图片」退化为另存为）、
+    没有桌面小组件与系统分享导入；「相册」在桌面走系统文件选择器，无摄像头入口。
+16. **桌面端关闭了 macOS App Sandbox。** 因为不走 App Store，且「外置备份文件夹」需要跨启动保留访问权限
+    （沙盒下必须用 security-scoped bookmark）。关闭沙盒意味着系统层面不再限制文件访问范围，
+    隐私边界完全由应用代码保证：不读取笔记目录以外的文件（用户主动选择的导入/导出路径除外），
+    依赖里没有任何网络库，代码中不发起网络请求。
+17. **锁定笔记与备份口令的密钥按平台保存**（Android Keystore / macOS Keychain / Windows DPAPI），
+    不随笔记文件迁移；换平台或重装后需用「导出（含锁定笔记，明文）」重新导入并重新锁定。
+    备份包（`.xiaoji`）本身是跨平台互通的：XJENC1 + PBKDF2-HMAC-SHA1 + AES-256-GCM。
 
 ## 路线图
 
@@ -405,4 +447,7 @@ docs/                                         GitHub Pages 落地页（下载 / 
 - [x] 备份恢复改为快照语义（附件整体替换）
 - [ ] 单篇版本历史（按编辑会话归档，保留 10 版 / 30 天）
 - [ ] 分享扩展 / 锁屏小组件
+- [x] 桌面端（macOS / Windows）工程、原生通道与 Actions 打包
+- [x] 平板适配：解除竖屏锁定、弹层限宽、顶栏与列表同宽
+- [ ] 平板 / 桌面双栏（列表 + 正文并排；需把编辑页从路由改为可嵌入面板）
 - [ ] iOS 平台工程与 Info.plist 配置

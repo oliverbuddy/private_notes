@@ -52,6 +52,24 @@ String backupFolderLabel(String? treeUri) {
   try {
     final String decoded = Uri.decodeComponent(treeUri);
     final String tail = decoded.split(':').last;
+    // 桌面端存的是普通文件系统路径（含盘符或 / 开头），
+    // 路径可能很长，只显示末两级，避免把设置页的行撑开。
+    final bool looksLikePath = treeUri.startsWith('/') ||
+        treeUri.contains('\\') ||
+        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(treeUri);
+    if (looksLikePath) {
+      final List<String> segments = tail
+          .split(RegExp(r'[\\/]'))
+          .where((String item) => item.isNotEmpty)
+          .toList();
+      if (segments.isEmpty) {
+        return '已选择';
+      }
+      if (segments.length <= 2) {
+        return segments.join('/');
+      }
+      return '…/${segments.sublist(segments.length - 2).join('/')}';
+    }
     // `primary:Download/Xiaoji` 里的卷名在冒号前，冒号后就是用户选的路径，
     // 所以这里原样拼回去即可（例如 `Download/Xiaoji`）。
     final List<String> parts =

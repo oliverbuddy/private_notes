@@ -1,4 +1,4 @@
-// 落地页的少量动态信息：最新版本号、大小、日期与 APK 直链。
+// 落地页的少量动态信息：最新版本号、大小、日期与各平台直链。
 // 拿不到 GitHub API（离线 / 限流）时保持 HTML 里的静态兜底文案。
 (function () {
   'use strict';
@@ -39,6 +39,24 @@
     });
   }
 
+  function link(selector, url) {
+    if (!url) {
+      return;
+    }
+    document.querySelectorAll(selector).forEach(function (el) {
+      el.setAttribute('href', url);
+    });
+  }
+
+  function findAsset(assets, pattern) {
+    for (var i = 0; i < assets.length; i++) {
+      if (pattern.test(assets[i].name)) {
+        return assets[i];
+      }
+    }
+    return null;
+  }
+
   fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
     headers: { Accept: 'application/vnd.github+json' },
   })
@@ -63,10 +81,14 @@
       fill('[data-latest-date]', formatDate(release.published_at));
       if (apk) {
         fill('[data-latest-size]', formatSize(apk.size));
-        document.querySelectorAll('[data-download-link]').forEach(function (link) {
-          link.setAttribute('href', apk.browser_download_url);
-        });
+        link('[data-download-link]', apk.browser_download_url);
       }
+
+      // 桌面端：macOS 通用包、Windows x64 包。缺失时保持指向 Releases 页。
+      var mac = findAsset(assets, /-macos-universal\.zip$/i);
+      var win = findAsset(assets, /-windows-x64\.zip$/i);
+      link('[data-macos-download]', mac && mac.browser_download_url);
+      link('[data-windows-download]', win && win.browser_download_url);
     })
     .catch(function () {
       // 保持静态兜底：链接仍指向 releases/latest 页面。
