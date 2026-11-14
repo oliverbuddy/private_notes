@@ -258,7 +258,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _showNoteActions(Note note) async {
+  Future<void> _showNoteActions(Note note, {Offset? anchorPosition}) async {
     // 长按是「重」手势，给一次轻震反馈，用户能确认按到了（与系统列表一致）。
     HapticFeedback.mediumImpact();
     // 列表长按与详情「更多」共用同一份动作定义（图标、文案、顺序一致），
@@ -270,6 +270,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final action = await showXiaojiActionSheet<String>(
       context: context,
       title: menuTitle,
+      // 桌面右键：菜单贴着指针弹出（左侧列表的动作菜单不再从底部升起）。
+      anchor: anchorPosition == null
+          ? null
+          : Rect.fromLTWH(anchorPosition.dx, anchorPosition.dy, 0, 0),
       actions: buildNoteActions(note),
     );
     if (action == null || !mounted) {
@@ -389,12 +393,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// 标签筛选按钮的位置锚点：桌面端弹出贴住按钮的小菜单。
+  final GlobalKey _tagMenuKey = GlobalKey();
+
   /// 标题栏标签按钮 → 「按标签筛选」弹层。
   ///
   /// 点选即生效并收起弹层：筛选是个轻动作，不值得再多按一次「确定」。
   /// 标签的改名 / 合并 / 删除收在这层右上角的「管理」里 —— 在哪里用就在
   /// 哪里管，不必再绕到设置页。
   Future<void> _showTagFilterSheet() async {
+    // 桌面端：菜单贴着标签按钮弹出（macOS / Windows 原生菜单形态），
+    // 不再从屏幕底部升起一个全宽面板。
+    if (PlatformFeatures.isDesktop) {
+      final List<String> tags = _repo.tags;
+      final String? picked = await showXiaojiActionSheet<String>(
+        context: context,
+        title: '按标签筛选',
+        anchor: anchorRectOf(_tagMenuKey),
+        actions: <SheetAction<String>>[
+          SheetAction<String>(
+            value: '__all__',
+            label: '全部',
+            icon: Icons.inbox_outlined,
+            selected: _repo.activeTag == null,
+          ),
+          for (final String tag in tags)
+            SheetAction<String>(
+              value: tag,
+              label: '#$tag',
+              icon: Icons.sell_outlined,
+              selected: _repo.activeTag == tag,
+            ),
+          if (tags.isNotEmpty)
+            const SheetAction<String>(
+              value: '__manage__',
+              label: '管理标签',
+              icon: Icons.settings_outlined,
+            ),
+        ],
+      );
+      if (picked == null || !mounted) {
+        return;
+      }
+      if (picked == '__manage__') {
+        hideSnack(context);
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (BuildContext context) => TagsPage(repository: _repo),
+          ),
+        );
+        return;
+      }
+      _repo.setActiveTag(picked == '__all__' ? null : picked);
+      return;
+    }
     final bool? manage = await showXiaojiSheet<bool>(
       context: context,
       builder: (BuildContext sheetContext) {
@@ -828,11 +880,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           // 一眼可见，也不再用一整行筛选条占掉列表高度。
           if (activeTag == null)
             _IconAction(
+              key: _tagMenuKey,
               icon: Icons.sell_outlined,
               onTap: _showTagFilterSheet,
             )
           else
-            _buildTagPill(colors, activeTag),
+            KeyedSubtree(
+              key: _tagMenuKey,
+              child: _buildTagPill(colors, activeTag),
+            ),
           _IconAction(
             icon: Icons.search_rounded,
             onTap: _enterSearch,
@@ -1165,6 +1221,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             hasAttachment: !note.locked && hasLocalAttachment(note.body),
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
+            onSecondaryTapAt: (Offset pos) =>
+                _showNoteActions(note, anchorPosition: pos),
           );
         } else {
           tile = NoteTileComfortable(
@@ -1178,6 +1236,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             hiddenThumbnailCount: images.length > 3 ? images.length - 3 : 0,
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
+            onSecondaryTapAt: (Offset pos) =>
+                _showNoteActions(note, anchorPosition: pos),
           );
         }
 
@@ -1217,6 +1277,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
 class _IconAction extends StatelessWidget {
   const _IconAction({
+    super.key,
     required this.icon,
     required this.onTap,
     this.iconSize = AppIcon.action,

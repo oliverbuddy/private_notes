@@ -43,6 +43,7 @@ class NoteTileComfortable extends StatelessWidget {
     this.selected = false,
     required this.onTap,
     required this.onLongPress,
+    this.onSecondaryTapAt,
   });
 
   final Note note;
@@ -63,6 +64,9 @@ class NoteTileComfortable extends StatelessWidget {
 
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+
+  /// 桌面端右键位置：动作菜单锚定在指针处（主流桌面菜单形态）。
+  final void Function(Offset globalPosition)? onSecondaryTapAt;
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +101,9 @@ class NoteTileComfortable extends StatelessWidget {
             onLongPress: onLongPress,
             // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
             onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
+            onSecondaryTapDown: PlatformFeatures.isDesktop
+                ? (TapDownDetails d) => onSecondaryTapAt?.call(d.globalPosition)
+                : null,
             // 卡片不缩放，整块轻微压暗/提亮（鸿蒙卡片的按压手感）；
             // 用蒙层而不是整体降透明度：正文和缩略图不会跟着闪。
             pressedScale: 1,

@@ -21,6 +21,7 @@ class AppPressable extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.onSecondaryTap,
+    this.onSecondaryTapDown,
     this.behavior = HitTestBehavior.opaque,
     this.pressedOpacity = 0.55,
     this.pressedScale = 0.98,
@@ -34,6 +35,9 @@ class AppPressable extends StatefulWidget {
 
   /// 鼠标右键（桌面端）：主流桌面 App 用右键代替移动端的长按菜单。
   final VoidCallback? onSecondaryTap;
+
+  /// 右键按下位置：桌面端动作菜单要锚定在指针处，而不是屏幕底部。
+  final void Function(TapDownDetails details)? onSecondaryTapDown;
 
   final HitTestBehavior behavior;
 
@@ -118,6 +122,7 @@ class _AppPressableState extends State<AppPressable> {
           onTap: widget.enabled ? widget.onTap : null,
           onLongPress: widget.enabled ? widget.onLongPress : null,
           onSecondaryTap: widget.enabled ? widget.onSecondaryTap : null,
+          onSecondaryTapDown: widget.enabled ? widget.onSecondaryTapDown : null,
           child: AnimatedOpacity(
             opacity: active ? widget.pressedOpacity : 1,
             duration: AppMotion.fast,

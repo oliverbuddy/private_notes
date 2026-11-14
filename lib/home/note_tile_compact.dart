@@ -30,6 +30,7 @@ class NoteTileCompact extends StatelessWidget {
     this.selected = false,
     required this.onTap,
     required this.onLongPress,
+    this.onSecondaryTapAt,
   });
   final Note note;
   final String query;
@@ -46,6 +47,9 @@ class NoteTileCompact extends StatelessWidget {
   final bool hasAttachment;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+
+  /// 桌面端右键位置：动作菜单锚定在指针处。
+  final void Function(Offset globalPosition)? onSecondaryTapAt;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +91,9 @@ class NoteTileCompact extends StatelessWidget {
         onLongPress: onLongPress,
         // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
         onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
+        onSecondaryTapDown: PlatformFeatures.isDesktop
+            ? (TapDownDetails d) => onSecondaryTapAt?.call(d.globalPosition)
+            : null,
         // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
         pressedColor: AppPress.overlay(context),
         pressedOpacity: 1,

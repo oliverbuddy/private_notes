@@ -1804,12 +1804,17 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
+  /// 「⋯」按钮的位置锚点：桌面端动作菜单贴在它下方弹出。
+  final GlobalKey _moreMenuKey = GlobalKey();
+
   Future<void> _showEditorMenu() async {
     // 与主页长按共用同一个动作菜单组件和同一份动作定义：标题、行高、
     // 图标、顺序、分隔线全部一致，不再各页面手写一套。
     final String? action = await showXiaojiActionSheet<String>(
       context: context,
       title: '',
+      // 桌面端锚定在「⋯」按钮下方（主流桌面菜单形态），移动端仍走底部菜单。
+      anchor: anchorRectOf(_moreMenuKey),
       actions: buildNoteActions(_currentNote, detail: true),
     );
     if (action == null || !mounted) {
@@ -3600,6 +3605,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                   // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
                   // 高频动作），顶栏只留笔记级操作「⋯」。
                   AppIconButton(
+                    key: _moreMenuKey,
                     icon: Icons.more_horiz_rounded,
                     onTap: _showEditorMenu,
                     tooltip: '更多',
