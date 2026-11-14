@@ -1672,13 +1672,48 @@ class _NewEditorPageState extends State<NewEditorPage>
   ///
   /// 只在标题数 ≥ 2 时出现（见 [_buildHeader]）：两行以内的小记不需要导航，
   /// 多出来的图标只会增加「这块是干什么的」的困惑。
+  ///
+  /// 桌面端用与「⋯」同一套锚定菜单（贴住按钮、右侧对齐、同样式），
+  /// 移动端仍是底部弹层。
   Future<void> _showOutline() async {
     if (_outline.isEmpty) {
       return;
     }
-    FocusScope.of(context).unfocus();
     final List<_OutlineEntry> entries = List<_OutlineEntry>.of(_outline);
-    final String? picked = await showXiaojiSheet<String>(
+    String? picked;
+    if (PlatformFeatures.isDesktop) {
+      FocusScope.of(context).unfocus();
+      picked = await showDesktopMenu<String>(
+        context: context,
+        anchor: anchorRectOf(_outlineKey),
+        minWidth: 200,
+        maxWidth: 340,
+        entries: <DesktopMenuEntry<String>>[
+          for (final _OutlineEntry entry in entries)
+            DesktopMenuEntry<String>(
+              label: entry.title,
+              value: entry.nodeId,
+              // 层级用缩进表达：与详情里的标题层级对应，不加连线。
+              indent: (entry.level - 1) * 14,
+            ),
+        ],
+      );
+    } else {
+      picked = await _showOutlineSheet(entries);
+    }
+    if (picked == null || !mounted) {
+      return;
+    }
+    final DocumentNode? node = _document.getNodeById(picked);
+    if (node == null) {
+      return;
+    }
+    _jumpToDocumentNode(node);
+  }
+
+  /// 移动端目录：底部弹层（桌面端见 [_showOutline]）。
+  Future<String?> _showOutlineSheet(List<_OutlineEntry> entries) {
+    return showXiaojiSheet<String>(
       context: context,
       builder: (BuildContext sheetContext) {
         final AppColors colors = AppColors.of(sheetContext);
@@ -1746,14 +1781,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         );
       },
     );
-    if (picked == null || !mounted) {
-      return;
-    }
-    final DocumentNode? node = _document.getNodeById(picked);
-    if (node == null) {
-      return;
-    }
-    _jumpToDocumentNode(node);
   }
 
   /// 把目标标题滚到视口上方。
@@ -1807,6 +1834,9 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   /// 「⋯」按钮的位置锚点：桌面端动作菜单贴在它下方弹出。
   final GlobalKey _moreMenuKey = GlobalKey();
+
+  /// 「目录」按钮的位置锚点：桌面端目录菜单与「⋯」用同一套锚定样式。
+  final GlobalKey _outlineKey = GlobalKey();
 
   Future<void> _showEditorMenu() async {
     // 与主页长按共用同一个动作菜单组件和同一份动作定义：标题、行高、
@@ -3834,6 +3864,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                       // 「文档 + 列表」：比旧版的 toc 更见名知义 —— 一眼能看出
                       // 是「按标题列出的全文导航」，与语雀/Notion 的目录图标
                       // 同一语义。
+                      key: _outlineKey,
                       icon: Icons.list_alt_rounded,
                       onTap: _showOutline,
                       tooltip: '目录',

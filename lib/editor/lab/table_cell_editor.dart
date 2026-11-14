@@ -454,12 +454,17 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     bool moveNext = false,
     bool movePrevious = false,
     bool moveDown = false,
+    bool moveUp = false,
     bool cancel = false,
   }) {
     final int? row = _editRow;
     final int? column = _editColumn;
     final TextEditingController? controller = _controller;
     if (row == null || column == null || controller == null) {
+      return;
+    }
+    // 第一行再按 ↑：表格外没有格子，保持编辑态，不关闭。
+    if (moveUp && row == 0) {
       return;
     }
 
@@ -477,6 +482,9 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       nextRow = row + 1;
       nextColumn = column;
       addRow = nextRow >= rowCount;
+    } else if (moveUp) {
+      nextRow = row - 1;
+      nextColumn = column;
     } else if (moveNext || movePrevious) {
       final int index = row * columnCount + column + (moveNext ? 1 : -1);
       if (index >= 0 && index < rowCount * columnCount) {
@@ -652,6 +660,11 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
             _commitEditing(movePrevious: true),
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             _commitEditing(cancel: true),
+        // ↑ / ↓ 在单元格之间上下移动（Excel / 语雀 的录入方式）。
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            _commitEditing(moveDown: true),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            _commitEditing(moveUp: true),
       },
       child: DecoratedBox(
         decoration: BoxDecoration(

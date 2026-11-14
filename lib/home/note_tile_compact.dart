@@ -88,13 +88,9 @@ class NoteTileCompact extends StatelessWidget {
       ),
       child: AppPressable(
         onTap: onTap,
-        // 桌面端：长按与右键都是「贴着指针」的菜单，不再弹移动端底部面板
-        // （用户反馈「长按弹窗改成右键一样」）。
+        // 桌面端只用右键菜单（主流桌面列表的约定）：长按不再弹任何东西，
+        // 避免「按住不放」误触菜单；移动端仍是长按。
         onLongPress: PlatformFeatures.isDesktop ? null : onLongPress,
-        onLongPressStart: PlatformFeatures.isDesktop
-            ? (LongPressStartDetails d) =>
-                onSecondaryTapAt?.call(d.globalPosition)
-            : null,
         // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
         onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
         onSecondaryTapDown: PlatformFeatures.isDesktop
