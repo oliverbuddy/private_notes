@@ -25,7 +25,6 @@ import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
 import '../../ui/content_frame.dart';
-import '../../ui/desktop_menu.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
@@ -1683,24 +1682,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     String? picked;
     if (PlatformFeatures.isDesktop) {
       FocusScope.of(context).unfocus();
-      picked = await showDesktopMenu<String>(
-        context: context,
-        anchor: anchorRectOf(_outlineKey),
-        header: '目录',
-        maxWidth: 280,
-        entries: <DesktopMenuEntry<String>>[
-          for (final _OutlineEntry entry in entries)
-            DesktopMenuEntry<String>(
-              label: entry.title,
-              value: entry.nodeId,
-              // 分级：一级标题更大更重，二级/三级缩进 + 次级色，
-              // 一眼能看出标题层级（用户反馈原来没有分级感）。
-              indent: (entry.level - 1) * 16,
-              strong: entry.level == 1,
-              muted: entry.level > 1,
-            ),
-        ],
-      );
+      picked = await _showOutlineMenu(entries);
     } else {
       picked = await _showOutlineSheet(entries);
     }
@@ -1712,6 +1694,70 @@ class _NewEditorPageState extends State<NewEditorPage>
       return;
     }
     _jumpToDocumentNode(node);
+  }
+
+  /// 桌面端目录：与顶栏「⋯」用同一套 PopupMenu（同样的圆角、描边与动画）。
+  ///
+  /// 标题按层级分级：一级更大更重、主色；二级 / 三级缩进并用次级色。
+  Future<String?> _showOutlineMenu(List<_OutlineEntry> entries) {
+    final RenderObject? overlayObject =
+        Overlay.of(context).context.findRenderObject();
+    if (overlayObject is! RenderBox) {
+      return Future<String?>.value();
+    }
+    final AppColors colors = AppColors.of(context);
+    final Rect anchor =
+        anchorRectOf(_outlineKey) ?? const Rect.fromLTWH(0, 0, 0, 44);
+    return showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        anchor.left,
+        anchor.bottom + 2,
+        overlayObject.size.width - anchor.right,
+        overlayObject.size.height - anchor.bottom,
+      ),
+      color: colors.page,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.block),
+        side: BorderSide(color: colors.chipBorder, width: 0.5),
+      ),
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          enabled: false,
+          height: 34,
+          child: Text(
+            '目录',
+            style: TextStyle(
+              fontSize: AppFontSize.caption,
+              color: colors.tertiary,
+            ),
+          ),
+        ),
+        for (final _OutlineEntry entry in entries)
+          PopupMenuItem<String>(
+            value: entry.nodeId,
+            height: entry.level == 1 ? 42 : 38,
+            child: Padding(
+              padding: EdgeInsets.only(left: (entry.level - 1) * 16.0),
+              child: Text(
+                entry.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: entry.level == 1
+                      ? AppFontSize.body
+                      : AppFontSize.labelLg,
+                  fontWeight: entry.level == 1
+                      ? AppWeight.medium
+                      : AppWeight.regular,
+                  color: entry.level == 1 ? colors.text : colors.secondary,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   /// 移动端目录：底部弹层（桌面端见 [_showOutline]）。
@@ -3346,70 +3392,48 @@ class _NewEditorPageState extends State<NewEditorPage>
           : 'left';
       final String? tableAction = await _showContextMenu(
         position: globalPosition,
-        entries: <DesktopMenuEntry<String>>[
-          const DesktopMenuEntry<String>(label: '编辑表格', value: 'editTable'),
-          const DesktopMenuEntry<String>(
-            label: '复制表格（Markdown）',
-            value: 'copyTable',
-          ),
+        items: <PopupMenuEntry<String>>[
+          _menuItem('编辑表格', 'editTable'),
+          _menuItem('复制表格（Markdown）', 'copyTable'),
+          const PopupMenuDivider(),
           // 行列操作与 Notion / 语雀 的右键菜单一致：就地增删，不用改源码。
-          DesktopMenuEntry<String>(
-            label: '上方插入行',
-            value: 'insertRowAbove',
-            dividerBefore: true,
-            enabled: hasCell,
-          ),
-          DesktopMenuEntry<String>(
-            label: '下方插入行',
-            value: 'insertRowBelow',
-            enabled: hasCell,
-          ),
-          DesktopMenuEntry<String>(
-            label: '删除本行',
-            value: 'deleteRow',
+          _menuItem('上方插入行', 'insertRowAbove', enabled: hasCell),
+          _menuItem('下方插入行', 'insertRowBelow', enabled: hasCell),
+          _menuItem(
+            '删除本行',
+            'deleteRow',
             // 表头行不能删：删掉表格就没有语义基准了。
             enabled: hasCell && targetRow > 0,
           ),
-          DesktopMenuEntry<String>(
-            label: '左侧插入列',
-            value: 'insertColumnLeft',
-            dividerBefore: true,
-            enabled: hasCell,
-          ),
-          DesktopMenuEntry<String>(
-            label: '右侧插入列',
-            value: 'insertColumnRight',
-            enabled: hasCell,
-          ),
-          DesktopMenuEntry<String>(
-            label: '删除本列',
-            value: 'deleteColumn',
+          const PopupMenuDivider(),
+          _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
+          _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
+          _menuItem(
+            '删除本列',
+            'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
           ),
-          DesktopMenuEntry<String>(
-            label: '列左对齐',
-            value: 'alignLeft',
-            dividerBefore: true,
+          const PopupMenuDivider(),
+          _menuItem(
+            '列左对齐',
+            'alignLeft',
             enabled: hasCell,
             selected: currentAlign == 'left',
           ),
-          DesktopMenuEntry<String>(
-            label: '列居中',
-            value: 'alignCenter',
+          _menuItem(
+            '列居中',
+            'alignCenter',
             enabled: hasCell,
             selected: currentAlign == 'center',
           ),
-          DesktopMenuEntry<String>(
-            label: '列右对齐',
-            value: 'alignRight',
+          _menuItem(
+            '列右对齐',
+            'alignRight',
             enabled: hasCell,
             selected: currentAlign == 'right',
           ),
-          const DesktopMenuEntry<String>(
-            label: '粘贴',
-            value: 'paste',
-            dividerBefore: true,
-          ),
+          const PopupMenuDivider(),
+          _menuItem('粘贴', 'paste'),
         ],
       );
       if (!mounted || tableAction == null) {
@@ -3478,23 +3502,12 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     final String? action = await _showContextMenu(
       position: globalPosition,
-      entries: <DesktopMenuEntry<String>>[
-        DesktopMenuEntry<String>(
-          label: '复制',
-          value: 'copy',
-          enabled: hasSelection,
-        ),
-        DesktopMenuEntry<String>(
-          label: '剪切',
-          value: 'cut',
-          enabled: hasSelection,
-        ),
-        const DesktopMenuEntry<String>(label: '粘贴', value: 'paste'),
-        const DesktopMenuEntry<String>(
-          label: '全选',
-          value: 'selectAll',
-          dividerBefore: true,
-        ),
+      items: <PopupMenuEntry<String>>[
+        _menuItem('复制', 'copy', enabled: hasSelection),
+        _menuItem('剪切', 'cut', enabled: hasSelection),
+        _menuItem('粘贴', 'paste'),
+        const PopupMenuDivider(),
+        _menuItem('全选', 'selectAll'),
       ],
     );
     if (!mounted || action == null) {
@@ -3519,17 +3532,90 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   /// 弹右键菜单。
   ///
-  /// 用 [showDesktopMenu]（Overlay 实现）而不是 `showMenu`：后者会 push 路由
-  /// 并接管焦点，SuperEditor 在焦点变化时会收起选区 —— 用户看到的就是
-  /// 「右键后蓝色选中底消失」。Overlay 菜单不动焦点，选区原样保留。
+  /// 用 `showMenu`：PopupMenu 自带弹出动画，与顶栏「⋯」是同一套观感。
+  /// 菜单打开会短暂拿走焦点，这里在弹出后与关闭后各恢复一次原选区，
+  /// 菜单开着时蓝色选中底仍然可见。
   Future<String?> _showContextMenu({
     required Offset position,
-    required List<DesktopMenuEntry<String>> entries,
-  }) {
-    return showDesktopMenu<String>(
+    required List<PopupMenuEntry<String>> items,
+  }) async {
+    final RenderBox? overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) {
+      return null;
+    }
+    _restoreSelectionBeforeContextMenu();
+    final Future<String?> menu = showMenu<String>(
       context: context,
-      globalPosition: position,
-      entries: entries,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: items,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _restoreSelectionBeforeContextMenu();
+      }
+    });
+    for (final int delay in const <int>[120, 400]) {
+      Future<void>.delayed(Duration(milliseconds: delay), () {
+        if (mounted) {
+          _restoreSelectionBeforeContextMenu();
+        }
+      });
+    }
+    final String? action = await menu;
+    if (mounted) {
+      _restoreSelectionBeforeContextMenu();
+    }
+    return action;
+  }
+
+  /// 右键菜单项：行高、字号与顶栏「⋯」一致（40 / 14）。
+  PopupMenuItem<String> _menuItem(
+    String label,
+    String value, {
+    bool enabled = true,
+    bool destructive = false,
+    bool selected = false,
+  }) {
+    final AppColors colors = AppColors.of(context);
+    return PopupMenuItem<String>(
+      value: value,
+      enabled: enabled,
+      height: 40,
+      child: Row(
+        children: <Widget>[
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppFontSize.labelLg,
+                color: !enabled
+                    ? colors.tertiary
+                    : destructive
+                        ? colors.danger
+                        : selected
+                            ? colors.accent
+                            : colors.text,
+              ),
+            ),
+          ),
+          if (selected) ...<Widget>[
+            const SizedBox(width: 10),
+            Icon(
+              Icons.check_rounded,
+              size: AppIcon.chevron,
+              color: colors.accent,
+            ),
+          ],
+        ],
+      ),
     );
   }
 

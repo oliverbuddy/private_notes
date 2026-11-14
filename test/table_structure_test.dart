@@ -128,7 +128,7 @@ void main() {
               TextNode(
                 id: 'h2',
                 text: AttributedText('数量'),
-                metadata: <String, dynamic>{
+                metadata: const <String, dynamic>{
                   TextNodeMetadata.textAlign: 'center',
                 },
               ),
@@ -138,7 +138,7 @@ void main() {
               TextNode(
                 id: 'c2',
                 text: AttributedText('3'),
-                metadata: <String, dynamic>{
+                metadata: const <String, dynamic>{
                   TextNodeMetadata.textAlign: 'center',
                 },
               ),

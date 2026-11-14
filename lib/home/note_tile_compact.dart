@@ -91,8 +91,8 @@ class NoteTileCompact extends StatelessWidget {
         // 桌面端只用右键菜单（主流桌面列表的约定）：长按不再弹任何东西，
         // 避免「按住不放」误触菜单；移动端仍是长按。
         onLongPress: PlatformFeatures.isDesktop ? null : onLongPress,
-        // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
-        onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
+        // 右键只在这里处理一次：同时挂 onSecondaryTap 会在按下与抬起时
+        // 各弹一次菜单（用户反馈「右键出两个弹窗」）。
         onSecondaryTapDown: PlatformFeatures.isDesktop
             ? (TapDownDetails d) => onSecondaryTapAt?.call(d.globalPosition)
             : null,

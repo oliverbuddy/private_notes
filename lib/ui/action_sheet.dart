@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
-import 'desktop_menu.dart';
 import 'pressable.dart';
 import 'show_sheet.dart';
 
@@ -123,26 +122,88 @@ Future<T?> showXiaojiActionSheet<T>({
   );
 }
 
-/// 桌面端的锚定动作菜单：与右键 / 目录共用同一份实现（同样的行高、圆角、
-/// 描边、投影与进场动画），只是数据源换成 [SheetAction]。
+/// 桌面端的锚定动作菜单：紧贴触发按钮下方，标准 `showMenu` 交互
+/// （Popover 自带弹出动画，与系统菜单一致）。
 Future<T?> _showDesktopActionMenu<T>({
   required BuildContext context,
   required String title,
   required List<SheetAction<T>> actions,
   required Rect anchor,
 }) {
-  return showDesktopMenu<T>(
+  final RenderObject? overlayObject =
+      Overlay.of(context).context.findRenderObject();
+  if (overlayObject is! RenderBox) {
+    return Future<T?>.value();
+  }
+  final AppColors colors = AppColors.of(context);
+  // 菜单从按钮下沿展开，不会盖住按钮本身。
+  final Rect position = Rect.fromLTWH(
+    anchor.left,
+    anchor.bottom + 2,
+    anchor.width,
+    0,
+  );
+  return showMenu<T>(
     context: context,
-    anchor: anchor,
-    header: title.isEmpty ? null : title,
-    entries: <DesktopMenuEntry<T>>[
+    position: RelativeRect.fromRect(position, Offset.zero & overlayObject.size),
+    color: colors.page,
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.block),
+      side: BorderSide(color: colors.chipBorder, width: 0.5),
+    ),
+    items: <PopupMenuEntry<T>>[
+      if (title.isNotEmpty)
+        PopupMenuItem<T>(
+          enabled: false,
+          height: 34,
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppFontSize.caption,
+              color: colors.tertiary,
+            ),
+          ),
+        ),
       for (final SheetAction<T> action in actions)
-        DesktopMenuEntry<T>(
-          label: action.label,
+        PopupMenuItem<T>(
           value: action.value,
-          icon: action.icon,
-          selected: action.selected,
-          destructive: action.destructive,
+          height: 40,
+          child: Row(
+            children: <Widget>[
+              if (action.icon != null) ...<Widget>[
+                Icon(
+                  action.icon,
+                  size: AppIcon.compact,
+                  color: action.destructive
+                      ? colors.danger
+                      : (action.selected ? colors.accent : colors.text),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Flexible(
+                child: Text(
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppFontSize.labelLg,
+                    color: action.destructive
+                        ? colors.danger
+                        : (action.selected ? colors.accent : colors.text),
+                  ),
+                ),
+              ),
+              if (action.selected)
+                Icon(
+                  Icons.check_rounded,
+                  size: AppIcon.chevron,
+                  color: colors.accent,
+                ),
+            ],
+          ),
         ),
     ],
   );
