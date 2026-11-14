@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'pressable.dart';
 
+/// 平板/桌面弹层的最大宽度。
+///
+/// 弹层是「一列文字 + 两个按钮」的形态，铺满 1000+ 宽会变成两条超长横条。
+const double kXiaojiSheetMaxWidth = 560;
+
 /// 全站统一的底部弹层入口。
 ///
 /// 之前各页面的弹层（菜单、确认框、选项面板）一半是 [AlertDialog]，
@@ -33,7 +38,7 @@ Future<T?> showXiaojiSheet<T>({
     backgroundColor: AppColors.of(context).page,
     useSafeArea: true,
     isScrollControlled: true,
-    constraints: wide ? const BoxConstraints(maxWidth: 560) : null,
+    constraints: wide ? const BoxConstraints(maxWidth: kXiaojiSheetMaxWidth) : null,
     sheetAnimationStyle: const AnimationStyle(
       duration: AppMotion.normal,
       reverseDuration: AppMotion.normal,

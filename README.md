@@ -42,14 +42,14 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.9.3 |
+| 版本 | 1.10.0 |
 | 平台 | Android（APK）· macOS（ad-hoc 签名，未公证）· Windows（未签名）；iOS 工程未生成 |
-| 测试 | `flutter test` 440 / 440 通过 |
+| 测试 | `flutter test` 449 / 449 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 21MB、`app-armeabi-v7a-release.apk` 约 19MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 桌面包 | `xiaoji-<版本>-macos-universal.zip`（Intel + Apple 芯片）、`xiaoji-<版本>-windows-x64.zip` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
-| 桌面验证 | Dart 层 440 测试共用（含 2000 条大库用例）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
+| 桌面验证 | Dart 层 449 测试共用（含 2000 条大库用例）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
 
 ## 功能
 
