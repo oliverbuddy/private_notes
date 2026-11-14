@@ -2548,10 +2548,27 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (event is! KeyDownEvent) {
       return false;
     }
-    if (!PlatformFeatures.isDesktop || !_editorFocus.hasFocus) {
+    if (!PlatformFeatures.isDesktop) {
       return false;
     }
     final HardwareKeyboard keyboard = HardwareKeyboard.instance;
+    final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
+
+    // 粘贴不要求编辑器焦点：点过工具条/弹层后焦点可能短暂不在正文上，
+    // 这时若放给内核，它会绕过 Markdown 解析、把 `**粗体**` 原样插进正文
+    // （用户反馈「粘贴的 md 标签没识别」）。只要有选区就按小记的解析走。
+    if (command &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isAltPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyV &&
+        _composer.selection != null) {
+      unawaited(_pasteFromClipboard());
+      return true;
+    }
+
+    if (!_editorFocus.hasFocus) {
+      return false;
+    }
     if ((event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         !keyboard.isShiftPressed &&
@@ -2560,7 +2577,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         !keyboard.isAltPressed) {
       return _tryExitEmptyListItem();
     }
-    final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
     if (command &&
         !keyboard.isShiftPressed &&
         !keyboard.isAltPressed &&
@@ -2571,13 +2587,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         unawaited(_copyTableAsMarkdown(node));
         return true;
       }
-    }
-    if (command &&
-        !keyboard.isShiftPressed &&
-        !keyboard.isAltPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyV) {
-      unawaited(_pasteFromClipboard());
-      return true;
     }
     return false;
   }

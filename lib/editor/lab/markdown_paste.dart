@@ -211,10 +211,8 @@ String normalizeRemoteImages(String markdown) {
 /// 相同。首行当表头。正文里偶然出现的单个制表符不会命中，避免误判。
 String? tabSeparatedToMarkdown(String text) {
   final List<String> lines = <String>[
-    for (final String line in text
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n'))
+    for (final String line
+        in text.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n'))
       if (line.trim().isNotEmpty) line,
   ];
   if (lines.length < 2) {
@@ -255,10 +253,8 @@ bool _hasGfmTable(List<String> lines) {
     if (!_isGfmTableSeparator(lines[i + 1])) {
       continue;
     }
-    final int cells = header
-        .replaceAll(RegExp(r'^\||\|$'), '')
-        .split('|')
-        .length;
+    final int cells =
+        header.replaceAll(RegExp(r'^\||\|$'), '').split('|').length;
     if (cells >= 2) {
       return true;
     }
@@ -284,8 +280,7 @@ String? normalizePlainBullets(String text) {
   var bullets = 0;
   final List<String> converted = lines.map((String line) {
     // 中文输入法 / 微信复制常见全角空格缩进（U+3000），一并当作缩进。
-    final Match? match =
-        RegExp(r'^([ \t\u3000]*)[•·‣◦▪]\s+').firstMatch(line);
+    final Match? match = RegExp(r'^([ \t\u3000]*)[•·‣◦▪]\s+').firstMatch(line);
     if (match == null) {
       return line;
     }
@@ -457,9 +452,8 @@ class MarkdownPaster {
     if (pasted.length == 1 &&
         first is ParagraphNode &&
         _isPlainParagraph(first)) {
-      final AttributedText merged = before
-          .copyAndAppend(first.text)
-          .copyAndAppend(after);
+      final AttributedText merged =
+          before.copyAndAppend(first.text).copyAndAppend(after);
       final int caret =
           before.toPlainText().length + first.text.toPlainText().length;
       editor.execute(<EditRequest>[
