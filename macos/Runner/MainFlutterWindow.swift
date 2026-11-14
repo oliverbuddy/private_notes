@@ -16,8 +16,12 @@ class MainFlutterWindow: NSWindow {
     self.minSize = NSSize(width: 560, height: 480)
     self.setFrameAutosaveName("XiaojiMainWindow")
     self.title = "小记"
-    // 列表是主体内容，标题栏不做全透明，避免拖动窗口时内容穿帮。
-    self.titlebarAppearsTransparent = false
+    // 沉浸式窗口：标题栏透明、内容延伸到标题栏区域，红黄绿三个按钮浮在
+    // 应用自己的顶栏之上（Bear / Notion / 语雀桌面版的做法）。Dart 侧为
+    // 这三个按钮预留了 28 的顶部安全区（见 main.dart）。
+    self.titlebarAppearsTransparent = true
+    self.titleVisibility = .hidden
+    self.styleMask.insert(.fullSizeContentView)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     bridge = XiaojiBridge(messenger: flutterViewController.engine.binaryMessenger)

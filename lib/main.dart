@@ -202,6 +202,17 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
                   child: content,
                 );
               }
+              // macOS：标题栏透明、内容延伸到标题栏（见 MainFlutterWindow），
+              // 顶部给红黄绿三个窗口按钮留出 28 的安全区。
+              if (PlatformFeatures.isMacOS) {
+                final EdgeInsets padding = MediaQuery.of(context).padding;
+                content = MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    padding: padding.copyWith(top: padding.top + 28),
+                  ),
+                  child: content,
+                );
+              }
               return AppLockGate(
                 repository: widget.repository,
                 child: _DesktopShortcuts(child: content),

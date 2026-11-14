@@ -18,6 +18,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      macos_only:
+        description: 只构建 macOS（本地调试用，跳过 Windows）
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -33,6 +38,14 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Cache Flutter macOS build
+        uses: actions/cache@v4
+        with:
+          path: build/macos
+          key: macos-build-${{ hashFiles('pubspec.lock', 'macos/Podfile.lock') }}
+          restore-keys: |
+            macos-build-
 
       - name: Build macOS app
         run: |
@@ -103,6 +116,9 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    # 手动触发默认只构建 macOS：本地看效果时不必等 Windows 那十几分钟；
+    # 打 tag 发版时仍然两端都构建。
+    if: github.event_name != 'workflow_dispatch' || !inputs.macos_only
     steps:
       - uses: actions/checkout@v4
 
