@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
+import 'package:xiaoji/editor/lab/caret_overlay.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/home/home_page.dart';
 import 'package:xiaoji/models/note.dart';
@@ -415,6 +416,38 @@ void main() {
       expect(find.text('标题'), findsWidgets);
       expect(find.text('结构'), findsWidgets);
       expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('桌面空文档：占位提示与光标对齐', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: NewEditorPage(
+            repository: repository,
+            note: Note(
+              id: 'pc-empty',
+              created: DateTime(2026, 11, 1),
+              updated: DateTime(2026, 11, 1),
+            ),
+            autoFocus: true,
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      final Rect placeholder = tester.getRect(
+        find.byKey(const ValueKey<String>('editor-placeholder')),
+      );
+      final Rect caret = tester.getRect(find.byKey(xiaojiCaretKey));
+      expect(caret.left, closeTo(placeholder.left, 0.5));
+      expect(caret.top, greaterThanOrEqualTo(placeholder.top - 0.5));
+      expect(caret.bottom, lessThanOrEqualTo(placeholder.bottom + 0.5));
       debugDefaultTargetPlatformOverride = null;
     });
 

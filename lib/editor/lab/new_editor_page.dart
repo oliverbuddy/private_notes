@@ -20,6 +20,7 @@ import '../../platform/platform_features.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
+import '../../ui/app_field.dart';
 import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
@@ -228,6 +229,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
   bool _draggingFiles = false;
 
+  /// 桌面硬件键处理器。必须持有同一个引用，dispose 时才能正确移除。
+  late final bool Function(KeyEvent) _desktopKeyHandler = _handleDesktopKey;
+
   /// SuperEditor 自己的焦点节点。面板关闭后（选区可能被清空）用
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
   final FocusNode _editorFocus = FocusNode(debugLabel: 'xiaoji-editor');
@@ -377,6 +381,10 @@ class _NewEditorPageState extends State<NewEditorPage>
       onPaste: _handleImePaste,
     );
     _editorFocus.addListener(_onEditorFocusChanged);
+    // 桌面硬件键：粘贴走 Markdown 解析、空列表回车显式退出列表。
+    if (PlatformFeatures.isDesktop) {
+      HardwareKeyboard.instance.addHandler(_desktopKeyHandler);
+    }
     _refreshClipboardSnapshot();
     _commands = KernelCommands(
       editor: _editor,
@@ -582,6 +590,9 @@ class _NewEditorPageState extends State<NewEditorPage>
     _canRedo.dispose();
     _documentEmpty.dispose();
     _editorFocus.removeListener(_onEditorFocusChanged);
+    if (PlatformFeatures.isDesktop) {
+      HardwareKeyboard.instance.removeHandler(_desktopKeyHandler);
+    }
     _editorFocus.dispose();
     _editorScroll.dispose();
     _editor.dispose();
@@ -2436,6 +2447,61 @@ class _NewEditorPageState extends State<NewEditorPage>
     _refreshActiveCommands();
   }
 
+  /// 桌面硬件键：粘贴与空列表回车。
+  ///
+  /// 桌面 Cmd/Ctrl+V 走内核的 `editorOps.paste()`，会绕过小记的 Markdown
+  /// 解析；这里在按键分发到焦点树之前截住，改走 [MarkdownPaster]。
+  ///
+  /// 空列表项回车在桌面 IME 路径下不稳定（新行只会落成文本），这里显式
+  /// 发 [InsertNewlineAtCaretRequest]，与移动端内核语义一致。
+  bool _handleDesktopKey(KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return false;
+    }
+    if (!PlatformFeatures.isDesktop || !_editorFocus.hasFocus) {
+      return false;
+    }
+    final HardwareKeyboard keyboard = HardwareKeyboard.instance;
+    if ((event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed) {
+      return _tryExitEmptyListItem();
+    }
+    final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
+    if (command &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isAltPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyV) {
+      unawaited(_pasteFromClipboard());
+      return true;
+    }
+    return false;
+  }
+
+  /// 光标所在的列表/待办为空时，回车退出列表回到正文。
+  bool _tryExitEmptyListItem() {
+    final DocumentSelection? selection = _composer.selection;
+    if (selection == null || !selection.isCollapsed) {
+      return false;
+    }
+    if (selection.base.nodeId != selection.extent.nodeId) {
+      return false;
+    }
+    final DocumentNode? node = _document.getNodeById(selection.extent.nodeId);
+    final bool isList = node is ListItemNode || node is TaskNode;
+    if (!isList || node is! TextNode) {
+      return false;
+    }
+    if (node.text.toPlainText().isNotEmpty) {
+      return false;
+    }
+    _editor.execute(<EditRequest>[InsertNewlineAtCaretRequest()]);
+    return true;
+  }
+
   void _hideKeyboard() {
     // 子菜单必须先收起：工具栏马上要滑走，挂着面板会看起来像没收干净。
     _closePanel(showKeyboard: false);
@@ -2780,6 +2846,9 @@ class _NewEditorPageState extends State<NewEditorPage>
                                         }
                                         return Text(
                                           '开始记录…',
+                                          key: const ValueKey<String>(
+                                            'editor-placeholder',
+                                          ),
                                           style: TextStyle(
                                             fontSize: AppFontSize.summary,
                                             height: 1.7,
@@ -2957,6 +3026,43 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     final DocumentSelection? selection = _composer.selection;
     final bool hasSelection = selection != null && !selection.isCollapsed;
+    // 表格是整块选中、没有逐单元格光标：右键给它单独的「编辑 / 复制」入口。
+    final DocumentNode? selectedNode = _selectionNode();
+    if (selectedNode is TableBlockNode) {
+      final String? tableAction = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          globalPosition.dx,
+          globalPosition.dy,
+          overlay.size.width - globalPosition.dx,
+          overlay.size.height - globalPosition.dy,
+        ),
+        items: const <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(value: 'editTable', child: Text('编辑表格')),
+          PopupMenuItem<String>(
+            value: 'copyTable',
+            child: Text('复制表格（Markdown）'),
+          ),
+          PopupMenuDivider(),
+          PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
+        ],
+      );
+      if (!mounted || tableAction == null) {
+        return;
+      }
+      switch (tableAction) {
+        case 'editTable':
+          await _editTableAsMarkdown(selectedNode);
+        case 'copyTable':
+          await _copyTableAsMarkdown(selectedNode);
+        case 'paste':
+          await _pasteFromClipboard();
+      }
+      if (mounted) {
+        _editorFocus.requestFocus();
+      }
+      return;
+    }
     final String? action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -2999,6 +3105,125 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     // 菜单路由会拿走焦点：关闭后交还编辑器，否则「菜单关了却打不了字」。
     _editorFocus.requestFocus();
+  }
+
+  /// 当前选区所在的块（表格右键菜单用）。
+  DocumentNode? _selectionNode() {
+    final DocumentSelection? selection = _composer.selection;
+    if (selection == null) {
+      return null;
+    }
+    return _document.getNodeById(selection.extent.nodeId);
+  }
+
+  /// 把表格节点写回 Markdown（复制/编辑弹层共用）。
+  String _tableMarkdownOf(TableBlockNode table) {
+    String row(List<TextNode> cells) {
+      final String joined = cells
+          .map(
+              (TextNode cell) => cell.text.toPlainText().replaceAll('|', r'\|'))
+          .join(' | ');
+      return '| $joined |';
+    }
+
+    final StringBuffer buffer = StringBuffer();
+    buffer.writeln(row(table.getRow(0)));
+    buffer.writeln(
+      '| ${List<String>.filled(table.columnCount, '---').join(' | ')} |',
+    );
+    for (int i = 1; i < table.rowCount; i++) {
+      buffer.writeln(row(table.getRow(i)));
+    }
+    return buffer.toString().trimRight();
+  }
+
+  Future<void> _copyTableAsMarkdown(TableBlockNode table) async {
+    await Clipboard.setData(ClipboardData(text: _tableMarkdownOf(table)));
+    if (mounted) {
+      _showHint('表格已复制');
+    }
+  }
+
+  /// 表格编辑：以 Markdown 源码编辑整表。
+  ///
+  /// 内核的 Markdown 表格组件只支持整块选中，没有逐单元格光标；
+  /// 在小记里用「源码编辑 → 解析回表格」覆盖编辑需求，同时保留
+  /// 表格的复制能力（右键菜单）。
+  Future<void> _editTableAsMarkdown(TableBlockNode table) async {
+    final TextEditingController controller =
+        TextEditingController(text: _tableMarkdownOf(table));
+    final String? edited = await showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  '编辑表格',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: controller,
+                  minLines: 5,
+                  maxLines: 10,
+                  style: TextStyle(
+                    fontSize: AppFontSize.label,
+                    height: 1.5,
+                    color: colors.text,
+                  ),
+                  decoration: appFieldDecoration(
+                    sheetContext,
+                    hintText: '| 列 1 | 列 2 |',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
+                    TextButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      child: const Text('取消'),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.of(sheetContext).pop(controller.text),
+                      child: const Text('保存'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    if (!mounted || edited == null) {
+      return;
+    }
+    final MutableDocument parsed = deserializeXiaojiMarkdown(edited);
+    TableBlockNode? next;
+    for (final DocumentNode node in parsed) {
+      if (node is TableBlockNode) {
+        next = node;
+        break;
+      }
+    }
+    if (next == null) {
+      _showHint('表格格式无法识别');
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: table.id, newNode: next),
+    ]);
+    _showHint('表格已更新');
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -3259,6 +3484,10 @@ class _NewEditorPageState extends State<NewEditorPage>
             _AdaptiveTableComponentBuilder(
               availableWidth: contentWidth - AppSpace.page * 2,
               columnMax: PlatformFeatures.isDesktop ? 320 : 240,
+              selectionColor: Color.alphaBlend(
+                colors.accent.withValues(alpha: 0.25),
+                colors.page,
+              ),
             ),
             ...defaultComponentBuilders,
             const UnknownComponentBuilder(),
@@ -3290,6 +3519,19 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 之前写在这一层里的手机端字阶其实从未生效，真机上看到的一直是
     // 桌面排版（用户反馈的「整体偏大、Typora 感」就是这个根因）。
     return defaultStylesheet.copyWith(
+      // maxWidth 必须作为「第一条规则」写进 rules：super_editor 的
+      // _mergeStyles 对非 TextStyle / 非 CascadingPadding 的值只保留旧值，
+      // 写在 addRulesAfter 里会被默认的 640 静默吃掉（桌面端一直按 640
+      // 排版、光标与占位提示因此错位 60dp）。
+      rules: <StyleRule>[
+        StyleRule(
+          BlockSelector.all,
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.maxWidth: contentWidth,
+          },
+        ),
+        ...defaultStylesheet.rules,
+      ],
       // 行内样式必须挂在 Stylesheet 上，不能写进 StyleRule！
       // super_editor 的 SingleColumnStylesheetStyler 合并样式时，对
       // **非 TextStyle / 非 CascadingPadding** 的值只保留旧值（见
@@ -3319,10 +3561,6 @@ class _NewEditorPageState extends State<NewEditorPage>
                 leadingDistribution: TextLeadingDistribution.even,
                 color: colors.text,
               ),
-              Styles.maxWidth: contentWidth,
-              // 页边距用设计 token（列表/设置页同一个值）。正文、引用、
-              // 代码块都走这条；图片/附件块的 ViewModel 也要用同一个值，
-              // 否则媒体会通栏贴屏幕边（用户反馈「详情没有内边距」）。
               Styles.padding:
                   const CascadingPadding.symmetric(horizontal: AppSpace.page),
               // IME 组词下划线（语音输入/候选词）不在这里配：super_editor
@@ -4531,11 +4769,16 @@ double tableColumnCap({
 class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
   const _AdaptiveTableComponentBuilder({
     required this.availableWidth,
+    required this.selectionColor,
     this.columnMax = 240,
   }) : super(fit: TableComponentFit.scroll);
 
   /// 正文内容区宽度（已扣掉页面左右页边距）。
   final double availableWidth;
+
+  /// 表格是整块选中：必须给它一个可见的选中底色，否则用户不知道
+  /// 已经选中，也就不会想到可以复制。
+  final Color selectionColor;
 
   /// 单列宽度上限：手机/平板 240，桌面放宽到 320。
   final double columnMax;
@@ -4550,6 +4793,7 @@ class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
     if (viewModel is! MarkdownTableViewModel || node is! TableBlockNode) {
       return viewModel;
     }
+    viewModel.selectionColor = selectionColor;
     final int columns = node.columnCount;
     if (columns > 0 && availableWidth > 0) {
       viewModel.columnWidth = _CappedIntrinsicColumnWidth(
