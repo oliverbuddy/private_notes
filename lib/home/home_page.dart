@@ -523,23 +523,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
             return Column(
               children: <Widget>[
-                _searchMode ? _buildSearchBar(colors) : _buildTitleBar(colors),
+                // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
+                // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
+                ContentFrame(
+                  child: _searchMode
+                      ? _buildSearchBar(colors)
+                      : _buildTitleBar(colors),
+                ),
                 if (_repo.isSearching && !_repo.isLoading)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpace.page,
-                      AppSpace.xs,
-                      AppSpace.page,
-                      AppSpace.sm,
-                    ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '共 ${notes.length} 条',
-                        style: TextStyle(
-                          fontSize: AppFontSize.caption,
-                          letterSpacing: 0.2,
-                          color: colors.tertiary,
+                  ContentFrame(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpace.page,
+                        AppSpace.xs,
+                        AppSpace.page,
+                        AppSpace.sm,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '共 ${notes.length} 条',
+                          style: TextStyle(
+                            fontSize: AppFontSize.caption,
+                            letterSpacing: 0.2,
+                            color: colors.tertiary,
+                          ),
                         ),
                       ),
                     ),

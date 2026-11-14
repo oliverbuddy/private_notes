@@ -23,11 +23,17 @@ Future<T?> showXiaojiSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
 }) {
+  // 平板/桌面：弹层不再铺满整屏，按手机宽度收窄并居中。
+  // 弹层内容是「一列文字 + 两个按钮」，拉成 1000+ 宽后按钮会变成
+  // 两条超长横条，阅读和点击都很别扭。
+  final bool wide =
+      !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
   return showModalBottomSheet<T>(
     context: context,
     backgroundColor: AppColors.of(context).page,
     useSafeArea: true,
     isScrollControlled: true,
+    constraints: wide ? const BoxConstraints(maxWidth: 560) : null,
     sheetAnimationStyle: const AnimationStyle(
       duration: AppMotion.normal,
       reverseDuration: AppMotion.normal,
