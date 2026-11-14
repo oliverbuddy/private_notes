@@ -747,9 +747,11 @@ void XiaojiBridge::HandleMethodCall(
 
   if (method == "beginFileDrag") {
     std::vector<std::wstring> paths;
-    if (const auto* args = std::get_if<flutter::EncodableMap>(call.arguments())) {
-      const auto it = args->find(flutter::EncodableValue("paths"));
-      if (it != args->end()) {
+    // 不能叫 args：外层已有一份同名参数表，MSVC 把遮蔽（C4456）当错误。
+    if (const auto* drag_args =
+            std::get_if<flutter::EncodableMap>(call.arguments())) {
+      const auto it = drag_args->find(flutter::EncodableValue("paths"));
+      if (it != drag_args->end()) {
         if (const auto* list =
                 std::get_if<flutter::EncodableList>(&it->second)) {
           for (const flutter::EncodableValue& value : *list) {
