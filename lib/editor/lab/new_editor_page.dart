@@ -1686,15 +1686,18 @@ class _NewEditorPageState extends State<NewEditorPage>
       picked = await showDesktopMenu<String>(
         context: context,
         anchor: anchorRectOf(_outlineKey),
-        minWidth: 200,
-        maxWidth: 340,
+        header: '目录',
+        maxWidth: 280,
         entries: <DesktopMenuEntry<String>>[
           for (final _OutlineEntry entry in entries)
             DesktopMenuEntry<String>(
               label: entry.title,
               value: entry.nodeId,
-              // 层级用缩进表达：与详情里的标题层级对应，不加连线。
-              indent: (entry.level - 1) * 14,
+              // 分级：一级标题更大更重，二级/三级缩进 + 次级色，
+              // 一眼能看出标题层级（用户反馈原来没有分级感）。
+              indent: (entry.level - 1) * 16,
+              strong: entry.level == 1,
+              muted: entry.level > 1,
             ),
         ],
       );
@@ -3338,6 +3341,9 @@ class _NewEditorPageState extends State<NewEditorPage>
       final int targetRow = cell?.row ?? 0;
       final int targetColumn = cell?.column ?? 0;
       final bool hasCell = cell != null;
+      final String currentAlign = hasCell
+          ? _tableColumnAlign(selectedNode, targetColumn)
+          : 'left';
       final String? tableAction = await _showContextMenu(
         position: globalPosition,
         entries: <DesktopMenuEntry<String>>[
@@ -3379,6 +3385,25 @@ class _NewEditorPageState extends State<NewEditorPage>
             label: '删除本列',
             value: 'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
+          ),
+          DesktopMenuEntry<String>(
+            label: '列左对齐',
+            value: 'alignLeft',
+            dividerBefore: true,
+            enabled: hasCell,
+            selected: currentAlign == 'left',
+          ),
+          DesktopMenuEntry<String>(
+            label: '列居中',
+            value: 'alignCenter',
+            enabled: hasCell,
+            selected: currentAlign == 'center',
+          ),
+          DesktopMenuEntry<String>(
+            label: '列右对齐',
+            value: 'alignRight',
+            enabled: hasCell,
+            selected: currentAlign == 'right',
           ),
           const DesktopMenuEntry<String>(
             label: '粘贴',
@@ -3437,6 +3462,12 @@ class _NewEditorPageState extends State<NewEditorPage>
             targetRow,
             targetColumn,
           );
+        case 'alignLeft':
+          _alignTableColumn(selectedNode.id, targetColumn, 'left');
+        case 'alignCenter':
+          _alignTableColumn(selectedNode.id, targetColumn, 'center');
+        case 'alignRight':
+          _alignTableColumn(selectedNode.id, targetColumn, 'right');
         case 'paste':
           await _pasteFromClipboard();
       }
@@ -3725,6 +3756,61 @@ class _NewEditorPageState extends State<NewEditorPage>
       ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
     ]);
     _selectTableBlock(next);
+  }
+
+  /// 表格整列对齐（左 / 中 / 右）：写入单元格的 textAlign 元数据。
+  ///
+  /// Markdown 的对齐是**列级**的（`| :--- | ---: |`），所以整列一起改；
+  /// 序列化会按第一行数据单元格的 textAlign 写回分隔行。
+  void _alignTableColumn(String tableId, int column, String align) {
+    final DocumentNode? node = _document.getNodeById(tableId);
+    if (node is! TableBlockNode) {
+      return;
+    }
+    if (column < 0 || column >= node.columnCount) {
+      return;
+    }
+    final List<List<TextNode>> rows = <List<TextNode>>[];
+    for (int r = 0; r < node.rowCount; r++) {
+      final List<TextNode> row = <TextNode>[];
+      for (int c = 0; c < node.columnCount; c++) {
+        final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
+        if (c != column) {
+          row.add(cell);
+          continue;
+        }
+        row.add(
+          TextNode(
+            id: cell.id,
+            text: cell.text,
+            metadata: <String, dynamic>{
+              ...cell.metadata,
+              TextNodeMetadata.textAlign: align,
+            },
+          ),
+        );
+      }
+      rows.add(row);
+    }
+    final TableBlockNode next = TableBlockNode(
+      id: node.id,
+      cells: rows,
+      metadata: Map<String, dynamic>.from(node.metadata),
+    );
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
+    ]);
+    _selectTableBlock(next);
+  }
+
+  /// 列当前对齐方式（左 / 中 / 右），用于右键菜单的对勾。
+  String _tableColumnAlign(TableBlockNode table, int column) {
+    if (column < 0 || column >= table.columnCount) {
+      return 'left';
+    }
+    final TextNode cell = table.getCell(rowIndex: 0, columnIndex: column);
+    final Object? align = cell.metadata[TextNodeMetadata.textAlign];
+    return align is String ? align : 'left';
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。

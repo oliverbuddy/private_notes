@@ -402,6 +402,50 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     final TextEditingController controller =
         TextEditingController(text: cell.text.toPlainText());
     final FocusNode focusNode = FocusNode(debugLabel: 'xiaoji-table-cell');
+    // 键盘语义放在焦点节点上：能拿到组词状态，拼音/候选框里的回车和方向键
+    // 不会被当成「提交单元格」。
+    focusNode.onKeyEvent = (FocusNode node, KeyEvent event) {
+      if (event is! KeyDownEvent) {
+        return KeyEventResult.ignored;
+      }
+      final HardwareKeyboard keyboard = HardwareKeyboard.instance;
+      final LogicalKeyboardKey key = event.logicalKey;
+      if (key == LogicalKeyboardKey.escape) {
+        _commitEditing(cancel: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.tab) {
+        if (keyboard.isShiftPressed) {
+          _commitEditing(movePrevious: true);
+        } else {
+          _commitEditing(moveNext: true);
+        }
+        return KeyEventResult.handled;
+      }
+      // 组词中不劫持按键，交给输入法确认候选。
+      final TextRange composing = controller.value.composing;
+      if (composing.isValid && !composing.isCollapsed) {
+        return KeyEventResult.ignored;
+      }
+      if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter) {
+        // Shift+Enter 在单元格内换行（与语雀一致），Enter 提交并下移。
+        if (keyboard.isShiftPressed) {
+          return KeyEventResult.ignored;
+        }
+        _commitEditing(moveDown: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowDown) {
+        _commitEditing(moveDown: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        _commitEditing(moveUp: true);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
     focusNode.addListener(() {
       if (_focusNode != focusNode || focusNode.hasFocus) {
         return;
@@ -487,7 +531,8 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
     final List<List<MarkdownTableCellViewModel>> cells = widget.viewModel.cells;
     final String original = cells[row][column].text.toPlainText();
-    final String text = controller.text.replaceAll('\n', ' ');
+    // 单元格允许换行：保留 \n（序列化时写成 <br>，重新打开还在）。
+    final String text = controller.text;
 
     final int rowCount = cells.length;
     final int columnCount = cells[row].length;
@@ -775,42 +820,29 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   }
 
   Widget _buildCellEditor(MarkdownTableCellViewModel cell) {
-    return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.tab): () =>
-            _commitEditing(moveNext: true),
-        const SingleActivator(LogicalKeyboardKey.tab, shift: true): () =>
-            _commitEditing(movePrevious: true),
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            _commitEditing(cancel: true),
-        // ↑ / ↓ 在单元格之间上下移动（Excel / 语雀 的录入方式）。
-        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-            _commitEditing(moveDown: true),
-        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-            _commitEditing(moveUp: true),
-      },
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: widget.editorBackground,
-          border: Border.all(color: widget.cursorColor, width: 1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: TextField(
-          controller: _controller,
-          focusNode: _focusNode,
-          style: cell.textStyleBuilder(const <Attribution>{}),
-          textAlign: cell.textAlign,
-          cursorColor: widget.cursorColor,
-          maxLines: 1,
-          // 回车提交并下移：与 Excel / 语雀 的表格录入一致。
-          onSubmitted: (_) => _commitEditing(moveDown: true),
-          onTapOutside: (_) => _commitEditing(),
-          decoration: const InputDecoration(
-            isDense: true,
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(horizontal: 2),
-            counterText: '',
-          ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: widget.editorBackground,
+        border: Border.all(color: widget.cursorColor, width: 1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        style: cell.textStyleBuilder(const <Attribution>{}),
+        textAlign: cell.textAlign,
+        cursorColor: widget.cursorColor,
+        // 单元格支持多行（Shift+Enter 换行）：语雀的表格也允许单元格内换行。
+        // 键盘语义（Enter/Tab/Esc/↑/↓）在焦点节点里处理，见 _beginEditing。
+        maxLines: null,
+        keyboardType: TextInputType.multiline,
+        textInputAction: TextInputAction.newline,
+        onTapOutside: (_) => _commitEditing(),
+        decoration: const InputDecoration(
+          isDense: true,
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.symmetric(horizontal: 2),
+          counterText: '',
         ),
       ),
     );

@@ -647,11 +647,63 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   _restoreCodeFenceLanguages(document, codeLanguages);
   _applyHighlights(document);
   _restoreLinkTitles(document, links.titles);
+  _restoreTableCellBreaks(document);
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
   _ensureTrailingParagraph(document);
   return document;
+}
+
+/// 把表格单元格里的 `<br>` 还原成换行。
+///
+/// 序列化时单元格内的换行写成 `<br>`（GFM 事实标准）；重新打开时如果不
+/// 还原，单元格里会残留一段字面量 `<br>`，看起来像「多行被压成一行还多了
+/// 个标签」。单元格里的行内样式很少见，这里按纯文本重建，样式不保留。
+void _restoreTableCellBreaks(MutableDocument document) {
+  final RegExp brPattern = RegExp(r'<br\s*/?>', caseSensitive: false);
+  // 先收集再替换：遍历过程中改文档会打断迭代器。
+  final List<TableBlockNode> tables = <TableBlockNode>[];
+  for (final DocumentNode node in document) {
+    if (node is TableBlockNode) {
+      tables.add(node);
+    }
+  }
+  for (final TableBlockNode table in tables) {
+    final List<List<TextNode>> rows = <List<TextNode>>[];
+    bool changed = false;
+    for (int r = 0; r < table.rowCount; r++) {
+      final List<TextNode> row = <TextNode>[];
+      for (int c = 0; c < table.columnCount; c++) {
+        final TextNode cell = table.getCell(rowIndex: r, columnIndex: c);
+        final String plain = cell.text.toPlainText();
+        if (!brPattern.hasMatch(plain)) {
+          row.add(cell);
+          continue;
+        }
+        changed = true;
+        row.add(
+          TextNode(
+            id: cell.id,
+            text: AttributedText(plain.replaceAll(brPattern, '\n')),
+            metadata: Map<String, dynamic>.from(cell.metadata),
+          ),
+        );
+      }
+      rows.add(row);
+    }
+    if (!changed) {
+      continue;
+    }
+    document.replaceNodeById(
+      table.id,
+      TableBlockNode(
+        id: table.id,
+        cells: rows,
+        metadata: Map<String, dynamic>.from(table.metadata),
+      ),
+    );
+  }
 }
 
 /// 图片行与相邻行紧挨着时，补一个真正的空行隔开。
@@ -1266,11 +1318,14 @@ String? _tableMarkdown(TableBlockNode node) {
   return buffer.toString();
 }
 
-/// 单元格里的换行与裸 `|` 会破坏管道语法，换成空格与转义；行内样式保留。
+/// 单元格里的换行与裸 `|` 会破坏管道语法，换成 `<br>` 与转义；行内样式保留。
+///
+/// `<br>` 是 GFM 表格里表达单元格内换行的事实标准（语雀 / 飞书 / GitHub
+/// 都是这么导出的），解析时会还原成换行。
 String _tableCellMarkdown(TextNode cell) {
   return _inlineMarkdown(cell.text)
-      .replaceAll('\n', ' ')
       .replaceAll('|', r'\|')
+      .replaceAll('\n', '<br>')
       .trim();
 }
 

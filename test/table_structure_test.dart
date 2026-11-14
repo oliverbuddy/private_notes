@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:xiaoji/editor/lab/table_cell_editor.dart';
+import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
 
 /// 桌面表格的结构操作：插入 / 删除行列（纯函数，便于单测）。
 void main() {
@@ -85,5 +86,68 @@ void main() {
       rebuildTableNode(sample, TableCellAction.insertColumnLeft, 0, 9),
       isNull,
     );
+  });
+
+  test('单元格内换行用 <br> 往返，不会压成一行', () {
+    final MutableDocument document = MutableDocument(
+      nodes: <DocumentNode>[
+        TableBlockNode(
+          id: 't1',
+          cells: <List<TextNode>>[
+            <TextNode>[
+              TextNode(id: 'h1', text: AttributedText('名称')),
+              TextNode(id: 'h2', text: AttributedText('说明')),
+            ],
+            <TextNode>[
+              TextNode(id: 'c1', text: AttributedText('苹果')),
+              TextNode(id: 'c2', text: AttributedText('第一行\n第二行')),
+            ],
+          ],
+        ),
+      ],
+    );
+    final String markdown = serializeDocumentToXiaojiMarkdown(document);
+    expect(markdown.contains('第一行<br>第二行'), isTrue);
+
+    final MutableDocument parsed = deserializeXiaojiMarkdown(markdown);
+    final TableBlockNode table = parsed.getNodeAt(0)! as TableBlockNode;
+    expect(
+      table.getCell(rowIndex: 1, columnIndex: 1).text.toPlainText(),
+      '第一行\n第二行',
+    );
+  });
+
+  test('列对齐写回分隔行', () {
+    final MutableDocument document = MutableDocument(
+      nodes: <DocumentNode>[
+        TableBlockNode(
+          id: 't1',
+          cells: <List<TextNode>>[
+            <TextNode>[
+              TextNode(id: 'h1', text: AttributedText('名称')),
+              TextNode(
+                id: 'h2',
+                text: AttributedText('数量'),
+                metadata: <String, dynamic>{
+                  TextNodeMetadata.textAlign: 'center',
+                },
+              ),
+            ],
+            <TextNode>[
+              TextNode(id: 'c1', text: AttributedText('苹果')),
+              TextNode(
+                id: 'c2',
+                text: AttributedText('3'),
+                metadata: <String, dynamic>{
+                  TextNodeMetadata.textAlign: 'center',
+                },
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+    final String markdown = serializeDocumentToXiaojiMarkdown(document);
+    expect(markdown.contains(':---:'), isTrue);
   });
 }
