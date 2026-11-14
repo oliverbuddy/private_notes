@@ -49,6 +49,14 @@ android {
                 storeFile = file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
             }
+            // 显式打开 v1/v2/v3 三重签名：
+            // AGP 在 minSdk >= 24 时默认只写 v2（APK 里没有 META-INF/*.SF），
+            // 国内常见的「查签名」工具、部分 ROM 安装器只认 v1，会把包误判成
+            // 「未签名」；v1 只多几十 KB，换来全链路可识别。v3 供 Android 9+
+            // 校验（不影响低版本）。
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

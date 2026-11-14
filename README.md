@@ -25,7 +25,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.9.1 |
+| 版本 | 1.9.2 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 434 / 434 通过 |
 | 静态检查 | `flutter analyze` No issues found |
