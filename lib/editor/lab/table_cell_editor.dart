@@ -298,17 +298,17 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     if (!_editable) {
       return;
     }
-    // 右键：把「哪一行哪一列」上报给页面，右键菜单据此做结构操作
-    // （插入 / 删除行列）。菜单本身由页面统一弹，避免两个菜单同时出现。
+    final (int, int)? cell = _cellAt(event.position);
+    // 左右键都上报单元格位置：右键菜单靠它定位行列；左键则让页面记录
+    // 点击前的滚动位置（内核会把整表选中并自动滚动，页面负责还原）。
+    if (cell != null) {
+      widget.onCellPointerDown?.call(
+        widget.viewModel.nodeId,
+        cell.$1,
+        cell.$2,
+      );
+    }
     if (event.buttons == kSecondaryMouseButton) {
-      final (int, int)? cell = _cellAt(event.position);
-      if (cell != null) {
-        widget.onCellPointerDown?.call(
-          widget.viewModel.nodeId,
-          cell.$1,
-          cell.$2,
-        );
-      }
       return;
     }
     if (_editRow != null) {
@@ -316,7 +316,6 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     }
     // 单击即进入编辑（Word / 语雀 / Notion 的表格都是这个语义）：
     // 进编辑后单元格里的文字可以拖选、⌘C 复制，不再只能整表选中。
-    final (int, int)? cell = _cellAt(event.position);
     if (cell != null) {
       _beginEditing(cell.$1, cell.$2, tapPosition: event.position);
     }

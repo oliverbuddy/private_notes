@@ -3082,7 +3082,9 @@ class _NewEditorPageState extends State<NewEditorPage>
               Column(
                 children: <Widget>[
                   _buildHeader(colors, contentWidth),
-                  Container(height: 0.5, color: colors.dividerStrong),
+                  // 桌面端不画分割线：顶栏与正文同底色，连成一体。
+                  if (!PlatformFeatures.isDesktop)
+                    Container(height: 0.5, color: colors.dividerStrong),
                   Expanded(
                     // 工具条是浮层，会盖住正文底部。工具条可见时给视口
                     // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
@@ -3835,6 +3837,42 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   void _rememberTableCellPointer(String tableId, int row, int column) {
     _lastTableCell = (tableId: tableId, row: row, column: column);
+    // 点击表格后内核会把整表选中并自动滚动到表格末尾，表现为「点一下
+    // 页面就往下跳」。这里记下点击前的滚动位置，随后几帧内还原。
+    if (_editorScroll.hasClients) {
+      _tableTapScroll = _editorScroll.position.pixels;
+      _scheduleScrollRestoreAfterTableTap();
+    }
+  }
+
+  /// 点击表格前的滚动位置（null = 没有待还原的滚动）。
+  double? _tableTapScroll;
+
+  void _scheduleScrollRestoreAfterTableTap() {
+    final double? target = _tableTapScroll;
+    if (target == null) {
+      return;
+    }
+    for (final int delay in const <int>[0, 60, 160]) {
+      Future<void>.delayed(Duration(milliseconds: delay), () {
+        if (!mounted || !_editorScroll.hasClients) {
+          return;
+        }
+        final ScrollPosition position = _editorScroll.position;
+        final double clamped = target.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+        if ((position.pixels - clamped).abs() > 1) {
+          // 还原期间不许光标跟随再把手势滚回去。
+          _stopCaretScroll();
+          position.jumpTo(clamped);
+        }
+      });
+    }
+    Future<void>.delayed(const Duration(milliseconds: 400), () {
+      _tableTapScroll = null;
+    });
   }
 
   /// 是否正在编辑表格单元格：此时焦点在单元格输入框上，⌘C / ⌘V 必须交给
@@ -4006,6 +4044,15 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Widget _buildHeader(AppColors colors, double contentWidth) {
+    // 桌面端：不再是一条独立「状态栏」，而是与正文同列宽的文档头部——
+    // 左侧返回 + 更新时间，右侧目录 / 更多，没有分割线（用户反馈原来的
+    // 顶栏像「多出的一块」，主流桌面笔记都没有这条横条）。
+    if (PlatformFeatures.isDesktop) {
+      return ContentFrame(
+        maxWidth: contentWidth,
+        child: SizedBox(height: 44, child: _buildDesktopHeader(colors)),
+      );
+    }
     // 顶栏与正文同一列宽：宽屏下返回键/更多按钮贴着正文边缘，
     // 而不是甩到窗口最左/最右（桌面竞品的通用做法）。
     return ContentFrame(
@@ -4076,6 +4123,54 @@ class _NewEditorPageState extends State<NewEditorPage>
           ],
         ),
       ),
+    );
+  }
+
+  /// 桌面端顶栏：一行元信息，与正文共享左右边距和底色。
+  Widget _buildDesktopHeader(AppColors colors) {
+    return Row(
+      children: <Widget>[
+        if (!widget.embedded)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                AppBackButton(
+                  hitSize: 40,
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  formatEditorTime(_updated),
+                  style: AppText.meta.copyWith(color: colors.secondary),
+                ),
+              ],
+            ),
+          )
+        else
+          Text(
+            formatEditorTime(_updated),
+            style: AppText.meta.copyWith(color: colors.secondary),
+          ),
+        const Spacer(),
+        if (_outline.length >= 2)
+          AppIconButton(
+            key: _outlineKey,
+            icon: Icons.list_alt_rounded,
+            hitSize: 40,
+            onTap: _showOutline,
+            tooltip: '目录',
+          ),
+        AppIconButton(
+          key: _moreMenuKey,
+          icon: Icons.more_horiz_rounded,
+          hitSize: 40,
+          onTap: _showEditorMenu,
+          tooltip: '更多',
+        ),
+      ],
     );
   }
 
