@@ -92,6 +92,8 @@ class NoteSettings {
     this.secureScreen = true,
     this.externalBackupUri,
     this.lastExternalBackupAt,
+    this.backupEncrypted = false,
+    this.backupPasswordSealed,
     this.backupTipShown = false,
   });
 
@@ -123,6 +125,15 @@ class NoteSettings {
   /// 上一次外置备份的时间（ISO 字符串，24 小时节奏用）。
   final String? lastExternalBackupAt;
 
+  /// 外置备份是否用口令加密（导出时单独询问，不受这里影响）。
+  final bool backupEncrypted;
+
+  /// 备份口令的 Keystore 密文（`sealText` 结果）。
+  ///
+  /// 绝不存明文：settings.json 会随导出包离开设备，6 位口令存明文
+  /// 等于没有加密。换机后 Keystore 密钥不同，这里解不开，需要重新设置。
+  final String? backupPasswordSealed;
+
   /// 主页的「数据只存在本机」提示是否已经展示/关闭过（只提醒一次）。
   final bool backupTipShown;
 
@@ -139,8 +150,11 @@ class NoteSettings {
     bool? secureScreen,
     String? externalBackupUri,
     String? lastExternalBackupAt,
+    bool? backupEncrypted,
+    String? backupPasswordSealed,
     bool? backupTipShown,
     bool clearExternalBackup = false,
+    bool clearBackupPassword = false,
   }) {
     return NoteSettings(
       theme: theme ?? this.theme,
@@ -157,6 +171,10 @@ class NoteSettings {
           : (externalBackupUri ?? this.externalBackupUri),
       lastExternalBackupAt:
           lastExternalBackupAt ?? this.lastExternalBackupAt,
+      backupEncrypted: backupEncrypted ?? this.backupEncrypted,
+      backupPasswordSealed: clearBackupPassword
+          ? null
+          : (backupPasswordSealed ?? this.backupPasswordSealed),
       backupTipShown: backupTipShown ?? this.backupTipShown,
     );
   }
@@ -173,6 +191,9 @@ class NoteSettings {
         if (externalBackupUri != null) 'externalBackupUri': externalBackupUri,
         if (lastExternalBackupAt != null)
           'lastExternalBackupAt': lastExternalBackupAt,
+        'backupEncrypted': backupEncrypted,
+        if (backupPasswordSealed != null)
+          'backupPasswordSealed': backupPasswordSealed,
         'backupTipShown': backupTipShown,
       };
 
@@ -192,6 +213,8 @@ class NoteSettings {
     final secureScreen = json['secureScreen'];
     final externalBackupUri = json['externalBackupUri'];
     final lastExternalBackupAt = json['lastExternalBackupAt'];
+    final backupEncrypted = json['backupEncrypted'];
+    final backupPasswordSealed = json['backupPasswordSealed'];
     final backupTipShown = json['backupTipShown'];
     return NoteSettings(
       theme: AppThemeMode.fromWire(theme is String ? theme : null),
@@ -208,6 +231,11 @@ class NoteSettings {
       lastExternalBackupAt:
           lastExternalBackupAt is String && lastExternalBackupAt.isNotEmpty
               ? lastExternalBackupAt
+              : null,
+      backupEncrypted: backupEncrypted is bool ? backupEncrypted : false,
+      backupPasswordSealed:
+          backupPasswordSealed is String && backupPasswordSealed.isNotEmpty
+              ? backupPasswordSealed
               : null,
       backupTipShown: backupTipShown is bool ? backupTipShown : false,
     );
@@ -226,6 +254,8 @@ class NoteSettings {
       other.secureScreen == secureScreen &&
       other.externalBackupUri == externalBackupUri &&
       other.lastExternalBackupAt == lastExternalBackupAt &&
+      other.backupEncrypted == backupEncrypted &&
+      other.backupPasswordSealed == backupPasswordSealed &&
       other.backupTipShown == backupTipShown;
 
   @override
@@ -240,6 +270,8 @@ class NoteSettings {
         secureScreen,
         externalBackupUri,
         lastExternalBackupAt,
+        backupEncrypted,
+        backupPasswordSealed,
         backupTipShown,
       );
 }

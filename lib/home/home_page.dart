@@ -52,6 +52,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 防止「冷启动 + 回到前台」两次消费到同一份分享内容。
   bool _importingShare = false;
 
+  /// 本次会话是否已经提示过备份失败（每个会话最多一次，不落盘）。
+  bool _backupFailureNotified = false;
+
   NoteRepository get _repo => widget.repository;
 
   @override
@@ -471,6 +474,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /// 备份失败在首页提醒一次（会话内去重）。
+  ///
+  /// 自动备份失败原先只在设置页可见，用户不主动点进去就永远不知道
+  /// 「最近没备份上」。这里用 SnackBar 轻量提示，不打断首页布局；
+  /// 只提示一次，避免每次 rebuild 都弹。
+  void _maybeNotifyBackupFailure(bool hasNotes) {
+    if (_backupFailureNotified || !hasNotes) {
+      return;
+    }
+    if (_repo.lastBackupError == null &&
+        _repo.lastExternalBackupError == null) {
+      return;
+    }
+    _backupFailureNotified = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      showSnack(
+        context,
+        message: '自动备份失败，可在「设置 › 备份与恢复」里重试',
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
@@ -491,6 +519,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           listenable: _repo,
           builder: (BuildContext context, Widget? child) {
             final notes = _repo.visibleNotes;
+            _maybeNotifyBackupFailure(notes.isNotEmpty);
 
             return Column(
               children: <Widget>[

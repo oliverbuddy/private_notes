@@ -41,14 +41,27 @@ Future<void> unzipTo({
 /// 拉起系统「另存为」（SAF），把 zip 流式复制到用户选的位置。
 ///
 /// 返回保存后的 content uri；用户取消返回 null。
+/// 加密包（`.xiaoji`）传 [mimeType] 为 `application/octet-stream`。
 Future<String?> saveFileToUser({
   required String sourcePath,
   required String fileName,
+  String? mimeType,
 }) async {
   return _channel.invokeMethod<String>('saveFileToUser', <String, Object?>{
     'sourcePath': sourcePath,
     'fileName': fileName,
+    if (mimeType != null) 'mimeType': mimeType,
   });
+}
+
+/// 读取备份包的摘要（manifest + 条目计数），不解压内容。
+///
+/// 返回 null 表示当前平台没有原生通道（测试/桌面），调用方自行回退。
+Future<Map<Object?, Object?>?> inspectBackupZip(String zipPath) {
+  return _channel.invokeMethod<Map<Object?, Object?>>(
+    'inspectZip',
+    <String, Object?>{'zipPath': zipPath},
+  );
 }
 
 /// 让用户选一个文件夹作为「外置备份」位置（SAF 目录授权）。

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/note_store.dart';
 import '../theme/app_theme.dart';
+import '../ui/app_field.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../util/date_format.dart';
@@ -20,6 +21,9 @@ enum BackupAction {
 
   /// 更换已选的备份文件夹。
   changeFolder,
+
+  /// 开启 / 关闭「外置备份口令加密」。
+  toggleEncrypt,
 
   /// 立即备份到应用内。
   backupNow,
@@ -71,6 +75,7 @@ Future<BackupAction?> showBackupMenu(
   BuildContext context, {
   required bool autoEnabled,
   required bool autoBusy,
+  required bool encrypted,
   required String autoStatusLabel,
   required String folderLabel,
   required String lastBackupLabel,
@@ -128,6 +133,17 @@ Future<BackupAction?> showBackupMenu(
                 subtitle: '当前：$folderLabel',
                 onTap: () =>
                     Navigator.of(sheetContext).pop(BackupAction.changeFolder),
+              ),
+            if (autoEnabled)
+              _SwitchRow(
+                title: '加密外置备份',
+                subtitle: encrypted
+                    ? '已开启：备份包用口令加密，恢复时需要输入口令'
+                    : '关闭时备份包是明文 zip，网盘同步时会原样上传',
+                value: encrypted,
+                enabled: !autoBusy,
+                onChanged: () => Navigator.of(sheetContext)
+                    .pop(BackupAction.toggleEncrypt),
               ),
             _Hairline(colors: colors),
             _ActionRow(
@@ -421,6 +437,148 @@ class _Hairline extends StatelessWidget {
       height: 0.5,
       margin: const EdgeInsets.only(left: 20),
       color: colors.dividerStrong,
+    );
+  }
+}
+
+/// 备份口令输入弹层。
+///
+/// [creating] 为 true 时输入两次（设置新口令），false 时输入一次（恢复）。
+/// 口令只在内存里交给原生加密，不写入任何文件；外置备份需要的副本
+/// 由 Keystore 封存（见 NoteSettings.backupPasswordSealed）。
+/// 返回 null 表示用户取消。
+Future<String?> showBackupPasswordSheet(
+  BuildContext context, {
+  required bool creating,
+}) {
+  return showXiaojiSheet<String>(
+    context: context,
+    builder: (BuildContext sheetContext) =>
+        _BackupPasswordSheet(creating: creating),
+  );
+}
+
+class _BackupPasswordSheet extends StatefulWidget {
+  const _BackupPasswordSheet({required this.creating});
+
+  final bool creating;
+
+  @override
+  State<_BackupPasswordSheet> createState() => _BackupPasswordSheetState();
+}
+
+class _BackupPasswordSheetState extends State<_BackupPasswordSheet> {
+  final TextEditingController _password = TextEditingController();
+  final TextEditingController _confirm = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String password = _password.text.trim();
+    if (password.length < 6) {
+      setState(() => _error = '口令至少 6 位');
+      return;
+    }
+    if (widget.creating && password != _confirm.text.trim()) {
+      setState(() => _error = '两次输入不一致');
+      return;
+    }
+    Navigator.of(context).pop(password);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppColors colors = AppColors.of(context);
+    final double keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + keyboard),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              widget.creating ? '设置备份口令' : '输入备份口令',
+              style: AppText.sheetTitle.copyWith(color: colors.text),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.creating
+                  ? '备份包会用这个口令加密（AES-256）。口令不会存明文，'
+                      '忘记后这份备份将无法恢复。'
+                  : '这份备份是口令加密的，输入当时设置的口令。',
+              style: TextStyle(
+                fontSize: AppFontSize.meta,
+                height: 1.6,
+                color: colors.tertiary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _password,
+              autofocus: true,
+              obscureText: true,
+              textInputAction: widget.creating
+                  ? TextInputAction.next
+                  : TextInputAction.done,
+              onSubmitted: widget.creating ? null : (_) => _submit(),
+              style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
+              decoration: appFieldDecoration(context, hintText: '备份口令'),
+            ),
+            if (widget.creating) ...<Widget>[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _confirm,
+                obscureText: true,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+                style:
+                    TextStyle(fontSize: AppFontSize.body, color: colors.text),
+                decoration: appFieldDecoration(context, hintText: '再次输入口令'),
+              ),
+            ],
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: colors.danger,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: AppSheetButton(
+                    label: '取消',
+                    background: colors.surface2,
+                    foreground: colors.secondary,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppSheetButton(
+                    label: widget.creating ? '确定' : '解密',
+                    background: colors.surface2,
+                    foreground: colors.accent,
+                    onTap: _submit,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

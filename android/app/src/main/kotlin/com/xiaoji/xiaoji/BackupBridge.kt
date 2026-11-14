@@ -5,7 +5,17 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import io.flutter.plugin.common.MethodChannel
+import java.io.DataInputStream
 import java.io.File
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
+import javax.crypto.CipherOutputStream
+import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -26,6 +36,17 @@ internal class BackupBridge(private val activity: Activity) {
         private const val REQUEST_SAVE = 4101
         private const val REQUEST_TREE = 4103
         private const val MIME_ZIP = "application/zip"
+
+        /** 明文 zip 与口令加密包的分界标记，Dart 侧读前 6 字节判断。 */
+        private const val ENC_MAGIC = "XJENC1"
+        private const val ENC_SALT_BYTES = 16
+        private const val ENC_IV_BYTES = 12
+        private const val GCM_TAG_BITS = 128
+        private const val PBKDF2_ITERATIONS = 150_000
+        private const val KEY_BITS = 256
+
+        /** manifest.json 读取上限：摘要文件只是几十字节，超限视为异常包。 */
+        private const val MAX_MANIFEST_BYTES = 64 * 1024
     }
 
     // -------------------------------------------------------------------------
@@ -113,7 +134,9 @@ internal class BackupBridge(private val activity: Activity) {
                 val id = cursor.getString(0) ?: continue
                 val name = cursor.getString(1) ?: continue
                 val modified = if (cursor.isNull(2)) 0L else cursor.getLong(2)
-                if (name.startsWith(prefix) && name.endsWith(".zip")) {
+                if (name.startsWith(prefix) &&
+                    (name.endsWith(".zip") || name.endsWith(".xiaoji"))
+                ) {
                     items.add(Triple(id, name, modified))
                 }
             }
@@ -154,6 +177,7 @@ internal class BackupBridge(private val activity: Activity) {
             val overrideMap = overrides ?: emptyMap()
             val target = File(targetPath)
             target.parentFile?.mkdirs()
+            val emitted = HashSet<String>()
             ZipOutputStream(target.outputStream().buffered()).use { zip ->
                 source.walkTopDown()
                     .onEnter { it == source || it.name != "tmp" }
@@ -171,11 +195,194 @@ internal class BackupBridge(private val activity: Activity) {
                         val payload = overrideMap[entryName]?.let { File(it) } ?: file
                         payload.inputStream().buffered().use { it.copyTo(zip) }
                         zip.closeEntry()
+                        emitted.add(entryName)
                     }
+                // overrides 里还有源目录不存在的条目（manifest.json 就是这种）：
+                // 它们不是「替换」，而是「额外写入」，必须单独补一遍，
+                // 否则备份包永远拿不到摘要。
+                overrideMap.forEach { (entryName, sourcePath) ->
+                    if (entryName in emitted) {
+                        return@forEach
+                    }
+                    if (excludes.any {
+                            entryName == it || entryName.startsWith("$it/")
+                        }
+                    ) {
+                        return@forEach
+                    }
+                    val payload = File(sourcePath)
+                    if (!payload.exists()) {
+                        return@forEach
+                    }
+                    zip.putNextEntry(ZipEntry(entryName))
+                    payload.inputStream().buffered().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                    emitted.add(entryName)
+                }
             }
             result.success(target.absolutePath)
         } catch (e: Exception) {
             result.error("zip_failed", e.message ?: "压缩失败", null)
+        }
+    }
+
+    /**
+     * 读取备份包摘要，不解压任何内容。
+     *
+     * 优先取包内 `manifest.json`；旧包没有 manifest 时用条目名扫描出
+     * 笔记数 / 附件数，恢复前仍能给出可核对的信息。
+     */
+    fun inspectZip(zipPath: String, result: MethodChannel.Result) {
+        try {
+            val zip = File(zipPath)
+            if (!zip.exists()) {
+                result.error("missing_zip", "备份文件不存在", null)
+                return
+            }
+            var manifest: String? = null
+            var notes = 0
+            var assets = 0
+            ZipInputStream(zip.inputStream().buffered()).use { input ->
+                var entry: ZipEntry? = input.nextEntry
+                while (entry != null) {
+                    val name = entry.name.replace('\\', '/')
+                    val lower = name.lowercase()
+                    if (name == "manifest.json" &&
+                        entry.size in 0..MAX_MANIFEST_BYTES
+                    ) {
+                        manifest = input.readBytes().toString(Charsets.UTF_8)
+                    } else if (lower.endsWith(".md") && !lower.endsWith(".tmp")) {
+                        notes += 1
+                    } else if (name.startsWith("assets/")) {
+                        assets += 1
+                    }
+                    input.closeEntry()
+                    entry = input.nextEntry
+                }
+            }
+            result.success(
+                mapOf(
+                    "manifest" to manifest,
+                    "noteCount" to notes,
+                    "assetCount" to assets,
+                ),
+            )
+        } catch (e: Exception) {
+            result.error("inspect_failed", e.message ?: "读取备份信息失败", null)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 口令加密（导出 / 外置备份）
+    // -------------------------------------------------------------------------
+
+    /**
+     * 用口令加密整份备份文件。
+     *
+     * 格式：`XJENC1` + 16 字节盐 + 12 字节 IV + AES-256-GCM 密文（含认证标签）。
+     * 密钥由 PBKDF2-HMAC-SHA1 派生 —— 选 SHA1 是为了 API 24 也能解，
+     * 换机恢复不会因为新旧系统不同而打不开。
+     */
+    fun encryptFile(
+        sourcePath: String,
+        targetPath: String,
+        password: String,
+        result: MethodChannel.Result,
+    ) {
+        try {
+            val source = File(sourcePath)
+            if (!source.exists()) {
+                result.error("missing_source", "待加密的备份不存在", null)
+                return
+            }
+            if (password.length < 6) {
+                result.error("weak_password", "备份口令至少 6 位", null)
+                return
+            }
+            val salt = ByteArray(ENC_SALT_BYTES).also { SecureRandom().nextBytes(it) }
+            val iv = ByteArray(ENC_IV_BYTES).also { SecureRandom().nextBytes(it) }
+            val key = deriveKey(password, salt)
+            val target = File(targetPath)
+            target.parentFile?.mkdirs()
+            target.outputStream().buffered().use { output ->
+                output.write(ENC_MAGIC.toByteArray(Charsets.US_ASCII))
+                output.write(salt)
+                output.write(iv)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    key,
+                    GCMParameterSpec(GCM_TAG_BITS, iv),
+                )
+                CipherOutputStream(output, cipher).use { cipherOut ->
+                    source.inputStream().buffered().use { it.copyTo(cipherOut) }
+                }
+            }
+            result.success(target.absolutePath)
+        } catch (e: Exception) {
+            result.error("encrypt_failed", e.message ?: "加密失败", null)
+        }
+    }
+
+    /** 解密 [encryptFile] 生成的文件；口令不对时返回 `bad_password`。 */
+    fun decryptFile(
+        sourcePath: String,
+        targetPath: String,
+        password: String,
+        result: MethodChannel.Result,
+    ) {
+        val target = File(targetPath)
+        try {
+            val source = File(sourcePath)
+            if (!source.exists()) {
+                result.error("missing_source", "备份文件不存在", null)
+                return
+            }
+            DataInputStream(source.inputStream().buffered()).use { data ->
+                val magic = ByteArray(ENC_MAGIC.length)
+                data.readFully(magic)
+                if (String(magic, Charsets.US_ASCII) != ENC_MAGIC) {
+                    result.error("not_encrypted", "不是加密备份文件", null)
+                    return
+                }
+                val salt = ByteArray(ENC_SALT_BYTES)
+                data.readFully(salt)
+                val iv = ByteArray(ENC_IV_BYTES)
+                data.readFully(iv)
+                val key = deriveKey(password, salt)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    key,
+                    GCMParameterSpec(GCM_TAG_BITS, iv),
+                )
+                target.parentFile?.mkdirs()
+                CipherInputStream(data, cipher).use { cipherIn ->
+                    target.outputStream().buffered().use { cipherIn.copyTo(it) }
+                }
+            }
+            result.success(target.absolutePath)
+        } catch (e: Exception) {
+            // GCM 认证失败在流式解密里会以 IOException 形式抛出：统一口径，
+            // 不把底层异常名暴露给用户。
+            try {
+                if (target.exists()) {
+                    target.delete()
+                }
+            } catch (_: Exception) {
+                // 半截明文删不掉也不能留在临时目录里被误用，交由 cleanTempDir 兜底。
+            }
+            result.error("bad_password", "口令不正确或文件已损坏", null)
+        }
+    }
+
+    private fun deriveKey(password: String, salt: ByteArray): SecretKey {
+        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_BITS)
+        try {
+            val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
+            return SecretKeySpec(factory.generateSecret(spec).encoded, "AES")
+        } finally {
+            spec.clearPassword()
         }
     }
 
@@ -223,7 +430,12 @@ internal class BackupBridge(private val activity: Activity) {
      * 用 ACTION_CREATE_DOCUMENT 而不是插件：插件要求把文件字节交给 Dart
      * 再回传，大文件一样会 OOM。这里只传 URI，复制在原生侧完成。
      */
-    fun saveFileToUser(sourcePath: String, fileName: String, result: MethodChannel.Result) {
+    fun saveFileToUser(
+        sourcePath: String,
+        fileName: String,
+        mimeType: String,
+        result: MethodChannel.Result,
+    ) {
         val source = File(sourcePath)
         if (!source.exists()) {
             result.error("missing_source", "临时文件不存在", null)
@@ -233,7 +445,9 @@ internal class BackupBridge(private val activity: Activity) {
         pendingSource = sourcePath
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = MIME_ZIP
+            // 加密包不是 zip（扩展名 .xiaoji），用通用二进制类型，
+            // 避免系统文件管理器把它当压缩包打开。
+            type = mimeType.ifBlank { MIME_ZIP }
             putExtra(Intent.EXTRA_TITLE, fileName)
         }
         try {

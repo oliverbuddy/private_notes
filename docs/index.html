@@ -61,7 +61,7 @@
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">查看源码</a>
           </div>
           <p class="hero-meta">
-            <span data-latest-version>v1.9.2</span>
+            <span data-latest-version>v1.9.3</span>
             <span data-latest-size>21.1 MB</span>
             <span>签名 APK</span>
           </p>
@@ -192,6 +192,8 @@
           <ul class="plain-list">
             <li>应用私有目录存储，系统「文件」管理器看不到，也不随云备份上传</li>
             <li>「备份与恢复」里可选「导出 zip」：交给系统保存到任意位置，图片附件一起打包</li>
+            <li>每个备份包内都有 <code>manifest.json</code>：恢复前先显示生成日期、笔记数与图片数，旧包自动按条目计数</li>
+            <li>导出与外置备份可选用口令加密（AES-256-GCM，扩展名 <code>.xiaoji</code>），恢复时才需要口令，口令不存明文</li>
             <li>可选「自动备份到文件夹」：每 24 小时把同一份 zip 写进你选定的目录（保留最近 3 份），手机丢失也有第二份</li>
             <li>锁定笔记正文是密文信封，换机后无法解密 —— 迁移请选择「含锁定笔记（明文）」导出</li>
             <li>备份与导出都排除「回收站」；恢复按备份条目回到快照，备份外的本地笔记不受影响</li>
@@ -225,7 +227,7 @@ pinned: true
             <div>
               <h2>下载小记</h2>
               <p class="download-meta">
-                <span data-latest-version>v1.9.2</span>
+                <span data-latest-version>v1.9.3</span>
                 <span data-latest-date>2026-11-14</span>
                 <span data-latest-size>21.1 MB</span>
                 <span>Android 7.0+</span>

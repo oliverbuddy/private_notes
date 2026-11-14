@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../security/security_service.dart';
+import '../util/app_info.dart';
+import '../util/backup_crypto.dart';
 import '../util/date_format.dart';
 import '../util/native_zip.dart';
 import 'search_index.dart';
@@ -726,22 +728,32 @@ class NoteStore {
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.parent.create(recursive: true);
+    final excludes = <String>[
+      ..._alwaysExcluded,
+      // 旧版本留下的明文导出目录：不该被备份打包带出去。
+      ...await _legacyExportDirs(),
+    ];
+    File? manifestFile;
     try {
-      await zipNotesToFile(
-        sourceRoot: root.path,
-        targetPath: tmp.path,
-        excludes: <String>[
-          ..._alwaysExcluded,
-          // 旧版本留下的明文导出目录：不该被备份打包带出去。
-          ...await _legacyExportDirs(),
-        ],
-      );
-      await tmp.rename(file.path);
-    } on MissingPluginException {
-      // 内存版只读磁盘文件，锁定笔记写进去的仍是密文。
-      final bytes = await buildExportZip();
-      await tmp.writeAsBytes(bytes, flush: true);
-      await tmp.rename(file.path);
+      final (int noteCount, int assetCount) = await _archiveStats(excludes);
+      final String manifest =
+          await _manifestJson(kind: _backupKindName(name), noteCount: noteCount, assetCount: assetCount);
+      manifestFile = await createTempExportFile('manifest.json');
+      await manifestFile.writeAsString(manifest, flush: true);
+      try {
+        await zipNotesToFile(
+          sourceRoot: root.path,
+          targetPath: tmp.path,
+          excludes: excludes,
+          overrides: <String, String>{'manifest.json': manifestFile.path},
+        );
+        await tmp.rename(file.path);
+      } on MissingPluginException {
+        // 内存版只读磁盘文件，锁定笔记写进去的仍是密文。
+        final bytes = await buildExportZip(manifestJson: manifest);
+        await tmp.writeAsBytes(bytes, flush: true);
+        await tmp.rename(file.path);
+      }
     } catch (error) {
       // 压缩失败不能留下半截 `.tmp`（虽然列表过滤 .zip，但会白白占磁盘）。
       try {
@@ -752,6 +764,14 @@ class NoteStore {
         // 删不掉也不影响把原始错误抛给上层。
       }
       rethrow;
+    } finally {
+      try {
+        if (manifestFile != null && await manifestFile.exists()) {
+          await manifestFile.delete();
+        }
+      } catch (_) {
+        // 摘要临时文件删不掉由 cleanTempDir 兜底。
+      }
     }
     // 手动备份不设上限会一直堆，磁盘写满后连笔记都存不下。
     // 只保留最近 5 份（auto-* 由 pruneAutoBackups 单独管，恢复前快照不动）。
@@ -807,11 +827,15 @@ class NoteStore {
   ///
   /// [lastAt] 是上次成功时间：不足 24 小时直接跳过（[force] 为 true 时忽略），
   /// 避免每次回前台都重新打包。返回本次备份时间；跳过时返回 null。
+  ///
+  /// 传了 [password] 时先打包再加密成 `.xiaoji`：外置目录可能被网盘同步，
+  /// 口令加密能避免「锁定的笔记在备份里是明文」。
   Future<DateTime?> ensureExternalBackup({
     required String treeUri,
     DateTime? lastAt,
     int keep = 3,
     bool force = false,
+    String? password,
   }) async {
     final DateTime now = DateTime.now();
     if (!force &&
@@ -819,16 +843,31 @@ class NoteStore {
         now.difference(lastAt) < const Duration(hours: 24)) {
       return null;
     }
+    final bool encrypted = password != null && password.isNotEmpty;
     // 文件名带秒：同一分钟内连点两次「立即导出」也不会撞名。
     final String stamp =
         '${formatExportStamp(now)}-${now.second.toString().padLeft(2, '0')}';
-    final String name = 'xiaoji-$stamp.zip';
+    final String name = encrypted
+        ? 'xiaoji-$stamp$encryptedBackupExtension'
+        : 'xiaoji-$stamp.zip';
     final File temp = await createTempExportFile('external-$stamp.zip');
+    File? cipherTemp;
     try {
-      await buildExportZipToFile(temp.path);
+      await buildExportZipToFile(temp.path, encrypt: encrypted);
+      String uploadPath = temp.path;
+      if (encrypted) {
+        cipherTemp =
+            await createTempExportFile('external-$stamp$encryptedBackupExtension');
+        await encryptBackupFile(
+          sourcePath: temp.path,
+          targetPath: cipherTemp.path,
+          password: password,
+        );
+        uploadPath = cipherTemp.path;
+      }
       await writeFileToTree(
         treeUri: treeUri,
-        sourcePath: temp.path,
+        sourcePath: uploadPath,
         fileName: name,
         keepPrefix: 'xiaoji-',
         keep: keep,
@@ -836,12 +875,14 @@ class NoteStore {
       return now;
     } finally {
       // 临时 zip 是完整数据副本：写完必须删，失败也不能留。
-      try {
-        if (await temp.exists()) {
-          await temp.delete();
+      for (final File tmp in <File>[temp, if (cipherTemp != null) cipherTemp]) {
+        try {
+          if (await tmp.exists()) {
+            await tmp.delete();
+          }
+        } catch (_) {
+          // 删不掉由 cleanTempDir 在下次启动时兜底。
         }
-      } catch (_) {
-        // 删不掉由 cleanTempDir 在下次启动时兜底。
       }
     }
   }
@@ -884,6 +925,142 @@ class NoteStore {
       // 目录读不到就等于没有残留，不影响主流程。
     }
     return dirs;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 备份摘要（manifest.json）
+  // ---------------------------------------------------------------------------
+
+  /// 备份包内 `manifest.json` 的 schema 版本。
+  static const int backupSchemaVersion = 1;
+
+  /// 备份文件名 → 来源（写进 manifest，恢复前供用户核对）。
+  static String _backupKindName(String fileName) {
+    final String base = p.basename(fileName).toLowerCase();
+    if (base.startsWith('auto-')) {
+      return 'auto';
+    }
+    if (base.startsWith('pre-restore-')) {
+      return 'pre-restore';
+    }
+    if (base.startsWith('manual-')) {
+      return 'manual';
+    }
+    if (base.startsWith('xiaoji-export')) {
+      return 'export';
+    }
+    return 'backup';
+  }
+
+  Future<String> _manifestJson({
+    required String kind,
+    required int noteCount,
+    required int assetCount,
+    bool encrypted = false,
+  }) async {
+    String? appVersion;
+    try {
+      appVersion = (await loadAppInfo())?.versionName;
+    } catch (_) {
+      // 非 Android / 通道不可用时 manifest 里就不写版本号。
+    }
+    return jsonEncode(<String, Object?>{
+      'schema': backupSchemaVersion,
+      'app': 'xiaoji',
+      if (appVersion != null && appVersion.isNotEmpty) 'appVersion': appVersion,
+      'createdAt': DateTime.now().toIso8601String(),
+      'kind': kind,
+      'noteCount': noteCount,
+      'assetCount': assetCount,
+      'encrypted': encrypted,
+    });
+  }
+
+  /// 统计本次打包会带走的笔记与附件数量（按排除规则过滤）。
+  ///
+  /// 只数条目、不读内容：几千条笔记也只是目录遍历。
+  Future<(int, int)> _archiveStats(List<String> excludes) async {
+    bool excluded(String path) => excludes
+        .any((String item) => path == item || path.startsWith('$item/'));
+
+    var notes = 0;
+    if (await notesDir.exists()) {
+      await for (final entity
+          in notesDir.list(recursive: true, followLinks: false)) {
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.md')) {
+          continue;
+        }
+        final String relative =
+            p.relative(entity.path, from: root.path).replaceAll('\\', '/');
+        if (!excluded(relative)) {
+          notes += 1;
+        }
+      }
+    }
+    var assets = 0;
+    if (await assetsDir.exists()) {
+      await for (final entity
+          in assetsDir.list(recursive: true, followLinks: false)) {
+        if (entity is! File || entity.path.endsWith('.tmp')) {
+          continue;
+        }
+        final String relative =
+            p.relative(entity.path, from: root.path).replaceAll('\\', '/');
+        if (!excluded(relative)) {
+          assets += 1;
+        }
+      }
+    }
+    return (notes, assets);
+  }
+
+  /// 读取备份包摘要（不解压内容）。旧包没有 manifest 时回退到条目扫描。
+  ///
+  /// 原生通道不可用（桌面/测试）时用 archive 包解出条目名，
+  /// 语义与原生一致：manifest 优先，否则按 `.md` / `assets/` 计数。
+  Future<BackupSummary> inspectBackupFile(String path) async {
+    try {
+      final Map<Object?, Object?>? raw = await inspectBackupZip(path);
+      if (raw != null) {
+        return BackupSummary.fromManifest(
+          raw['manifest'] as String?,
+          noteCount: (raw['noteCount'] as num?)?.toInt() ?? 0,
+          assetCount: (raw['assetCount'] as num?)?.toInt() ?? 0,
+        );
+      }
+    } on MissingPluginException {
+      // 桌面/测试环境：走内存版。
+    } catch (_) {
+      // 原生读取失败（文件损坏/权限）时同样尝试内存版，失败再抛出。
+    }
+    return _inspectBackupWithArchive(path);
+  }
+
+  Future<BackupSummary> _inspectBackupWithArchive(String path) async {
+    final Uint8List bytes = await File(path).readAsBytes();
+    final Archive archive = ZipDecoder().decodeBytes(bytes);
+    String? manifest;
+    var notes = 0;
+    var assets = 0;
+    for (final ArchiveFile entry in archive.files) {
+      if (!entry.isFile) {
+        continue;
+      }
+      final String name = entry.name.replaceAll('\\', '/');
+      if (name == 'manifest.json') {
+        manifest = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      } else if (name.toLowerCase().endsWith('.md') &&
+          !name.endsWith('.tmp')) {
+        notes += 1;
+      } else if (name.startsWith('assets/')) {
+        assets += 1;
+      }
+    }
+    return BackupSummary.fromManifest(
+      manifest,
+      noteCount: notes,
+      assetCount: assets,
+    );
   }
 
   /// 按文件名前缀清理备份，只保留最新 [keep] 份。
@@ -1177,12 +1354,16 @@ class NoteStore {
   /// 条目 —— 调用方必须先完成身份验证。单条解密失败时保持原密文条目，
   /// 不让一条坏数据拖垮整次导出。
   ///
+  /// [encrypt] 只影响 manifest 里的 `encrypted` 标记：真正的加密由调用方
+  /// 在打包完成后用 [encryptBackupFile] 执行（先有 zip 才能加密）。
+  ///
   /// 导出给用户的包里不写真实 `settings.json`：里面有应用锁 PIN 的
   /// PBKDF2 哈希和盐，6 位数字 PIN 离开设备后可以离线枚举。这里写一份
   /// 只含主题/密度的脱敏版本。
   Future<File> buildExportZipToFile(
     String targetPath, {
     bool includeLocked = false,
+    bool encrypt = false,
   }) async {
     final file = File(targetPath);
     await file.parent.create(recursive: true);
@@ -1217,14 +1398,27 @@ class NoteStore {
       if (settingsOverride != null) {
         overrides['settings.json'] = settingsOverride;
       }
+      final List<String> archiveExcludes = <String>[
+        ..._alwaysExcluded,
+        ...await _legacyExportDirs(),
+        ...excludes,
+      ];
+      final (int noteCount, int assetCount) =
+          await _archiveStats(archiveExcludes);
+      final String manifestJson = await _manifestJson(
+        kind: 'export',
+        noteCount: noteCount,
+        assetCount: assetCount,
+        encrypted: encrypt,
+      );
+      final File manifest = await createTempExportFile('manifest.json');
+      await manifest.writeAsString(manifestJson, flush: true);
+      tempFiles.add(manifest);
+      overrides['manifest.json'] = manifest.path;
       await zipNotesToFile(
         sourceRoot: root.path,
         targetPath: file.path,
-        excludes: <String>[
-          ..._alwaysExcluded,
-          ...await _legacyExportDirs(),
-          ...excludes,
-        ],
+        excludes: archiveExcludes,
         overrides: overrides,
       );
       return file;
@@ -1274,19 +1468,22 @@ class NoteStore {
   /// isolate 里可以自由用 dart:io，直接传目录路径即可。
   Future<Uint8List> buildExportZip({
     Set<String> excludeNoteIds = const <String>{},
+    String? manifestJson,
   }) {
     return compute(
       _buildExportZipSync,
-      (notesDir.path, assetsDir.path, excludeNoteIds),
+      (notesDir.path, assetsDir.path, excludeNoteIds, manifestJson),
     );
   }
 
   /// 必须是顶层/静态函数才能进 isolate。
   static Future<Uint8List> _buildExportZipSync(
-    (String, String, Set<String>) dirs,
+    (String, String, Set<String>, String?) dirs,
   ) async {
-    final (notesPath, assetsPath, excludeIds) = dirs;
+    final (notesPath, assetsPath, excludeIds, manifestJson) = dirs;
     final archive = Archive();
+    var noteCount = 0;
+    var assetCount = 0;
     final notesDir = Directory(notesPath);
     if (await notesDir.exists()) {
       await for (final entity
@@ -1304,6 +1501,7 @@ class NoteStore {
         archive.addFile(
           ArchiveFile(p.basename(entity.path), bytes.length, bytes),
         );
+        noteCount += 1;
       }
     }
     final assetsDir = Directory(assetsPath);
@@ -1324,6 +1522,23 @@ class NoteStore {
         }
         final bytes = await entity.readAsBytes();
         archive.addFile(ArchiveFile('assets/$rel', bytes.length, bytes));
+        assetCount += 1;
+      }
+    }
+    if (manifestJson != null) {
+      try {
+        final decoded = jsonDecode(manifestJson);
+        if (decoded is Map<String, dynamic>) {
+          // 计数以真正写进包的条目为准：调用方传入的只是预估。
+          decoded['noteCount'] = noteCount;
+          decoded['assetCount'] = assetCount;
+          final bytes = utf8.encode(jsonEncode(decoded));
+          archive.addFile(
+            ArchiveFile('manifest.json', bytes.length, bytes),
+          );
+        }
+      } catch (_) {
+        // manifest 拼装失败不影响数据本身，跳过即可。
       }
     }
     final encoded = ZipEncoder().encode(archive);
@@ -1879,4 +2094,69 @@ class BackupEntry {
   String get path => file.path;
 
   String get name => p.basename(file.path);
+}
+
+/// 备份包摘要：恢复前给用户核对「这是哪一天的哪一版」。
+///
+/// 新备份有 `manifest.json`（[hasManifest] 为 true）；旧备份只能靠扫描
+/// 条目计数，此时 [createdAt] 为 null，界面只显示篇数/图片数。
+class BackupSummary {
+  const BackupSummary({
+    required this.noteCount,
+    required this.assetCount,
+    this.createdAt,
+    this.hasManifest = false,
+    this.encrypted = false,
+  });
+
+  /// 解析 manifest；缺失或格式不对时退回扫描计数（不抛异常）。
+  factory BackupSummary.fromManifest(
+    String? raw, {
+    required int noteCount,
+    required int assetCount,
+  }) {
+    final BackupSummary fallback =
+        BackupSummary(noteCount: noteCount, assetCount: assetCount);
+    if (raw == null || raw.trim().isEmpty) {
+      return fallback;
+    }
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return fallback;
+      }
+      int count(Object? value, int orElse) =>
+          value is num ? value.toInt() : orElse;
+      final Object? created = decoded['createdAt'];
+      return BackupSummary(
+        noteCount: count(decoded['noteCount'], noteCount),
+        assetCount: count(decoded['assetCount'], assetCount),
+        createdAt: created is String ? DateTime.tryParse(created) : null,
+        hasManifest: true,
+        encrypted: decoded['encrypted'] == true,
+      );
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  final int noteCount;
+  final int assetCount;
+  final DateTime? createdAt;
+  final bool hasManifest;
+  final bool encrypted;
+
+  /// `2026-11-13 · 32 篇 · 48 张图`
+  String get label {
+    final List<String> parts = <String>[];
+    final DateTime? time = createdAt;
+    if (time != null) {
+      final DateTime local = time.toLocal();
+      String two(int value) => value.toString().padLeft(2, '0');
+      parts.add('${local.year}-${two(local.month)}-${two(local.day)}');
+    }
+    parts.add('$noteCount 篇');
+    parts.add('$assetCount 张图');
+    return parts.join(' · ');
+  }
 }

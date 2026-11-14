@@ -8,6 +8,7 @@ import '../data/note_repository.dart';
 import '../data/note_store.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
+import '../security/security_service.dart';
 import '../security/unlock.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
@@ -18,6 +19,7 @@ import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/app_info.dart';
+import '../util/backup_crypto.dart';
 import '../util/date_format.dart';
 import '../util/native_zip.dart';
 import 'about_page.dart';
@@ -365,6 +367,11 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  /// 应用内备份或外置备份最近一次失败（设置页红点用）。
+  bool get _backupFailed =>
+      repository.lastBackupError != null ||
+      repository.lastExternalBackupError != null;
+
   /// 「备份与恢复」行的状态文案。
   ///
   /// 自动备份失败时用户无从感知，这里把它摊到设置页上：失败 → 提示重试；
@@ -485,6 +492,18 @@ class _SettingsPageState extends State<SettingsPage> {
                               label: '备份与恢复',
                               value: _backupOverviewText(),
                               chevron: true,
+                              // 备份失败不能只藏在弹层里：设置首屏给一个红点，
+                              // 让「最近一次没备份成功」在打开设置时立刻可见。
+                              trailing: _backupFailed
+                                  ? Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: colors.danger,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    )
+                                  : null,
                               onTap: _openBackupMenu,
                             ),
                             AppListRow(
@@ -919,6 +938,7 @@ class _SettingsPageState extends State<SettingsPage> {
       context,
       autoEnabled: autoEnabled,
       autoBusy: repository.externalBackupRunning,
+      encrypted: settings.backupEncrypted,
       autoStatusLabel: _autoBackupStatusText(),
       folderLabel: backupFolderLabel(settings.externalBackupUri),
       lastBackupLabel: _backupStatusText(),
@@ -939,6 +959,8 @@ class _SettingsPageState extends State<SettingsPage> {
         }
       case BackupAction.backupNow:
         await _backupNow();
+      case BackupAction.toggleEncrypt:
+        await _toggleBackupEncryption();
       case BackupAction.exportZip:
         await _exportAll();
       case BackupAction.restore:
@@ -1005,6 +1027,49 @@ class _SettingsPageState extends State<SettingsPage> {
     await _exportToFolder();
   }
 
+  /// 开启 / 关闭外置备份的口令加密。
+  ///
+  /// 开启时立刻设口令并马上重跑一次备份，让用户当场拿到一份加密包；
+  /// 关闭时清掉 Keystore 密文，提示下一次备份是明文。
+  Future<void> _toggleBackupEncryption() async {
+    final NoteSettings settings = repository.settings;
+    if (settings.backupEncrypted) {
+      await repository.updateSettings(
+        settings.copyWith(backupEncrypted: false, clearBackupPassword: true),
+      );
+      if (mounted) {
+        _showSnack('已关闭加密，下次备份是明文 zip');
+      }
+      return;
+    }
+    final String? password =
+        await showBackupPasswordSheet(context, creating: true);
+    if (password == null || !mounted) {
+      return;
+    }
+    String sealed;
+    try {
+      // 自动备份需要口令时不能再让用户输入一次，只能存「Keystore 封存的密文」。
+      sealed = await const SecurityService().sealText(password);
+    } catch (error) {
+      if (mounted) {
+        _showSnack('无法保存口令：$error');
+      }
+      return;
+    }
+    await repository.updateSettings(
+      settings.copyWith(backupEncrypted: true, backupPasswordSealed: sealed),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (repository.settings.externalBackupUri == null) {
+      _showSnack('已开启加密，选择文件夹后按加密方式备份');
+      return;
+    }
+    await _exportToFolder();
+  }
+
   /// 立即把导出包写进外置目录（强制，忽略 24 小时间隔）。
   Future<void> _exportToFolder() async {
     final DateTime? at = await repository.runExternalBackup(force: true);
@@ -1062,7 +1127,7 @@ class _SettingsPageState extends State<SettingsPage> {
       // 只取路径，不把 zip 读进内存（大备份会 OOM）。
       final picked = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: <String>['zip'],
+        allowedExtensions: <String>['zip', 'xiaoji'],
         withData: false,
       );
       path = picked?.files.single.path;
@@ -1076,24 +1141,70 @@ class _SettingsPageState extends State<SettingsPage> {
         return; // 用户取消
       }
     }
+    final String backupPath = path!;
 
-    final confirmed = await showXiaojiConfirmSheet(
-      context: context,
-      title: '从备份恢复？',
-      message: '备份里与现有小记同 id 的会被覆盖为备份内容，其余保留。'
-          '恢复前会自动留一份当前数据的快照。',
-      confirmLabel: '恢复',
-    );
-    if (confirmed != true || !mounted) {
-      return;
-    }
-
-    setState(() => _restoring = true);
+    File? decrypted;
     try {
+      // 1. 加密包先要口令：解密到临时 zip，后续流程与明文包完全一致。
+      if (await isEncryptedBackup(backupPath)) {
+        if (!mounted) {
+          return;
+        }
+        final String? password =
+            await showBackupPasswordSheet(context, creating: false);
+        if (password == null || !mounted) {
+          return;
+        }
+        try {
+          decrypted =
+              await repository.store.createTempExportFile('restore-decoded.zip');
+          await decryptBackupFile(
+            sourcePath: backupPath,
+            targetPath: decrypted.path,
+            password: password,
+          );
+        } on BackupPasswordException catch (error) {
+          if (mounted) {
+            _showSnack(error.message);
+          }
+          return;
+        } on MissingPluginException {
+          if (mounted) {
+            _showSnack('当前环境不支持解密备份');
+          }
+          return;
+        }
+        path = decrypted.path;
+      }
+      final String restorePath = path;
+
+      // 2. 先读摘要再确认：让用户看到「恢复的是哪一天、多少篇」，
+      //    而不是盲点一个「恢复」。旧包没有 manifest 时按条目计数。
+      BackupSummary summary;
+      try {
+        summary = await repository.store.inspectBackupFile(restorePath);
+      } catch (_) {
+        // 摘要读不出来不阻止恢复（例如包被第三方工具重新压缩过）。
+        summary = const BackupSummary(noteCount: 0, assetCount: 0);
+      }
+      if (!mounted) {
+        return;
+      }
+      final bool? confirmed = await showXiaojiConfirmSheet(
+        context: context,
+        title: '从备份恢复？',
+        message: _restoreConfirmMessage(summary),
+        confirmLabel: '恢复',
+      );
+      if (confirmed != true || !mounted) {
+        return;
+      }
+
+      setState(() => _restoring = true);
       // 恢复是覆盖语义：先强制留一份当前数据，恢复错了还能回滚。
       await repository.store.createPreRestoreSnapshot();
       await _refreshLastBackup();
-      final (int restored, int skipped) = await _restoreFromPath(path!);
+      final (int restored, int skipped) = await _restoreFromPath(restorePath);
       if (!mounted) {
         return;
       }
@@ -1104,10 +1215,28 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       _showSnack('恢复失败：$error');
     } finally {
-      if (mounted) {
+      try {
+        if (decrypted != null && await decrypted.exists()) {
+          await decrypted.delete();
+        }
+      } catch (_) {
+        // 解密出的临时 zip 是明文数据，删不掉交给 cleanTempDir 兜底。
+      }
+      if (mounted && _restoring) {
         setState(() => _restoring = false);
       }
     }
+  }
+
+  /// 恢复确认文案：摘要 + 合并覆盖语义 + 「删掉的会回来」。
+  String _restoreConfirmMessage(BackupSummary summary) {
+    final String header = summary.hasManifest
+        ? '备份信息：${summary.label}'
+        : '旧版备份（无摘要）：${summary.label}';
+    return '$header\n\n'
+        '备份里与现有小记同 id 的会被覆盖为备份内容，其余保留；'
+        '但在备份之后删除的笔记会重新出现。'
+        '恢复前会自动留一份当前数据的快照。';
   }
 
   /// 原生流式恢复；桌面/测试环境没有原生通道时回退到内存版。
@@ -1196,44 +1325,168 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
 
+    final bool? encryptChoice = await _askExportEncryption();
+    if (encryptChoice == null || !mounted) {
+      return;
+    }
+    String? password;
+    if (encryptChoice) {
+      password = await showBackupPasswordSheet(context, creating: true);
+      if (password == null || !mounted) {
+        return;
+      }
+    }
+
     setState(() => _exporting = true);
     File? temp;
+    File? cipherTemp;
     try {
       final stamp = formatExportStamp(DateTime.now());
-      final name = 'xiaoji-export-$stamp.zip';
-      temp = await repository.store.createTempExportFile(name);
+      final bool encrypt = password != null;
+      final name =
+          'xiaoji-export-$stamp${encrypt ? encryptedBackupExtension : '.zip'}';
+      temp = await repository.store
+          .createTempExportFile('xiaoji-export-$stamp.zip');
       await repository.store.buildExportZipToFile(
         temp.path,
         includeLocked: includeLocked,
+        encrypt: encrypt,
       );
+      File upload = temp;
+      if (encrypt) {
+        cipherTemp = await repository.store
+            .createTempExportFile('xiaoji-export-$stamp$encryptedBackupExtension');
+        await encryptBackupFile(
+          sourcePath: temp.path,
+          targetPath: cipherTemp.path,
+          password: password,
+        );
+        upload = cipherTemp;
+      }
       final saved = await saveFileToUser(
-        sourcePath: temp.path,
+        sourcePath: upload.path,
         fileName: name,
+        // 加密包不是 zip：用通用二进制类型，避免被当压缩包打开。
+        mimeType: encrypt ? 'application/octet-stream' : null,
       );
       if (!mounted || saved == null) {
         return; // 用户取消
       }
-      await _showExportResult('导出文件已保存到：\n$saved');
+      await _showExportResult(
+        encrypt
+            ? '导出文件已保存到：\n$saved\n\n文件已用口令加密（.xiaoji），'
+                '恢复时需要输入同一口令。'
+            : '导出文件已保存到：\n$saved',
+      );
     } on MissingPluginException {
       // 桌面/测试环境没有原生通道：退回内存版 + FilePicker。
-      await _exportWithFilePicker(includeLocked: includeLocked);
+      await _exportWithFilePicker(
+        includeLocked: includeLocked,
+        encrypted: password != null,
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       _showSnack('导出失败：$error');
     } finally {
-      try {
-        if (temp != null && await temp.exists()) {
-          await temp.delete();
+      for (final File? file in <File?>[temp, cipherTemp]) {
+        try {
+          if (file != null && await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {
+          // 临时文件删不掉不影响导出结果。
         }
-      } catch (_) {
-        // 临时文件删不掉不影响导出结果。
       }
       if (mounted) {
         setState(() => _exporting = false);
       }
     }
+  }
+
+  /// 导出前询问是否口令加密：返回 null = 取消，false = 明文，true = 加密。
+  Future<bool?> _askExportEncryption() {
+    return showXiaojiSheet<bool>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        Widget tile({
+          required IconData icon,
+          required String label,
+          required String subtitle,
+          required bool value,
+        }) {
+          return InkWell(
+            onTap: () => Navigator.of(sheetContext).pop(value),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: Row(
+                children: <Widget>[
+                  Icon(icon, size: AppIcon.action, color: colors.text),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: AppFontSize.summary,
+                            color: colors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: AppFontSize.meta,
+                            height: 1.5,
+                            color: colors.tertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                  child: Text(
+                    '导出 zip',
+                    style: AppText.sheetTitle.copyWith(color: colors.text),
+                  ),
+                ),
+                tile(
+                  icon: Icons.archive_outlined,
+                  label: '明文 zip（默认）',
+                  subtitle: '任何拿到文件的人都能直接打开',
+                  value: false,
+                ),
+                tile(
+                  icon: Icons.enhanced_encryption_outlined,
+                  label: '口令加密（.xiaoji）',
+                  subtitle: 'AES-256；恢复时需要同一口令，忘记无法找回',
+                  value: true,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   /// 有锁定笔记时的导出选项：默认排除，或明文导出（需另外验证身份）。
@@ -1330,7 +1583,16 @@ class _SettingsPageState extends State<SettingsPage> {
   ///
   /// 与主通道保持同样的隐私语义：默认排除锁定笔记；这里没有原生解密
   /// 能力，选「明文导出」只能把密文原样带出，并在结果里明确说明。
-  Future<void> _exportWithFilePicker({required bool includeLocked}) async {
+  Future<void> _exportWithFilePicker({
+    required bool includeLocked,
+    required bool encrypted,
+  }) async {
+    if (encrypted) {
+      // 没有原生加密通道的桌面/测试环境：宁可失败，也不能把
+      // 用户以为「已经加密」的明文 zip 存出去。
+      _showSnack('当前环境不支持口令加密导出');
+      return;
+    }
     try {
       final excludeIds = includeLocked
           ? const <String>{}

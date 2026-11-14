@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../editor/block.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
+import '../security/security_service.dart';
 import '../util/date_format.dart';
 import 'note_store.dart';
 import 'search_index.dart';
@@ -243,10 +244,30 @@ class NoteRepository extends ChangeNotifier {
     _externalBackupRunning = true;
     notifyListeners();
     try {
+      // 加密外置备份：口令以 Keystore 密文存在 settings 里，这里临时解开。
+      // 换机后 Keystore 不同、或用户清过数据，解不开就明确报错，
+      // 绝不悄悄退化成明文备份。
+      String? password;
+      if (_settings.backupEncrypted) {
+        final String? sealed = _settings.backupPasswordSealed;
+        if (sealed == null) {
+          _lastExternalBackupError = '未设置备份口令，请在「备份与恢复」里重新开启加密';
+          notifyListeners();
+          return null;
+        }
+        try {
+          password = await const SecurityService().openText(sealed);
+        } catch (_) {
+          _lastExternalBackupError = '无法读取本机备份口令，请重新设置';
+          notifyListeners();
+          return null;
+        }
+      }
       final DateTime? at = await _store.ensureExternalBackup(
         treeUri: treeUri,
         lastAt: lastExternalBackupTime,
         force: force,
+        password: password,
       );
       if (at != null) {
         // 记下成功时间，避免下次回前台又重打一遍。

@@ -112,6 +112,23 @@ class MainActivity : FlutterActivity() {
                     "saveFileToUser" -> backupBridge.saveFileToUser(
                         call.argument<String>("sourcePath") ?: "",
                         call.argument<String>("fileName") ?: "backup.zip",
+                        call.argument<String>("mimeType") ?: "application/zip",
+                        result,
+                    )
+                    "inspectZip" -> backupBridge.inspectZip(
+                        call.argument<String>("zipPath") ?: "",
+                        result,
+                    )
+                    "encryptFile" -> backupBridge.encryptFile(
+                        call.argument<String>("sourcePath") ?: "",
+                        call.argument<String>("targetPath") ?: "",
+                        call.argument<String>("password") ?: "",
+                        result,
+                    )
+                    "decryptFile" -> backupBridge.decryptFile(
+                        call.argument<String>("sourcePath") ?: "",
+                        call.argument<String>("targetPath") ?: "",
+                        call.argument<String>("password") ?: "",
                         result,
                     )
                     "pickDirectory" -> backupBridge.pickDirectory(result)
