@@ -29,7 +29,7 @@
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
 | 测试 | `flutter test` 434 / 434 通过 |
 | 静态检查 | `flutter analyze` No issues found |
-| APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 23MB、`app-armeabi-v7a-release.apk` 约 20MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
+| APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 21MB、`app-armeabi-v7a-release.apk` 约 19MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
 
 ## 功能
