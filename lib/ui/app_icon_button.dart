@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import 'pressable.dart';
 
@@ -42,6 +43,12 @@ class AppIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
     final Color foreground = color ?? (selected ? colors.accent : colors.text);
+    // 桌面端图标收一档：27 寸屏上 24vp 图标与正文同高，比 macOS 原生
+    // 工具栏（16–18vp 视觉）粗一截；热区不变，只把图形缩小更精细。
+    final double drawnSize =
+        PlatformFeatures.isDesktop ? iconSize * 0.82 : iconSize;
+    final double drawnBackground =
+        PlatformFeatures.isDesktop ? backgroundSize - 4 : backgroundSize;
 
     final Widget button = AppPressable(
       onTap: onTap,
@@ -51,15 +58,15 @@ class AppIconButton extends StatelessWidget {
         height: hitSize,
         child: Center(
           child: Container(
-            width: backgroundSize,
-            height: backgroundSize,
+            width: drawnBackground,
+            height: drawnBackground,
             decoration: selected
                 ? BoxDecoration(
                     color: colors.accentBg,
                     shape: BoxShape.circle,
                   )
                 : null,
-            child: Icon(icon, size: iconSize, color: foreground),
+            child: Icon(icon, size: drawnSize, color: foreground),
           ),
         ),
       ),

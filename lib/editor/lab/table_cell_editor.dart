@@ -37,6 +37,7 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
     required this.cursorColor,
     required this.editorBackground,
     this.columnMax = 240,
+    this.fillWidth = false,
     this.onCellCommitted,
   }) : super(fit: TableComponentFit.scroll);
 
@@ -56,6 +57,10 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
   /// 单列宽度上限：手机/平板 240，桌面放宽到 320。
   final double columnMax;
 
+  /// 桌面：表格铺满正文宽度、各列等分（Notion / 语雀的桌面形态），
+  /// 不再按内容宽度收缩 + 横向滚动。
+  final bool fillWidth;
+
   /// 单元格内容提交回调；为 null 时不启用双击编辑。
   final void Function(String tableNodeId, int row, int column, String text)?
       onCellCommitted;
@@ -72,7 +77,10 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
     }
     viewModel.selectionColor = selectionColor;
     final int columns = node.columnCount;
-    if (columns > 0 && availableWidth > 0) {
+    if (fillWidth) {
+      // 铺满正文宽度、各列等分：与 Notion / 语雀 桌面版一致。
+      viewModel.columnWidth = const FlexColumnWidth();
+    } else if (columns > 0 && availableWidth > 0) {
       final double cap = (availableWidth / columns).clamp(96, columnMax);
       viewModel.columnWidth = CappedIntrinsicColumnWidth(cap.toDouble());
     }
@@ -92,6 +100,7 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
       viewModel: componentViewModel,
       cursorColor: cursorColor,
       editorBackground: editorBackground,
+      fillWidth: fillWidth,
       onCellCommitted: onCellCommitted,
     );
   }
@@ -105,6 +114,7 @@ class EditableTableComponent extends StatefulWidget {
     required this.viewModel,
     required this.cursorColor,
     required this.editorBackground,
+    this.fillWidth = false,
     this.onCellCommitted,
   });
 
@@ -112,6 +122,9 @@ class EditableTableComponent extends StatefulWidget {
   final MarkdownTableViewModel viewModel;
   final Color cursorColor;
   final Color editorBackground;
+
+  /// 铺满正文宽度（桌面形态），不再横向滚动。
+  final bool fillWidth;
   final void Function(String tableNodeId, int row, int column, String text)?
       onCellCommitted;
 
@@ -314,6 +327,15 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
   @override
   Widget build(BuildContext context) {
+    final Widget table = _buildInteractiveTable(context);
+    if (widget.fillWidth) {
+      // 桌面：表格本身就是正文宽度（列宽 FlexColumnWidth 等分），
+      // 不需要横向滚动容器；外层的 Table 撑满父级可用宽度。
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(width: double.infinity, child: table),
+      );
+    }
     return SingleAxisTrackpadAndWheelScroller(
       axis: Axis.horizontal,
       controller: _scrollController,
@@ -324,33 +346,38 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
           child: SingleChildScrollView(
             controller: _scrollController,
             scrollDirection: Axis.horizontal,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.basic,
-              hitTestBehavior: HitTestBehavior.translucent,
-              // Listener 只观察指针、不参与手势竞技场：双击进入单元格编辑，
-              // 单击仍然完整交给内核去选中整表（与官方组件同一套行为）。
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _handlePointerDown,
-                // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
-                // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
-                child: IgnorePointer(
-                  ignoring: _editRow == null,
-                  child: SelectableBox(
-                    selection: widget.viewModel.selection?.nodeSelection
-                            is UpstreamDownstreamNodeSelection
-                        ? widget.viewModel.selection?.nodeSelection
-                            as UpstreamDownstreamNodeSelection
-                        : null,
-                    selectionColor: widget.viewModel.selectionColor,
-                    child: BoxComponent(
-                      key: widget.componentKey,
-                      opacity: widget.viewModel.opacity,
-                      child: _buildTable(context),
-                    ),
-                  ),
-                ),
-              ),
+            child: table,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 可交互的表格主体：单击选表交给内核，双击进入单元格编辑。
+  Widget _buildInteractiveTable(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.basic,
+      hitTestBehavior: HitTestBehavior.translucent,
+      // Listener 只观察指针、不参与手势竞技场：双击进入单元格编辑，
+      // 单击仍然完整交给内核去选中整表（与官方组件同一套行为）。
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handlePointerDown,
+        // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
+        // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
+        child: IgnorePointer(
+          ignoring: _editRow == null,
+          child: SelectableBox(
+            selection: widget.viewModel.selection?.nodeSelection
+                    is UpstreamDownstreamNodeSelection
+                ? widget.viewModel.selection?.nodeSelection
+                    as UpstreamDownstreamNodeSelection
+                : null,
+            selectionColor: widget.viewModel.selectionColor,
+            child: BoxComponent(
+              key: widget.componentKey,
+              opacity: widget.viewModel.opacity,
+              child: _buildTable(context),
             ),
           ),
         ),

@@ -699,6 +699,37 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    testWidgets('桌面表格铺满正文宽度，不再按内容收缩', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: NewEditorPage(
+            repository: repository,
+            note: Note(
+              id: 'pc-table-fill',
+              created: DateTime(2026, 11, 1),
+              updated: DateTime(2026, 11, 1),
+              body: '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      final Size table = tester.getSize(find.byType(Table));
+      // 正文列宽 760，扣掉页边距后表格应铺满（而不是按内容缩到一百多）。
+      expect(table.width, greaterThan(600));
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('桌面表格：单击不会进入单元格编辑（双击才进入）', (
       WidgetTester tester,
     ) async {

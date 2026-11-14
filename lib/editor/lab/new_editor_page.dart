@@ -414,6 +414,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
     // 选区变化：块级激活态跟着光标所在行走，只需要监听 composer。
     _composer.addListener(_refreshActiveCommands);
+    _composer.addListener(_rememberSelection);
     _syncDocumentEmpty();
     // 输入法弹出/收起会改变可用视口：等布局结算后再校正一次光标可见性。
     WidgetsBinding.instance.addObserver(this);
@@ -2206,6 +2207,23 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   DateTime? _lastMarkdownPasteHint;
 
+  /// 右键前的选区（内核会把右键也当成「落光标」，选中会被清掉）。
+  DocumentSelection? _rememberedSelection;
+
+  /// 记住最近一次「同块内的非折叠选区」。
+  ///
+  /// 内核的鼠标交互把右键按下也当成「落光标」，会先把选区收成光标；
+  /// 右键菜单里的「复制 / 剪切」因此没有对象（用户反馈「选中没有了」）。
+  /// 这里持续记住选区，右键时按节点判断能否恢复。
+  void _rememberSelection() {
+    final DocumentSelection? selection = _composer.selection;
+    if (selection != null &&
+        !selection.isCollapsed &&
+        selection.base.nodeId == selection.extent.nodeId) {
+      _rememberedSelection = selection;
+    }
+  }
+
   /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
   Future<bool> _pasteFromClipboard() async {
     try {
@@ -3098,6 +3116,24 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
+  /// 右键把选区收成光标时，若点击仍在原选中的块内，恢复原选区。
+  void _restoreSelectionBeforeContextMenu() {
+    final DocumentSelection? remembered = _rememberedSelection;
+    final DocumentSelection? current = _composer.selection;
+    if (remembered == null || current == null || !current.isCollapsed) {
+      return;
+    }
+    if (current.extent.nodeId != remembered.extent.nodeId) {
+      // 右键点在别的块上：按桌面惯例把光标落到点击处。
+      _rememberedSelection = null;
+      return;
+    }
+    _composer.setSelectionWithReason(
+      remembered,
+      SelectionReason.userInteraction,
+    );
+  }
+
   /// 桌面右键菜单：复制 / 剪切 / 粘贴 / 全选。
   ///
   /// 主流桌面笔记都能在正文里右键；手机端没有右键，不会触发。
@@ -3108,6 +3144,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (overlay == null) {
       return;
     }
+    // 内核先处理了右键（把选区收成光标），这里按原选区恢复。
+    _restoreSelectionBeforeContextMenu();
     final DocumentSelection? selection = _composer.selection;
     final bool hasSelection = selection != null && !selection.isCollapsed;
     // 表格是整块选中、没有逐单元格光标：右键给它单独的「编辑 / 复制」入口。
@@ -3483,11 +3521,19 @@ class _NewEditorPageState extends State<NewEditorPage>
                 left: 0,
                 top: 0,
                 bottom: 0,
-                child: AppBackButton(
-                  // 详情页返回是高频动作：热区放到 56（默认 48），
-                  // 用户不用精确点中 24vp 的箭头（用户反馈「只有箭头有效」）。
-                  hitSize: 56,
+                // 覆盖顶栏左侧整段（箭头 + 标题区），与主流桌面应用一致：
+                // 点左上角任意位置都能返回，而不是只认 24vp 的箭头。
+                right: 96,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => Navigator.of(context).maybePop(),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: AppBackButton(
+                      hitSize: 56,
+                      onTap: () => Navigator.of(context).maybePop(),
+                    ),
+                  ),
                 ),
               ),
             Positioned(
@@ -3641,6 +3687,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               EditableTableComponentBuilder(
                 availableWidth: contentWidth - AppSpace.page * 2,
                 columnMax: 320,
+                // 桌面表格铺满正文宽度、各列等分（Notion / 语雀形态）。
+                fillWidth: true,
                 selectionColor: Color.alphaBlend(
                   colors.accent.withValues(alpha: 0.25),
                   colors.page,
