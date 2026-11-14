@@ -98,8 +98,12 @@ bool StartFileDrag(const std::vector<std::wstring>& paths) {
       static_cast<UINT>(pidls.size()),
       const_cast<PCIDLIST_ABSOLUTE*>(pidls.data()), &items);
   if (SUCCEEDED(hr) && items != nullptr) {
-    hr = SHCreateDataObject(nullptr, 0, nullptr, items, IID_IDataObject,
-                            reinterpret_cast<void**>(&data));
+    // 用 Shell 项数组自带的 DataObject 发起拖拽（Vista+ 的推荐做法）。
+    // 不用 SHCreateDataObject 的「IShellItemArray + IDataObject*」重载：
+    // 部分 Windows SDK 里没有导出该重载，会退化成 PIDL 版本并编译失败
+    // （v1.10.9 起 CI 的 error C2664 就是它）。
+    hr = items->BindToHandler(nullptr, BHID_DataObject, IID_IDataObject,
+                              reinterpret_cast<void**>(&data));
     items->Release();
   }
   for (PIDLIST_ABSOLUTE pidl : pidls) {
