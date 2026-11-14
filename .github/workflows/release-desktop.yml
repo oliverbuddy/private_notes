@@ -16,6 +16,9 @@ on:
   push:
     tags:
       - "v*"
+    # 临时：验证桌面端原生代码能否编译（不创建 Release）。
+    branches:
+      - "feat/cross-platform"
   workflow_dispatch:
 
 permissions:
