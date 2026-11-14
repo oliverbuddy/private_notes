@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import 'pressable.dart';
 import 'show_sheet.dart';
@@ -27,16 +28,38 @@ class SheetAction<T> {
   final bool selected;
 }
 
-/// 统一的底部动作菜单（主页长按、详情「⋯」等）。
+/// 触发按钮的全局矩形，用来把桌面菜单锚定在按钮下方。
 ///
-/// HarmonyOS 菜单规格：标题 20 Medium 左对齐、行高 56、24 图标、
-/// 0.5 分隔线（左缩进 16）、底部独立的 40 高「取消」按钮。
-/// 与确认弹层、选项弹层共用同一套弹层动画与安全区。
+/// 取不到（按钮还没布局）时返回 null，调用方退回居中/底部弹层。
+Rect? anchorRectOf(GlobalKey key) {
+  final RenderObject? renderObject = key.currentContext?.findRenderObject();
+  if (renderObject is! RenderBox ||
+      !renderObject.attached ||
+      !renderObject.hasSize) {
+    return null;
+  }
+  return renderObject.localToGlobal(Offset.zero) & renderObject.size;
+}
+
+/// 统一的动作菜单（主页长按/右键、详情「⋯」等）。
+///
+/// 桌面端：锚定在触发按钮下方的小弹窗（与 macOS / Windows 原生菜单
+/// 一致：贴住触发点、点空白即关、可用方向键移动）。
+/// 移动端：沿用底部动作菜单（HarmonyOS 规格，见下方实现）。
 Future<T?> showXiaojiActionSheet<T>({
   required BuildContext context,
   required String title,
   required List<SheetAction<T>> actions,
+  Rect? anchor,
 }) {
+  if (PlatformFeatures.isDesktop && anchor != null) {
+    return _showDesktopActionMenu<T>(
+      context: context,
+      title: title,
+      actions: actions,
+      anchor: anchor,
+    );
+  }
   return showXiaojiSheet<T>(
     context: context,
     builder: (BuildContext sheetContext) {
@@ -96,6 +119,89 @@ Future<T?> showXiaojiActionSheet<T>({
         ),
       );
     },
+  );
+}
+
+/// 桌面端的锚定动作菜单：紧贴触发按钮下方，标准 `showMenu` 交互。
+Future<T?> _showDesktopActionMenu<T>({
+  required BuildContext context,
+  required String title,
+  required List<SheetAction<T>> actions,
+  required Rect anchor,
+}) {
+  final RenderObject? overlayObject =
+      Overlay.of(context).context.findRenderObject();
+  if (overlayObject is! RenderBox) {
+    return Future<T?>.value();
+  }
+  final AppColors colors = AppColors.of(context);
+  // 菜单从按钮下沿展开，不会盖住按钮本身。
+  final Rect position = Rect.fromLTWH(
+    anchor.left,
+    anchor.bottom + 2,
+    anchor.width,
+    0,
+  );
+  return showMenu<T>(
+    context: context,
+    position: RelativeRect.fromRect(position, Offset.zero & overlayObject.size),
+    color: colors.page,
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.block),
+      side: BorderSide(color: colors.chipBorder, width: 0.5),
+    ),
+    items: <PopupMenuEntry<T>>[
+      if (title.isNotEmpty)
+        PopupMenuItem<T>(
+          enabled: false,
+          height: 34,
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: AppFontSize.caption, color: colors.tertiary),
+          ),
+        ),
+      for (final SheetAction<T> action in actions)
+        PopupMenuItem<T>(
+          value: action.value,
+          height: 40,
+          child: Row(
+            children: <Widget>[
+              if (action.icon != null) ...<Widget>[
+                Icon(
+                  action.icon,
+                  size: AppIcon.compact,
+                  color: action.destructive
+                      ? colors.danger
+                      : (action.selected ? colors.accent : colors.text),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppFontSize.labelLg,
+                    color: action.destructive
+                        ? colors.danger
+                        : (action.selected ? colors.accent : colors.text),
+                  ),
+                ),
+              ),
+              if (action.selected)
+                Icon(
+                  Icons.check_rounded,
+                  size: AppIcon.chevron,
+                  color: colors.accent,
+                ),
+            ],
+          ),
+        ),
+    ],
   );
 }
 
