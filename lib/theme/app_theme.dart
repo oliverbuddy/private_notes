@@ -530,6 +530,16 @@ abstract final class AppBreakpoints {
   static const double compact = 600;
   static const double medium = 1024;
 
+  /// 双栏阈值：宽度 ≥900 且高度 ≥520 时启用「列表 + 正文」并排。
+  ///
+  /// 高度条件是为了排除手机横屏（例如 932×430）：那种尺寸双栏会把
+  /// 正文压得太窄，仍走单栏。桌面窗口最小 560×480，也不会误触发。
+  static const double split = 900;
+  static const double splitMinHeight = 520;
+
+  static bool useSplitPane(double width, double height) =>
+      width >= split && height >= splitMinHeight;
+
   static bool isCompact(double width) => width < compact;
 
   /// 单列内容的最大宽度：手机全宽，平板/桌面不把一行拉得过长。

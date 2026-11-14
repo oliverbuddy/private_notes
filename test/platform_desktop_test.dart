@@ -5,8 +5,10 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:super_editor/super_editor.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
+import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/home/home_page.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/settings/backup_sheets.dart';
@@ -45,7 +47,8 @@ void main() {
       File('${source.path}/manifest.json').writeAsStringSync('{"v":1}');
       Directory('${source.path}/notes/2026-11').createSync(recursive: true);
       File('${source.path}/notes/2026-11/a.md').writeAsStringSync('# A');
-      File('${source.path}/notes/2026-11/locked.md').writeAsStringSync('secret');
+      File('${source.path}/notes/2026-11/locked.md')
+          .writeAsStringSync('secret');
       Directory('${source.path}/tmp').createSync(recursive: true);
       File('${source.path}/tmp/junk.tmp').writeAsStringSync('x');
       File('${source.path}/.hidden').writeAsStringSync('h');
@@ -192,7 +195,8 @@ void main() {
       addTearDown(tester.view.reset);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light(), home: HomePage(repository: repository)),
+        MaterialApp(
+            theme: AppTheme.light(), home: HomePage(repository: repository)),
       );
       await _pumpFrames(tester);
 
@@ -204,13 +208,84 @@ void main() {
       expect(listWidth, greaterThan(300));
     });
 
+    testWidgets('平板横屏（1024x768）也启用双栏', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(1024, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.text('选择一条小记开始阅读'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('手机横屏（932x430）保持单栏，不强行双栏', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      tester.view.physicalSize = const Size(932, 430);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      expect(find.text('选择一条小记开始阅读'), findsNothing);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('桌面宽屏：列表与详情并排，点笔记在右侧打开', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 双栏空态：列表在左，右侧提示选一条。
+      expect(find.text('选择一条小记开始阅读'), findsOneWidget);
+      expect(find.byType(NewEditorPage), findsNothing);
+
+      await tester.tap(find.textContaining('宽屏笔记正文').first);
+      await _pumpFrames(tester);
+
+      // 正文嵌在右侧，列表没有消失（不是整页路由跳走）。
+      expect(find.byType(NewEditorPage), findsOneWidget);
+      expect(find.byType(ListView), findsWidgets);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('宽屏弹层收窄到 560 并居中', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light(), home: HomePage(repository: repository)),
+        MaterialApp(
+            theme: AppTheme.light(), home: HomePage(repository: repository)),
       );
       await _pumpFrames(tester);
 
@@ -236,7 +311,8 @@ void main() {
       addTearDown(tester.view.reset);
 
       await tester.pumpWidget(
-        MaterialApp(theme: AppTheme.light(), home: HomePage(repository: repository)),
+        MaterialApp(
+            theme: AppTheme.light(), home: HomePage(repository: repository)),
       );
       await _pumpFrames(tester);
 
@@ -251,6 +327,75 @@ void main() {
             box.constraints.maxWidth == kXiaojiSheetMaxWidth),
         isFalse,
       );
+    });
+  });
+
+  group('桌面端：详情页交互与排版', () {
+    late Directory tempDir;
+    late NoteRepository repository;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('xiaoji_pc_editor_');
+      final NoteStore store = await NoteStore.openAt(
+        Directory('${tempDir.path}/Xiaoji'),
+      );
+      repository = NoteRepository(store);
+      await repository.load();
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    testWidgets('点进正文后工具栏可用，Aa 面板无需软键盘即可展开', (
+      WidgetTester tester,
+    ) async {
+      // 平台覆写必须在测试体内设置并在测试体内复位：widget 测试结束前
+      // 会校验 foundation 调试变量已还原，addTearDown 的时机晚于校验。
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: NewEditorPage(
+            repository: repository,
+            note: Note(
+              id: 'pc1',
+              created: DateTime(2026, 11, 1),
+              updated: DateTime(2026, 11, 1),
+              body: '# 第一章\n\n桌面端正文，双击应该可以选词。\n',
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 桌面没有软键盘（viewInsets 恒为 0）。修复前工具条被
+      // IgnorePointer 一直挡住，Aa 面板永远打不开。
+      final Offset textSpot =
+          tester.getTopLeft(find.byType(SuperEditor)) + const Offset(80, 120);
+      await tester.tapAt(textSpot);
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Aa'));
+      await _pumpFrames(tester);
+
+      expect(find.text('标题'), findsWidgets);
+      expect(find.text('结构'), findsWidgets);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('表格单列上限：桌面 320，手机/平板仍 240', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      expect(tableColumnCap(availableWidth: 728, columns: 2, max: 320), 320);
+      expect(tableColumnCap(availableWidth: 728, columns: 4, max: 320), 182);
+      expect(tableColumnCap(availableWidth: 358, columns: 2), 179);
     });
   });
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -360,6 +361,36 @@ class _ImageViewerPageState extends State<ImageViewerPage>
     _pointerDownPosition = event.localPosition;
   }
 
+  /// 桌面滚轮缩放：以指针为中心在 1x–4x 之间缩放，回到 1x 时归位。
+  ///
+  /// 手机没有滚轮，不会触发；桌面查看大图不再只能双击切换。
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    final double current = _transform.value.getMaxScaleOnAxis();
+    final double next =
+        (current * (event.scrollDelta.dy > 0 ? 0.9 : 1.1)).clamp(1.0, 4.0);
+    if ((next - current).abs() < 0.001) {
+      return;
+    }
+    if (next <= 1.0001) {
+      _transform.value = Matrix4.identity();
+      return;
+    }
+    final Offset focal = event.localPosition;
+    final Matrix4 matrix = _transform.value.clone();
+    final double ratio = next / current;
+    final Offset translation =
+        Offset(matrix.getTranslation().x, matrix.getTranslation().y);
+    matrix
+      ..setEntry(0, 0, next)
+      ..setEntry(1, 1, next)
+      ..setEntry(0, 3, focal.dx - (focal.dx - translation.dx) * ratio)
+      ..setEntry(1, 3, focal.dy - (focal.dy - translation.dy) * ratio);
+    _transform.value = matrix;
+  }
+
   /// InteractiveViewer 手势开始：1x 单指进入拖动关闭，双指/缩放态不进入。
   void _handleInteractionStart(ScaleStartDetails details) {
     // 正在回弹时重新按下：停在当前位移继续跟手。
@@ -487,8 +518,19 @@ class _ImageViewerPageState extends State<ImageViewerPage>
         systemNavigationBarColor: Colors.transparent,
         systemNavigationBarIconBrightness: Brightness.light,
       ),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
+      child: Focus(
+        // 桌面习惯：Esc 关闭大图。手机没有实体 Esc，不影响原手势。
+        autofocus: true,
+        onKeyEvent: (FocusNode node, KeyEvent event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            Navigator.of(context).maybePop();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
         body: AnimatedBuilder(
           animation: routeAnimation ?? kAlwaysCompleteAnimation,
           builder: (BuildContext context, Widget? _) {
@@ -508,6 +550,7 @@ class _ImageViewerPageState extends State<ImageViewerPage>
                   // 内的 ScaleGestureRecognizer 同阈值抢竞技场必输（详见类注释）。
                   child: Listener(
                     onPointerDown: _handlePointerDown,
+                    onPointerSignal: _handlePointerSignal,
                     child: Stack(
                       children: <Widget>[
                         Transform.translate(
@@ -618,6 +661,7 @@ class _ImageViewerPageState extends State<ImageViewerPage>
               ),
             );
           },
+        ),
         ),
       ),
     );

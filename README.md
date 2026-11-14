@@ -43,14 +43,14 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.10.1 |
+| 版本 | 1.10.2 |
 | 平台 | Android（APK）· macOS（ad-hoc 签名，未公证）· Windows（未签名）；iOS 工程未生成 |
-| 测试 | `flutter test` 449 / 449 通过 |
+| 测试 | `flutter test` 454 / 454 通过 |
 | 静态检查 | `flutter analyze` No issues found |
 | APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 21MB、`app-armeabi-v7a-release.apk` 约 19MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 桌面包 | `xiaoji-<版本>-macos-universal.dmg`（Intel + Apple 芯片）、`xiaoji-<版本>-windows-x64-setup.exe` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
-| 桌面验证 | Dart 层 449 测试共用（含 2000 条大库用例）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
+| 桌面验证 | Dart 层 454 测试共用（含 2000 条大库用例、桌面/平板双栏与详情页交互）；macOS/Windows 原生桥由 CI 在对应系统上编译，未做逐项真机回归 |
 
 ## 功能
 
@@ -83,10 +83,14 @@
 **自动备份到文件夹**（SAF 目录授权，每 24h 写一份，保留最近 3 份；可选口令加密）·
 Android 系统备份已关闭（`allowBackup=false` + `data_extraction_rules`）
 
-**桌面端（macOS / Windows）**：原生窗口（macOS 记忆位置与大小，最小 560×480）·
-宽屏内容限宽居中、弹层封顶 560dp · `⌘N` / `Ctrl+N` 新建 · 保存与选目录走系统对话框 ·
-备份可直接写进本机文件夹（保留最近 3 份）· 锁定内容窗口级截屏屏蔽
-（macOS `sharingType` / Windows `WDA_EXCLUDEFROMCAPTURE`）· 密钥存 Keychain / DPAPI
+**桌面端（macOS / Windows）**：桌面与平板横屏（≥900×520）双栏——左侧列表常驻、
+右侧正文，对齐 Apple Notes / 语雀 / Bear 的桌面形态；空态给出「新建小记」入口 ·
+详情页与首页共用断点（平板 680 / 桌面 760），顶栏、正文、标签栏、底部工具条同宽居中 ·
+点进正文即出现排版工具条（Aa 面板、标签、撤销/还原），Esc 或「完成」退出编辑 ·
+正文右键菜单（复制/剪切/粘贴/全选）、双击选词、列表右键菜单、卡片悬停反馈 ·
+图片查看器支持滚轮缩放与 Esc 关闭 · 表格单列上限桌面放宽到 320 ·
+保存与选目录走系统对话框 · 备份可直接写进本机文件夹（保留最近 3 份）·
+锁定内容窗口级截屏屏蔽（macOS `sharingType` / Windows `WDA_EXCLUDEFROMCAPTURE`）· 密钥存 Keychain / DPAPI
 
 **明确不做**：分享链接（需服务端）· 知识库 / 生成文档 · 账号与同步
 
@@ -460,5 +464,6 @@ docs/                                         GitHub Pages 落地页（下载 / 
 - [ ] 分享扩展 / 锁屏小组件
 - [x] 桌面端（macOS / Windows）工程、原生通道与 Actions 打包
 - [x] 平板适配：解除竖屏锁定、弹层限宽、顶栏与列表同宽
-- [ ] 平板 / 桌面双栏（列表 + 正文并排；需把编辑页从路由改为可嵌入面板）
+- [x] 桌面双栏（列表 + 正文并排，宽屏 ≥1024）
+- [x] 平板横屏双栏（≥900×520；手机横屏仍单栏）
 - [ ] iOS 平台工程与 Info.plist 配置

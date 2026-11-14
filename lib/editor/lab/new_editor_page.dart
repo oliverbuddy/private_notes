@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:file_picker/file_picker.dart';
@@ -21,6 +22,7 @@ import '../../ui/action_sheet.dart';
 import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
+import '../../ui/content_frame.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
@@ -119,6 +121,9 @@ class NewEditorPage extends StatefulWidget {
     required this.note,
     this.autoFocus = false,
     this.shareOnOpen = false,
+    this.embedded = false,
+    this.onClose,
+    this.onReplaced,
   });
 
   final NoteRepository repository;
@@ -131,6 +136,18 @@ class NewEditorPage extends StatefulWidget {
   /// 从列表长按「分享为图片」进入时置为 true：等首帧渲染完成后自动分享，
   /// 保证分享图取到的是详情页真实的文档布局。
   final bool shareOnOpen;
+
+  /// 桌面双栏模式：嵌在首页右侧作为常驻面板，而不是独立路由。
+  ///
+  /// 影响三处：不显示返回按钮、删除后不 pop 路由、恢复历史版本时
+  /// 通过 [onReplaced] 通知外层换内容（内嵌时没有可替换的路由）。
+  final bool embedded;
+
+  /// 内嵌模式下需要关闭右侧面板（例如删除当前笔记）。
+  final VoidCallback? onClose;
+
+  /// 内嵌模式下文档被整体替换（恢复历史版本）。
+  final ValueChanged<Note>? onReplaced;
 
   @override
   State<NewEditorPage> createState() => _NewEditorPageState();
@@ -273,6 +290,14 @@ class _NewEditorPageState extends State<NewEditorPage>
   bool _panelOpeningUntilHidden = false;
 
   bool get _panelExpanded => _panel != MarkdownToolbarPanel.none;
+
+  /// 各面板的固定高度（桌面端在工具条上方展开时要预留）。
+  static double _panelHeight(MarkdownToolbarPanel panel) => switch (panel) {
+        MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel.height,
+        MarkdownToolbarPanel.insert => MarkdownInsertPanel.height,
+        MarkdownToolbarPanel.attach => MarkdownAttachPanel.height,
+        MarkdownToolbarPanel.none => 0,
+      };
 
   /// 是否处在「面板 ↔ 键盘」的交替过程中。
   ///
@@ -495,10 +520,10 @@ class _NewEditorPageState extends State<NewEditorPage>
       final int level = blockType == header1Attribution
           ? 1
           : blockType == header2Attribution
-          ? 2
-          : blockType == header3Attribution
-          ? 3
-          : 0;
+              ? 2
+              : blockType == header3Attribution
+                  ? 3
+                  : 0;
       if (level == 0) {
         continue;
       }
@@ -1306,6 +1331,19 @@ class _NewEditorPageState extends State<NewEditorPage>
       setState(() => _panel = next);
       return;
     }
+    if (PlatformFeatures.isDesktop) {
+      // 桌面没有软键盘：面板直接在工具条上方展开，不需要锚点，
+      // 也不需要先收起输入法。之前的实现要求 ime > 0，PC 上面板
+      // 永远打不开（Aa 排版整块不可用）。
+      _lastSelection = _composer.selection;
+      setState(() {
+        _panel = next;
+        _toolbarAnchorIme = null;
+        _panelClosing = false;
+        _panelOpeningUntilHidden = false;
+      });
+      return;
+    }
     final double ime = MediaQuery.viewInsetsOf(context).bottom;
     if (ime <= 0) {
       // 键盘不在（浏览态 / 已收起）：没有「原键盘区域」可铺面板。
@@ -1340,14 +1378,14 @@ class _NewEditorPageState extends State<NewEditorPage>
       _panel = MarkdownToolbarPanel.none;
       _panelOpeningUntilHidden = false;
       // 锚点保留到键盘真正回来（_reconcilePanelWithKeyboard 里清理），
-      // 否则工具条会先掉到屏幕底部再被顶上来。
-      _panelClosing = showKeyboard;
+      // 否则工具条会先掉到屏幕底部再被顶上来。桌面没有键盘，不需要。
+      _panelClosing = showKeyboard && !PlatformFeatures.isDesktop;
     });
     // 兜底释放：系统键盘高度可能和展开前不同（候选栏/输入法切换），
     // 到不了锚点高度时锚点会一直留着，正文底部就会多出一片空白
     // （用户反馈「反复调起几次后偶现底部空白」）。超时后无条件释放。
     _scheduleAnchorRelease();
-    if (showKeyboard) {
+    if (showKeyboard && !PlatformFeatures.isDesktop) {
       // 键盘高度与展开前一致，工具条位置不会跳动。
       SystemChannels.textInput.invokeMethod<void>('TextInput.show');
     }
@@ -1833,6 +1871,11 @@ class _NewEditorPageState extends State<NewEditorPage>
       return;
     }
     // 整页重建：文档/选区/撤销栈全部按恢复后的内容重新初始化。
+    if (widget.embedded) {
+      // 内嵌在双栏右侧时没有路由可替换：交给外层用新内容重建面板。
+      widget.onReplaced?.call(restored);
+      return;
+    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => NewEditorPage(
@@ -2291,7 +2334,12 @@ class _NewEditorPageState extends State<NewEditorPage>
     await widget.repository.remove(_currentNote);
     _discarded = true;
     if (mounted) {
-      Navigator.of(context).pop();
+      if (widget.embedded) {
+        // 双栏：清空右侧面板，左侧列表仍在。
+        widget.onClose?.call();
+      } else {
+        Navigator.of(context).pop();
+      }
     }
   }
 
@@ -2412,147 +2460,173 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncImeState(imeInset);
     // 面板/键盘交替时按当前 ime 结算锚点（工具条保持同一屏幕 Y）。
     _reconcilePanelWithKeyboard(imeInset);
+    final bool desktop = PlatformFeatures.isDesktop;
+    // 详情页与首页/设置共用同一套断点：手机全宽、平板 680、桌面 760。
+    // 之前这里写死 640，桌面宽窗口下正文两侧空一大片、顶栏与标签栏却
+    // 通栏，视觉上完全对不上（PC 用户反馈的「排版不像桌面软件」）。
+    final double contentWidth = AppBreakpoints.contentMaxWidth(
+      MediaQuery.sizeOf(context).width,
+    );
     return Scaffold(
       backgroundColor: colors.page,
       // 键盘避让根修的延续：视口真正缩短，编辑器视口贴键盘上沿。
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         bottom: false,
-        child: Stack(
-          children: <Widget>[
-            Column(
-              children: <Widget>[
-                _buildHeader(colors),
-                Container(height: 0.5, color: colors.dividerStrong),
-                Expanded(
-                  // 工具条是浮层，会盖住正文底部。工具条可见时给视口
-                  // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
-                  // 上方，不再出现「最后几行被工具栏/键盘压住」。
-                  //
-                  // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
-                  // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
-                  // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
-                  // （用户反馈）。预留量每帧精确计算，所以不用动画。
-                  child: AnimatedBuilder(
-                    animation: _editing,
-                    builder: (
-                      BuildContext context,
-                      Widget? child,
-                    ) {
-                      final double panelReserve = _toolbarAnchorIme == null
-                          ? 0
-                          : math.max(_toolbarAnchorIme! - imeInset, 0);
-                      // 预留必须在「工具栏真的会盖住正文」时才有意义：
-                      //  - 键盘可见（工具条贴键盘上沿）；
-                      //  - 面板/键盘交替（工具条被锚点钉住）；
-                      //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
-                      //    冻结，工具条位置要全程不变）。
-                      // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
-                      // 选区还在、工具条已经滑走，多预留的一条就会变成页面
-                      // 底部一片「工具栏白底」的遮挡（用户反馈）。
-                      final bool reserve =
-                          imeInset > 0 || _panelTransitioning || _panelOpen;
-                      // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
-                      // 不含 safe area、也不随键盘高度变化：
-                      //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
-                      //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
-                      //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
-                      final double reserveHeight =
-                          _toolbarHeight + panelReserve;
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          bottom: reserve ? reserveHeight : 0,
-                        ),
-                        child: child,
-                      );
-                    },
-                    child: Theme(
-                      // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
-                      // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
-                      // 成 accent，不动全局 app_theme。
-                      data: Theme.of(context).copyWith(
-                        checkboxTheme: CheckboxThemeData(
-                          fillColor: WidgetStateProperty.resolveWith(
-                            (states) => states.contains(WidgetState.selected)
-                                ? colors.accent
-                                : null,
+        child: CallbackShortcuts(
+          // 桌面习惯：Esc 退出编辑态（工具栏随之收起）。
+          bindings: desktop
+              ? <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.escape):
+                      _hideKeyboard,
+                }
+              : const <ShortcutActivator, VoidCallback>{},
+          child: Stack(
+            children: <Widget>[
+              Column(
+                children: <Widget>[
+                  _buildHeader(colors, contentWidth),
+                  Container(height: 0.5, color: colors.dividerStrong),
+                  Expanded(
+                    // 工具条是浮层，会盖住正文底部。工具条可见时给视口
+                    // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
+                    // 上方，不再出现「最后几行被工具栏/键盘压住」。
+                    //
+                    // 子菜单展开时键盘收起、body 变高：这里把「键盘原本占的
+                    // 高度」补回来（锚点 - 当前 ime），正文视口高度全程不变。
+                    // 否则视口突然变高会让滚动位置被 clamp，光标跟着往下掉
+                    // （用户反馈）。预留量每帧精确计算，所以不用动画。
+                    child: AnimatedBuilder(
+                      animation: _editing,
+                      builder: (
+                        BuildContext context,
+                        Widget? child,
+                      ) {
+                        final double panelReserve = _toolbarAnchorIme == null
+                            ? 0
+                            : math.max(_toolbarAnchorIme! - imeInset, 0);
+                        // 预留必须在「工具栏真的会盖住正文」时才有意义：
+                        //  - 键盘可见（工具条贴键盘上沿）；
+                        //  - 面板/键盘交替（工具条被锚点钉住）；
+                        //  - 面板打开过的流程（链接弹层、选图/选文件，选区被
+                        //    冻结，工具条位置要全程不变）。
+                        // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
+                        // 选区还在、工具条已经滑走，多预留的一条就会变成页面
+                        // 底部一片「工具栏白底」的遮挡（用户反馈）。
+                        //
+                        // 桌面端没有输入法 inset，工具条在编辑态常显，
+                        // 所以只要有选区就要预留；面板再额外预留它自己的高度。
+                        final bool reserve = desktop
+                            ? _editing.value
+                            : (imeInset > 0 ||
+                                _panelTransitioning ||
+                                _panelOpen);
+                        // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
+                        // 不含 safe area、也不随键盘高度变化：
+                        //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
+                        //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
+                        //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
+                        final double desktopPanelReserve =
+                            desktop && _panelExpanded
+                                ? _panelHeight(_panel)
+                                : 0;
+                        final double reserveHeight =
+                            _toolbarHeight + panelReserve + desktopPanelReserve;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: reserve ? reserveHeight : 0,
                           ),
-                          side: BorderSide(color: colors.tertiary, width: 1.6),
+                          child: child,
+                        );
+                      },
+                      child: Theme(
+                        // checkbox 主色：内核的 Checkbox 走全局 CheckboxTheme，
+                        // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
+                        // 成 accent，不动全局 app_theme。
+                        data: Theme.of(context).copyWith(
+                          checkboxTheme: CheckboxThemeData(
+                            fillColor: WidgetStateProperty.resolveWith(
+                              (states) => states.contains(WidgetState.selected)
+                                  ? colors.accent
+                                  : null,
+                            ),
+                            side:
+                                BorderSide(color: colors.tertiary, width: 1.6),
+                          ),
                         ),
-                      ),
-                      child: LayoutBuilder(
-                        builder: (
-                          BuildContext context,
-                          BoxConstraints constraints,
-                        ) {
-                          // 占位提示要和正文内容列对齐：SingleColumnLayout
-                          // 在宽度超过 maxWidth(640) 时把内容整体居中，
-                          // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
-                          // （用户反馈「提示语和光标没对齐」）。
-                          const double contentMaxWidth = 640;
-                          final bool centered =
-                              constraints.maxWidth > contentMaxWidth;
-                          final double gutter = centered
-                              ? (constraints.maxWidth - contentMaxWidth) / 2 +
-                                  AppSpace.page
-                              : AppSpace.page;
-                          return Stack(
-                            children: <Widget>[
-                              SuperEditorAndroidControlsScope(
-                                controller: _androidControls,
-                                child: _buildEditor(colors),
-                              ),
-                              // 空文档占位提示（新建小记时的 tip）。
-                              // 不拦截点击：点它应该像点正文一样把光标放进来。
-                              // top 12 与段落规则里的 `padding top: 12` 一致，
-                              // 文字行盒与光标起点因此完全重合。
-                              Positioned(
-                                left: gutter,
-                                top: 12,
-                                right: gutter,
-                                child: IgnorePointer(
-                                  child: ValueListenableBuilder<bool>(
-                                    valueListenable: _documentEmpty,
-                                    builder: (
-                                      BuildContext context,
-                                      bool empty,
-                                      _,
-                                    ) {
-                                      if (!empty) {
-                                        return const SizedBox.shrink();
-                                      }
-                                      return Text(
-                                        '开始记录…',
-                                        style: TextStyle(
-                                          fontSize: AppFontSize.summary,
-                                          height: 1.7,
-                                          letterSpacing: 0.3,
-                                          leadingDistribution:
-                                              TextLeadingDistribution.even,
-                                          color: colors.tertiary,
-                                        ),
-                                      );
-                                    },
+                        child: LayoutBuilder(
+                          builder: (
+                            BuildContext context,
+                            BoxConstraints constraints,
+                          ) {
+                            // 占位提示要和正文内容列对齐：SingleColumnLayout
+                            // 在宽度超过 maxWidth 时把内容整体居中，
+                            // 提示语若仍按页边距摆放，宽屏上会比光标左出一截
+                            // （用户反馈「提示语和光标没对齐」）。
+                            final bool centered =
+                                constraints.maxWidth > contentWidth;
+                            final double gutter = centered
+                                ? (constraints.maxWidth - contentWidth) / 2 +
+                                    AppSpace.page
+                                : AppSpace.page;
+                            return Stack(
+                              children: <Widget>[
+                                SuperEditorAndroidControlsScope(
+                                  controller: _androidControls,
+                                  child: _buildEditor(colors, contentWidth),
+                                ),
+                                // 空文档占位提示（新建小记时的 tip）。
+                                // 不拦截点击：点它应该像点正文一样把光标放进来。
+                                // top 12 与段落规则里的 `padding top: 12` 一致，
+                                // 文字行盒与光标起点因此完全重合。
+                                Positioned(
+                                  left: gutter,
+                                  top: 12,
+                                  right: gutter,
+                                  child: IgnorePointer(
+                                    child: ValueListenableBuilder<bool>(
+                                      valueListenable: _documentEmpty,
+                                      builder: (
+                                        BuildContext context,
+                                        bool empty,
+                                        _,
+                                      ) {
+                                        if (!empty) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Text(
+                                          '开始记录…',
+                                          style: TextStyle(
+                                            fontSize: AppFontSize.summary,
+                                            height: 1.7,
+                                            letterSpacing: 0.3,
+                                            leadingDistribution:
+                                                TextLeadingDistribution.even,
+                                            color: colors.tertiary,
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
-                ),
-                // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
-                _buildTagBar(colors, imeInset),
-              ],
-            ),
-            // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
-            if (_panelExpanded) _buildPanelSheet(colors, imeInset),
-            // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
-            // 挪光标（旧版实测的坑）。
-            _buildToolbar(imeInset),
-          ],
+                  // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
+                  _buildTagBar(colors, imeInset, contentWidth),
+                ],
+              ),
+              // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
+              if (_panelExpanded) _buildPanelSheet(colors, imeInset),
+              // 工具条浮层：贴键盘上沿；空白处 Listener 吞事件，防止穿透
+              // 挪光标（旧版实测的坑）。
+              _buildToolbar(imeInset, contentWidth),
+            ],
+          ),
         ),
       ),
     );
@@ -2569,6 +2643,35 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 面板永远从工具栏下沿开始展开；内容按最终高度（锚点）布局后再裁剪，
   /// 所以内容本身不随动画上下漂移。
   Widget _buildPanelSheet(AppColors colors, double imeInset) {
+    // 桌面：面板直接浮在工具条上方，宽度与正文列对齐。
+    // 没有键盘区域可铺，也不需要锚点补偿。
+    if (PlatformFeatures.isDesktop) {
+      if (_panel == MarkdownToolbarPanel.none) {
+        return const SizedBox.shrink();
+      }
+      final double contentWidth = AppBreakpoints.contentMaxWidth(
+        MediaQuery.sizeOf(context).width,
+      );
+      return Positioned(
+        left: 0,
+        right: 0,
+        bottom: _toolbarHeight,
+        child: Container(
+          decoration: BoxDecoration(
+            color: colors.page,
+            border: Border(
+              top: BorderSide(color: colors.divider, width: 0.5),
+            ),
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: contentWidth),
+              child: _buildPanelContent(),
+            ),
+          ),
+        ),
+      );
+    }
     final double full = _toolbarAnchorIme ?? 0;
     final double visible = math.max(full - imeInset, 0);
     if (full <= 0 || visible <= 0) {
@@ -2590,49 +2693,108 @@ class _NewEditorPageState extends State<NewEditorPage>
             color: colors.page,
             // 面板内容垂直居中：＋ 面板只有一组、Aa 面板四行，顶在上沿会让
             // 下面留一大片空白（用户反馈「太空」）。居中后上下留白对称。
-            child: Center(
-              child: ValueListenableBuilder<Set<MarkdownCommand>>(
-                valueListenable: _activeCommands,
-                builder: (
-                  BuildContext context,
-                  Set<MarkdownCommand> active,
-                  _,
-                ) {
-                  return switch (_panel) {
-                    // 子菜单铺在工具条下方的键盘区域里，本身就是独立白面：
-                    // 不再画顶部分隔线（否则工具栏和面板之间多出一道横线）。
-                    MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel(
-                        active: active,
-                        showTopDivider: false,
-                        onPick: _runPanelCommand,
-                      ),
-                    MarkdownToolbarPanel.insert => MarkdownInsertPanel(
-                        active: active,
-                        showTopDivider: false,
-                        onPick: (MarkdownCommand command) {
-                          // 插入是一次性动作：收面板、回键盘，再执行。
-                          _closePanel(showKeyboard: true);
-                          _runToolbarCommand(command);
-                        },
-                      ),
-                    MarkdownToolbarPanel.attach => MarkdownAttachPanel(
-                        showTopDivider: false,
-                        onPick: (MarkdownAttachAction action) {
-                          // 选完收起面板，交给系统选择器（它会接管焦点）。
-                          _closePanel(showKeyboard: false);
-                          _onPanelOpening();
-                          _handleAttachAction(action);
-                        },
-                      ),
-                    MarkdownToolbarPanel.none => const SizedBox.shrink(),
-                  };
-                },
-              ),
-            ),
+            child: Center(child: _buildPanelContent()),
           ),
         ),
       ),
     );
+  }
+
+  /// 面板内容（Aa / 插入 / 附件），桌面与移动共用同一份。
+  Widget _buildPanelContent() {
+    return ValueListenableBuilder<Set<MarkdownCommand>>(
+      valueListenable: _activeCommands,
+      builder: (
+        BuildContext context,
+        Set<MarkdownCommand> active,
+        _,
+      ) {
+        return switch (_panel) {
+          // 子菜单铺在工具条下方的键盘区域里，本身就是独立白面：
+          // 不再画顶部分隔线（否则工具栏和面板之间多出一道横线）。
+          MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel(
+              active: active,
+              showTopDivider: false,
+              onPick: _runPanelCommand,
+            ),
+          MarkdownToolbarPanel.insert => MarkdownInsertPanel(
+              active: active,
+              showTopDivider: false,
+              onPick: (MarkdownCommand command) {
+                // 插入是一次性动作：收面板、回键盘，再执行。
+                _closePanel(showKeyboard: true);
+                _runToolbarCommand(command);
+              },
+            ),
+          MarkdownToolbarPanel.attach => MarkdownAttachPanel(
+              showTopDivider: false,
+              onPick: (MarkdownAttachAction action) {
+                // 选完收起面板，交给系统选择器（它会接管焦点）。
+                _closePanel(showKeyboard: false);
+                _onPanelOpening();
+                _handleAttachAction(action);
+              },
+            ),
+          MarkdownToolbarPanel.none => const SizedBox.shrink(),
+        };
+      },
+    );
+  }
+
+  /// 桌面右键菜单：复制 / 剪切 / 粘贴 / 全选。
+  ///
+  /// 主流桌面笔记都能在正文里右键；手机端没有右键，不会触发。
+  /// 粘贴走与工具条一致的 Markdown 智能粘贴，而不是系统默认粘贴。
+  Future<void> _showDesktopContextMenu(Offset globalPosition) async {
+    final RenderBox? overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) {
+      return;
+    }
+    final DocumentSelection? selection = _composer.selection;
+    final bool hasSelection = selection != null && !selection.isCollapsed;
+    final String? action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        overlay.size.width - globalPosition.dx,
+        overlay.size.height - globalPosition.dy,
+      ),
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'copy',
+          enabled: hasSelection,
+          child: const Text('复制'),
+        ),
+        PopupMenuItem<String>(
+          value: 'cut',
+          enabled: hasSelection,
+          child: const Text('剪切'),
+        ),
+        const PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(value: 'selectAll', child: Text('全选')),
+      ],
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    switch (action) {
+      case 'copy':
+        _ops.copy();
+      case 'cut':
+        _ops.cut();
+      case 'paste':
+        await _pasteFromClipboard();
+      case 'selectAll':
+        _ops.selectAll();
+    }
+    if (!mounted) {
+      return;
+    }
+    // 菜单路由会拿走焦点：关闭后交还编辑器，否则「菜单关了却打不了字」。
+    _editorFocus.requestFocus();
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -2660,14 +2822,18 @@ class _NewEditorPageState extends State<NewEditorPage>
   ///
   /// 编辑态且键盘弹起时整条隐藏：那时底部已经有工具条，再挂一条标签栏
   /// 会把正文挤掉，也和工具条抢位置。
-  Widget _buildTagBar(AppColors colors, double imeInset) {
+  Widget _buildTagBar(AppColors colors, double imeInset, double contentWidth) {
     return ValueListenableBuilder<bool>(
       valueListenable: _editing,
       builder: (BuildContext context, bool editing, _) {
         // 编辑态键盘弹起、或面板 ↔ 键盘交替时整条隐藏：底部已经有
         // 工具条/面板，再挂一条标签栏会把正文挤掉。交替期间也必须隐藏，
         // 否则正文视口会多出标签栏那一截，滚动位置被 clamp → 内容跟着动。
-        if (_panelTransitioning || (editing && imeInset > 0)) {
+        //
+        // 桌面端没有软键盘，但编辑态工具条常显且底部预留了它的高度，
+        // 标签栏留着会与工具条重叠，同样隐藏（标签入口就在工具条上）。
+        if (_panelTransitioning ||
+            (editing && (imeInset > 0 || PlatformFeatures.isDesktop))) {
           return const SizedBox.shrink();
         }
         final List<String> tags = _currentNote.tags;
@@ -2676,35 +2842,38 @@ class _NewEditorPageState extends State<NewEditorPage>
         if (tags.isEmpty) {
           return const SizedBox.shrink();
         }
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            AppSpace.page,
-            2,
-            AppSpace.page,
-            8 + MediaQuery.paddingOf(context).bottom,
-          ),
-          // 固定一行高：标签多了横向滚动，不再换行把正文顶上去。
-          // （换行会让底部条越堆越高，标签多时正文被压得只剩半屏。）
-          // width: infinity 必须给：Column 的 crossAxisAlignment 默认居中，
-          // 内容宽度只按标签占位时，只有一个标签会被整条居中（用户反馈）。
-          child: SizedBox(
-            width: double.infinity,
-            height: 22,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: <Widget>[
-                  for (final tag in tags)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _editTags,
-                        child: TagChip(label: tag),
+        return ContentFrame(
+          maxWidth: contentWidth,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpace.page,
+              2,
+              AppSpace.page,
+              8 + MediaQuery.paddingOf(context).bottom,
+            ),
+            // 固定一行高：标签多了横向滚动，不再换行把正文顶上去。
+            // （换行会让底部条越堆越高，标签多时正文被压得只剩半屏。）
+            // width: infinity 必须给：Column 的 crossAxisAlignment 默认居中，
+            // 内容宽度只按标签占位时，只有一个标签会被整条居中（用户反馈）。
+            child: SizedBox(
+              width: double.infinity,
+              height: 22,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: <Widget>[
+                    for (final tag in tags)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _editTags,
+                          child: TagChip(label: tag),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -2713,60 +2882,67 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  Widget _buildHeader(AppColors colors) {
-    return SizedBox(
-      height: AppSize.navBar,
-      child: Stack(
-        children: <Widget>[
-          // 顶栏按早期版本逻辑：居中显示更新时间（编辑后实时刷新）。
-          Center(
-            child: Text(
-              formatEditorTime(_updated),
-              style: AppText.meta.copyWith(color: colors.secondary),
+  Widget _buildHeader(AppColors colors, double contentWidth) {
+    // 顶栏与正文同一列宽：宽屏下返回键/更多按钮贴着正文边缘，
+    // 而不是甩到窗口最左/最右（桌面竞品的通用做法）。
+    return ContentFrame(
+      maxWidth: contentWidth,
+      child: SizedBox(
+        height: AppSize.navBar,
+        child: Stack(
+          children: <Widget>[
+            // 顶栏按早期版本逻辑：居中显示更新时间（编辑后实时刷新）。
+            Center(
+              child: Text(
+                formatEditorTime(_updated),
+                style: AppText.meta.copyWith(color: colors.secondary),
+              ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            child: AppBackButton(
-              onTap: () => Navigator.of(context).maybePop(),
-            ),
-          ),
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                // 标题 ≥ 2 个才显示目录：短文不需要导航，少一个图标就少一分
-                // "这块是干什么的"的负担。
-                if (_outline.length >= 2)
-                  AppIconButton(
-                    // 「文档 + 列表」：比旧版的 toc 更见名知义 —— 一眼能看出
-                    // 是「按标题列出的全文导航」，与语雀/Notion 的目录图标
-                    // 同一语义。
-                    icon: Icons.list_alt_rounded,
-                    onTap: _showOutline,
-                    tooltip: '目录',
-                  ),
-                // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
-                // 高频动作），顶栏只留笔记级操作「⋯」。
-                AppIconButton(
-                  icon: Icons.more_horiz_rounded,
-                  onTap: _showEditorMenu,
-                  tooltip: '更多',
+            // 双栏模式下没有「返回」：右侧面板常驻，左侧列表一直在。
+            if (!widget.embedded)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: AppBackButton(
+                  onTap: () => Navigator.of(context).maybePop(),
                 ),
-              ],
+              ),
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  // 标题 ≥ 2 个才显示目录：短文不需要导航，少一个图标就少一分
+                  // "这块是干什么的"的负担。
+                  if (_outline.length >= 2)
+                    AppIconButton(
+                      // 「文档 + 列表」：比旧版的 toc 更见名知义 —— 一眼能看出
+                      // 是「按标题列出的全文导航」，与语雀/Notion 的目录图标
+                      // 同一语义。
+                      icon: Icons.list_alt_rounded,
+                      onTap: _showOutline,
+                      tooltip: '目录',
+                    ),
+                  // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
+                  // 高频动作），顶栏只留笔记级操作「⋯」。
+                  AppIconButton(
+                    icon: Icons.more_horiz_rounded,
+                    onTap: _showEditorMenu,
+                    tooltip: '更多',
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildEditor(AppColors colors) {
+  Widget _buildEditor(AppColors colors, double contentWidth) {
     // 组词下划线跟随主题：每帧同步给插件（深色/浅色切换后也立刻正确）。
     _composingUnderlinePlugin.style = StraightUnderlineStyle(
       color: colors.accent.withValues(alpha: 0.55),
@@ -2785,96 +2961,110 @@ class _NewEditorPageState extends State<NewEditorPage>
         }
         return false;
       },
-      child: SuperEditor(
-        editor: _editor,
-        // 组词（语音/输入法候选）下划线统一成主题色细线，见插件说明。
-        plugins: <SuperEditorPlugin>{_composingUnderlinePlugin},
-        // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
-        focusNode: _editorFocus,
-        // 粘贴拦截：键盘粘贴与工具条粘贴走同一套 Markdown 解析。
-        imeOverrides: _pasteImeDecorator,
-        // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
-        // _ensureCaretVisible），内部自建的控制器拿不到位置。
-        scrollController: _editorScroll,
-        // 分享长图用的布局入口：直接取这份渲染结果，宽度/换行/表格与详情一致。
-        documentLayoutKey: _documentLayoutKey,
-        // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
-        selectionStyle: SelectionStyles(
-          // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
-          // 必然重叠；半透明色叠两层就会出现一条更深的蓝带（用户反馈）。
-          // 预先与页面底色混成不透明色，画多少层都是同一个颜色。
-          selectionColor: Color.alphaBlend(
-            colors.accent.withValues(alpha: 0.25),
-            colors.page,
+      child: Listener(
+        // 桌面右键：弹出复制/剪切/粘贴/全选；手机没有右键，不会触发。
+        onPointerDown: (PointerDownEvent event) {
+          if (PlatformFeatures.isDesktop &&
+              event.buttons == kSecondaryMouseButton) {
+            unawaited(_showDesktopContextMenu(event.position));
+          }
+        },
+        child: SuperEditor(
+          editor: _editor,
+          // 组词（语音/输入法候选）下划线统一成主题色细线，见插件说明。
+          plugins: <SuperEditorPlugin>{_composingUnderlinePlugin},
+          // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
+          focusNode: _editorFocus,
+          // 粘贴拦截：键盘粘贴与工具条粘贴走同一套 Markdown 解析。
+          imeOverrides: _pasteImeDecorator,
+          // 外部持有滚动控制器：光标被输入法/工具条挡住时要精确滚动（见
+          // _ensureCaretVisible），内部自建的控制器拿不到位置。
+          scrollController: _editorScroll,
+          // 分享长图用的布局入口：直接取这份渲染结果，宽度/换行/表格与详情一致。
+          documentLayoutKey: _documentLayoutKey,
+          // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
+          selectionStyle: SelectionStyles(
+            // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
+            // 必然重叠；半透明色叠两层就会出现一条更深的蓝带（用户反馈）。
+            // 预先与页面底色混成不透明色，画多少层都是同一个颜色。
+            selectionColor: Color.alphaBlend(
+              colors.accent.withValues(alpha: 0.25),
+              colors.page,
+            ),
           ),
+          androidHandleColor: colors.accent,
+          stylesheet: _buildStylesheet(colors, contentWidth),
+          // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
+          // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
+          contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
+            (SuperEditorContext context) =>
+                XiaojiLinkTapHandler(context.document),
+          ],
+          // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
+          // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
+          // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
+          documentOverlayBuilders: <SuperEditorLayerBuilder>[
+            const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+            const SuperEditorIosHandlesDocumentLayerBuilder(),
+            const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+            const SuperEditorAndroidHandlesDocumentLayerBuilder(caretWidth: 0),
+            const DefaultCaretOverlayBuilder(),
+            XiaojiCaretLayerBuilder(_composer),
+          ],
+          componentBuilders: <ComponentBuilder>[
+            // 相对路径图片解析（assets/… → 真实文件），必须排在默认构建器
+            // 之前才能接管 ImageNode；其余组件保持默认链（含 Task）。
+            _LabImageComponentBuilder(
+              repository: widget.repository,
+              editor: _editor,
+              onImageLongPress: _showImageActions,
+            ),
+            // 分隔线颜色接管：HorizontalRuleComponent 的线色写死 Colors.grey
+            // （源码实测，HorizontalRuleComponentViewModel 不透出 color 键，
+            // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
+            // 构建器前面，用主题 divider 色重建同一个组件。
+            const _LabHorizontalRuleComponentBuilder(),
+            // 代码块：官方 ParagraphComponent 外面包一层不接手势的视觉外壳
+            // （见 _LabCodeBlockComponentBuilder），光标/长按走内核原生路径。
+            _LabCodeBlockComponentBuilder(editor: _editor),
+            // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
+            _LabBlockquoteComponentBuilder(
+              editor: _editor,
+              focusNode: _editorFocus,
+            ),
+            // 任务勾选框对齐修复：官方 Checkbox 视觉盒 40px 导致框比文字
+            // 低约 10px（真机用户反馈），换自绘 22px 勾选框与首行视觉居中。
+            XiaojiTaskComponentBuilder(_editor),
+            // 文件附件：整行只有 `[文件名](assets/…)` 的段落渲染成卡片，
+            // 点击查看/复制路径，不再是一条点了没反应的下划线链接。
+            AttachmentComponentBuilder(
+              repository: widget.repository,
+              editor: _editor,
+              onShowActions: _showAttachmentActions,
+            ),
+            // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
+            const _LabListItemComponentBuilder(),
+            // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
+            // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
+            // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
+            // 才保留横向滚动兜底。断点差异只体现在这里，结构不动。
+            //
+            // 桌面端按真正的正文列宽（而不是窗口宽度）计算，并把单列上限
+            // 放宽到 320：桌面表格再按手机的 240 封顶会显得又窄又挤，
+            // 两三列表格不该出现横向滚动条。
+            _AdaptiveTableComponentBuilder(
+              availableWidth: contentWidth - AppSpace.page * 2,
+              columnMax: PlatformFeatures.isDesktop ? 320 : 240,
+            ),
+            ...defaultComponentBuilders,
+            const UnknownComponentBuilder(),
+          ],
         ),
-        androidHandleColor: colors.accent,
-        stylesheet: _buildStylesheet(colors),
-        // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
-        // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
-        contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
-          (SuperEditorContext context) =>
-              XiaojiLinkTapHandler(context.document),
-        ],
-        // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
-        // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
-        // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
-        documentOverlayBuilders: <SuperEditorLayerBuilder>[
-          const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
-          const SuperEditorIosHandlesDocumentLayerBuilder(),
-          const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
-          const SuperEditorAndroidHandlesDocumentLayerBuilder(caretWidth: 0),
-          const DefaultCaretOverlayBuilder(),
-          XiaojiCaretLayerBuilder(_composer),
-        ],
-        componentBuilders: <ComponentBuilder>[
-          // 相对路径图片解析（assets/… → 真实文件），必须排在默认构建器
-          // 之前才能接管 ImageNode；其余组件保持默认链（含 Task）。
-          _LabImageComponentBuilder(
-            repository: widget.repository,
-            editor: _editor,
-            onImageLongPress: _showImageActions,
-          ),
-          // 分隔线颜色接管：HorizontalRuleComponent 的线色写死 Colors.grey
-          // （源码实测，HorizontalRuleComponentViewModel 不透出 color 键，
-          // stylesheet 无法配），深色模式下灰线几乎不可见。这里排在默认
-          // 构建器前面，用主题 divider 色重建同一个组件。
-          const _LabHorizontalRuleComponentBuilder(),
-          // 代码块：官方 ParagraphComponent 外面包一层不接手势的视觉外壳
-          // （见 _LabCodeBlockComponentBuilder），光标/长按走内核原生路径。
-          _LabCodeBlockComponentBuilder(editor: _editor),
-          // 引用块：自建组件（官方实现点不进去且内边距写死 16/16）。
-          _LabBlockquoteComponentBuilder(
-            editor: _editor,
-            focusNode: _editorFocus,
-          ),
-          // 任务勾选框对齐修复：官方 Checkbox 视觉盒 40px 导致框比文字
-          // 低约 10px（真机用户反馈），换自绘 22px 勾选框与首行视觉居中。
-          XiaojiTaskComponentBuilder(_editor),
-          // 文件附件：整行只有 `[文件名](assets/…)` 的段落渲染成卡片，
-          // 点击查看/复制路径，不再是一条点了没反应的下划线链接。
-          AttachmentComponentBuilder(
-            repository: widget.repository,
-            editor: _editor,
-            onShowActions: _showAttachmentActions,
-          ),
-          // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
-          const _LabListItemComponentBuilder(),
-          // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
-          // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
-          // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
-          // 才保留横向滚动兜底。断点差异只体现在这里，结构不动。
-          _AdaptiveTableComponentBuilder(
-            availableWidth: MediaQuery.sizeOf(context).width - 36,
-          ),
-          ...defaultComponentBuilders,
-          const UnknownComponentBuilder(),
-        ],
       ),
     );
   }
 
-  Stylesheet _buildStylesheet(AppColors colors) {
+  Stylesheet _buildStylesheet(AppColors colors, double contentWidth) {
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -2918,7 +3108,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                 leadingDistribution: TextLeadingDistribution.even,
                 color: colors.text,
               ),
-              Styles.maxWidth: 640.0,
+              Styles.maxWidth: contentWidth,
               // 页边距用设计 token（列表/设置页同一个值）。正文、引用、
               // 代码块都走这条；图片/附件块的 ViewModel 也要用同一个值，
               // 否则媒体会通栏贴屏幕边（用户反馈「详情没有内边距」）。
@@ -3158,13 +3348,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
-              fontSize:
-                  AppFontSize.summary * CodeBlockCardStyle.fontSizeFactor,
+              fontSize: AppFontSize.summary * CodeBlockCardStyle.fontSizeFactor,
               height: CodeBlockCardStyle.lineHeight,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text
-                  .withValues(alpha: CodeBlockCardStyle.textAlpha),
+              color:
+                  colors.text.withValues(alpha: CodeBlockCardStyle.textAlpha),
             ),
             // 横向页边距从 BlockSelector.all 级联（16），卡片与正文同宽；
             // 卡片内边距在组件里给，这里只补块间呼吸。
@@ -3214,7 +3403,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 只在编辑态（有光标/选区）显示：浏览态露出来时按钮没有作用对象，
   /// 点下去只会 no-op，用户会误判成「功能坏了」。显隐用滑入/淡入，
   /// 内容区底部 padding 是常量，不会因为工具条出现而顶动正文。
-  Widget _buildToolbar(double imeInset) {
+  Widget _buildToolbar(double imeInset, double contentWidth) {
     const duration = Duration(milliseconds: 180);
     return Positioned(
       left: 0,
@@ -3229,7 +3418,13 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 工具栏也必须跟着收起；否则底部会一直挂着一条按钮条。
           // 子菜单展开、或正在「面板 → 键盘」回弹时，键盘高度可能短暂为
           // 0，但工具栏必须留下（否则会先滑下去再被顶上来，用户反馈）。
-          final bool show = editing && (imeInset > 0 || _panelTransitioning);
+          //
+          // 桌面端没有软键盘，`imeInset` 恒为 0；这里以前直接沿用
+          // 「必须有键盘」的条件，导致 PC 上点进正文后工具栏永远不出现，
+          // 排版/标签/撤销入口全部不可达。桌面改为「有选区即常显」。
+          final bool show = PlatformFeatures.isDesktop
+              ? editing
+              : (editing && (imeInset > 0 || _panelTransitioning));
           return IgnorePointer(
             // 不可见时也别让它接住点击（否则会点和渲染态完全无关的东西）。
             ignoring: !show,
@@ -3267,6 +3462,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                           onCommand: _runToolbarCommand,
                           onAttachAction: _handleAttachAction,
                           onHideKeyboard: _hideKeyboard,
+                          contentMaxWidth: contentWidth,
                           // 受控模式：面板由页面渲染在工具条下方（原键盘
                           // 区域），工具条本身不移动、不做正文预留。
                           panel: _panel,
@@ -4122,11 +4318,16 @@ double tableColumnCap({
 /// 手机窄屏下，长文本单元格以前会把列撑到内容宽度（整表几千 dp），
 /// 必须横向滑很久才能看完。现在每列最多拿到自己那份屏宽。
 class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
-  const _AdaptiveTableComponentBuilder({required this.availableWidth})
-      : super(fit: TableComponentFit.scroll);
+  const _AdaptiveTableComponentBuilder({
+    required this.availableWidth,
+    this.columnMax = 240,
+  }) : super(fit: TableComponentFit.scroll);
 
   /// 正文内容区宽度（已扣掉页面左右页边距）。
   final double availableWidth;
+
+  /// 单列宽度上限：手机/平板 240，桌面放宽到 320。
+  final double columnMax;
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -4141,7 +4342,11 @@ class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
     final int columns = node.columnCount;
     if (columns > 0 && availableWidth > 0) {
       viewModel.columnWidth = _CappedIntrinsicColumnWidth(
-        tableColumnCap(availableWidth: availableWidth, columns: columns),
+        tableColumnCap(
+          availableWidth: availableWidth,
+          columns: columns,
+          max: columnMax,
+        ),
       );
     }
     return viewModel;
@@ -4484,7 +4689,8 @@ class _ThemedComposingUnderlinePhase extends SingleColumnLayoutStylePhase {
         List<SingleColumnLayoutComponentViewModel>.generate(
       components.length,
       (int index) {
-        final SingleColumnLayoutComponentViewModel component = components[index];
+        final SingleColumnLayoutComponentViewModel component =
+            components[index];
         if (component is! TextComponentViewModel ||
             component.composingRegion == null) {
           return component;

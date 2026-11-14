@@ -56,6 +56,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 本次会话是否已经提示过备份失败（每个会话最多一次，不落盘）。
   bool _backupFailureNotified = false;
 
+  /// 桌面双栏：右侧当前打开的笔记（null = 显示空态）。
+  ///
+  /// 主流桌面笔记（Apple Notes / 语雀 / Bear）都是「列表常驻 + 正文
+  /// 并排」，而不是列表整页跳走再返回；这里只在桌面宽屏启用。
+  Note? _paneNote;
+
+  /// 右侧面板是否需要在首帧聚焦（新建笔记时）。
+  bool _paneAutoFocus = false;
+
+  /// 恢复历史版本后强制重建右侧面板（同一 id 也要换成新文档）。
+  int _paneRevision = 0;
+
+  /// 是否启用双栏（桌面与平板横屏共用）。
+  ///
+  /// 900×520 以上才并排：手机横屏（约 932×430）高度不够，仍走单栏。
+  bool get _splitEnabled {
+    final Size size = MediaQuery.sizeOf(context);
+    return AppBreakpoints.useSplitPane(size.width, size.height);
+  }
+
   NoteRepository get _repo => widget.repository;
 
   @override
@@ -186,6 +206,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           created: DateTime.now(),
           updated: DateTime.now(),
         );
+    // 桌面宽屏：列表不动，正文在右侧打开（主流双栏）。窄屏/平板仍走路由。
+    if (_splitEnabled) {
+      setState(() {
+        if (_paneNote?.id != effective.id) {
+          _paneRevision++;
+        }
+        _paneNote = effective;
+        _paneAutoFocus = note == null;
+      });
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => NewEditorPage(
@@ -464,6 +495,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) {
       return;
     }
+    // 删掉的正好是右侧打开的那条：面板回到空态，避免继续显示已删内容。
+    if (_paneNote?.id == note.id) {
+      setState(() => _paneNote = null);
+    }
     // 删除不再「不可逆」：正文和附件整体进了回收站，这里给一次即时撤销。
     showSnack(
       context,
@@ -522,18 +557,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             final notes = _repo.visibleNotes;
             _maybeNotifyBackupFailure(notes.isNotEmpty);
 
-            return Column(
+            final bool split = _splitEnabled;
+            // 双栏时列表是 340 的窄栏，本身就是「内容列」，不再套 ContentFrame；
+            // 单栏宽屏仍保持原来的限宽居中。
+            Widget framed(Widget child) =>
+                split ? child : ContentFrame(child: child);
+            final Widget listColumn = Column(
               children: <Widget>[
                 // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
                 // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
-                ContentFrame(
-                  child: _searchMode
+                framed(
+                  _searchMode
                       ? _buildSearchBar(colors)
                       : _buildTitleBar(colors),
                 ),
                 if (_repo.isSearching && !_repo.isLoading)
-                  ContentFrame(
-                    child: Padding(
+                  framed(
+                    Padding(
                       padding: const EdgeInsets.fromLTRB(
                         AppSpace.page,
                         AppSpace.xs,
@@ -565,10 +605,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       : (notes.isEmpty
                           ? _EmptyState(searching: _repo.isSearching)
                           // 平板/桌面：内容限宽居中，长列表不拉满整屏。
-                          : ContentFrame(
-                              child: _buildList(colors, notes, density),
-                            )),
+                          : framed(_buildList(colors, notes, density))),
                 ),
+              ],
+            );
+            if (!split) {
+              return listColumn;
+            }
+            // 桌面双栏：左列表 + 右正文（Apple Notes / 语雀 / Bear 形态）。
+            return Row(
+              children: <Widget>[
+                SizedBox(width: 340, child: listColumn),
+                Container(width: 0.5, color: colors.dividerStrong),
+                Expanded(child: _buildDetailPane(colors)),
               ],
             );
           },
@@ -576,7 +625,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
       // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
       // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
-      floatingActionButton: _searchMode
+      // 双栏模式改用列表栏顶部的「+」，不再让按钮压在右侧正文上。
+      floatingActionButton: (_searchMode || _splitEnabled)
           ? null
           // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
           : Tooltip(
@@ -607,6 +657,61 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /// 桌面双栏的右侧面板：空态提示或嵌入的详情页。
+  ///
+  /// 用 [ValueKey] 绑定笔记 id + 版本号：切换笔记/恢复历史版本时强制重建
+  /// 编辑器，旧页面 dispose 时会把未落盘的改动写完。
+  Widget _buildDetailPane(AppColors colors) {
+    final Note? note = _paneNote;
+    if (note == null) {
+      return ColoredBox(
+        color: colors.page,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.menu_book_outlined, size: 36, color: colors.tertiary),
+              const SizedBox(height: 12),
+              Text(
+                '选择一条小记开始阅读',
+                style: TextStyle(
+                  fontSize: AppFontSize.label,
+                  color: colors.secondary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: () => _openEditor(null),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('新建小记'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return NewEditorPage(
+      key: ValueKey<String>('pane-${note.id}-$_paneRevision'),
+      repository: _repo,
+      note: note,
+      autoFocus: _paneAutoFocus,
+      embedded: true,
+      onClose: () {
+        if (mounted) {
+          setState(() => _paneNote = null);
+        }
+      },
+      onReplaced: (Note restored) {
+        if (mounted) {
+          setState(() {
+            _paneNote = restored;
+            _paneRevision++;
+          });
+        }
+      },
+    );
+  }
+
   Widget _buildTitleBar(AppColors colors) {
     final activeTag = _repo.activeTag;
     return Padding(
@@ -624,6 +729,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             style: AppText.pageTitle.copyWith(color: colors.text),
           ),
           const Spacer(),
+          // 双栏时新建入口收到列表栏顶部（主流桌面形态），不再用悬浮球。
+          if (_splitEnabled)
+            _IconAction(
+              icon: Icons.add_rounded,
+              onTap: () => _openEditor(null),
+            ),
           // 标签入口（语雀式）：未选中时是描边图标；选中后整个入口变成
           // 「图标 + 标签名 + 清除」的胶囊，原位替换图标 —— 筛选状态
           // 一眼可见，也不再用一整行筛选条占掉列表高度。
@@ -670,8 +781,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.sell_rounded,
-                size: AppIcon.chip, color: colors.accent),
+            Icon(Icons.sell_rounded, size: AppIcon.chip, color: colors.accent),
             const SizedBox(width: 4),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 96),
