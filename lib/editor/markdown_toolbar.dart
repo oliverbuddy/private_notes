@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 
 /// 工具条能发出的命令。
@@ -234,12 +235,18 @@ class MarkdownAttachPanel extends StatelessWidget {
   /// 是独立的一块白面，再画一条线就变成「工具栏下面多出一道横线」。
   final bool showTopDivider;
 
-  static const List<(MarkdownAttachAction, IconData, String)> _mediaItems =
+  /// 插入面板的三个入口。
+  ///
+  /// 桌面没有摄像头，保留「拍照」只会点了报错，所以按平台过滤；
+  /// 「相册」在桌面走系统文件选择器（image_picker 的桌面实现），入口名称不变。
+  static List<(MarkdownAttachAction, IconData, String)> get _mediaItems =>
       <(MarkdownAttachAction, IconData, String)>[
-    (MarkdownAttachAction.gallery, Icons.photo_library_outlined, '相册'),
-    (MarkdownAttachAction.camera, Icons.photo_camera_outlined, '拍照'),
-    (MarkdownAttachAction.file, Icons.attach_file_rounded, '文件'),
-  ];
+        (MarkdownAttachAction.gallery, Icons.photo_library_outlined,
+            PlatformFeatures.isDesktop ? '图片' : '相册'),
+        if (!PlatformFeatures.isDesktop)
+          (MarkdownAttachAction.camera, Icons.photo_camera_outlined, '拍照'),
+        (MarkdownAttachAction.file, Icons.attach_file_rounded, '文件'),
+      ];
 
   @override
   Widget build(BuildContext context) {

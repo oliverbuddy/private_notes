@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../editor/block.dart';
 import '../models/note.dart';
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import '../ui/pressable.dart';
 import '../util/date_format.dart';
@@ -74,6 +75,8 @@ class NoteTileCompact extends StatelessWidget {
     return AppPressable(
       onTap: onTap,
       onLongPress: onLongPress,
+      // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
+      onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
       // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
       pressedColor: AppPress.overlay(context),
       pressedOpacity: 1,

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show PlatformDispatcher;
+import 'dart:ui' show FlutterView, PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -9,19 +9,31 @@ import 'data/note_repository.dart';
 import 'data/note_store.dart';
 import 'home/home_page.dart';
 import 'models/note_settings.dart';
+import 'platform/platform_features.dart';
 import 'security/app_lock_gate.dart';
 import 'theme/app_theme.dart';
+
+/// 启动时的逻辑宽度。取不到视图时按「窄屏」处理，保持旧行为。
+double _startupWidth() {
+  final FlutterView? view =
+      WidgetsBinding.instance.platformDispatcher.implicitView;
+  if (view == null) {
+    return 0;
+  }
+  return view.physicalSize.width / view.devicePixelRatio;
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 锁定竖屏：这是手机端的随手记工具，横屏下正文列宽/键盘避让都没有
-  // 适配过，跟着传感器转会直接把布局打散。国内同类 App 也一律竖屏。
-  // Android 侧同时在 manifest 里声明 screenOrientation="portrait"，
-  // 两侧都锁，避免启动瞬间先转一次。
-  await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
-    DeviceOrientation.portraitUp,
-  ]);
+  // 窄屏手机锁竖屏：随手记在竖屏下键盘避让/列宽最稳，国内同类也一律竖屏。
+  // 平板（宽度 ≥ 600）与桌面不锁：平板横屏才有空间，桌面窗口本来就能拉伸。
+  // Android 侧 manifest 已改成 fullUser，这里只在启动时再兜一层。
+  if (!PlatformFeatures.isDesktop && _startupWidth() < AppBreakpoints.compact) {
+    await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+      DeviceOrientation.portraitUp,
+    ]);
+  }
 
   // 状态栏透明（edge-to-edge）：部分机型在非 edge-to-edge 模式下会给
   // 状态栏垫一层半透明灰 scrim，观感很脏。全 app 页面顶层都有 SafeArea，
@@ -162,7 +174,9 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
             // builder 包住整个 Navigator，锁屏才能盖住所有路由。
             builder: (BuildContext context, Widget? child) => AppLockGate(
               repository: widget.repository,
-              child: child ?? const SizedBox.shrink(),
+              child: _DesktopShortcuts(
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
             home: HomePage(
               repository: widget.repository,
@@ -173,6 +187,46 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
       },
     );
   }
+}
+
+/// 桌面端全局快捷键。
+///
+/// 只做一件手机上没有、桌面上每天都要用的事：⌘N / Ctrl+N 新建。
+/// 其余（⌘W 关窗、⌘Q 退出、⌘Z 撤销）由系统与 Flutter 默认行为提供，
+/// 不再重复实现 —— 快捷键和系统习惯打架比没有更难用。
+class _DesktopShortcuts extends StatelessWidget {
+  const _DesktopShortcuts({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!PlatformFeatures.isDesktop) {
+      return child;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyN, meta: true): _NewNoteIntent(),
+        SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            _NewNoteIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _NewNoteIntent: CallbackAction<_NewNoteIntent>(
+            onInvoke: (_) {
+              newNoteRequests.value++;
+              return null;
+            },
+          ),
+        },
+        child: child,
+      ),
+    );
+  }
+}
+
+class _NewNoteIntent extends Intent {
+  const _NewNoteIntent();
 }
 
 class _StartupFailureApp extends StatelessWidget {

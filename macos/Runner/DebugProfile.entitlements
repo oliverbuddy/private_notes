@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 关闭 App Sandbox：本 App 只做本地笔记，不走 App Store，
+	     而「外置备份文件夹」需要跨启动保留访问权限 —— 沙盒下必须用
+	     security-scoped bookmark 才能做到。为了少一层平台差异，
+	     这里选择非沙盒形态；应用自身不申请任何网络权限。 -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- Flutter Debug 需要 JIT，Release 不需要。 -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>

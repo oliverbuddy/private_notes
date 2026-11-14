@@ -27,6 +27,9 @@ Future<bool> openExternalLink(String url) async {
     return handled ?? false;
   } on PlatformException {
     return false;
+  } on MissingPluginException {
+    // 纯测试环境没有平台通道：按「未处理」返回，不抛异常打断点击流程。
+    return false;
   }
 }
 
