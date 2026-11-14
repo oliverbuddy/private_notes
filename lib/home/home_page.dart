@@ -10,6 +10,7 @@ import '../editor/tag_editor_sheet.dart';
 import '../security/unlock.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
+import '../platform/platform_features.dart';
 import '../settings/settings_page.dart';
 import '../settings/tags_page.dart';
 import '../theme/app_theme.dart';
@@ -523,23 +524,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
             return Column(
               children: <Widget>[
-                _searchMode ? _buildSearchBar(colors) : _buildTitleBar(colors),
+                // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
+                // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
+                ContentFrame(
+                  child: _searchMode
+                      ? _buildSearchBar(colors)
+                      : _buildTitleBar(colors),
+                ),
                 if (_repo.isSearching && !_repo.isLoading)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpace.page,
-                      AppSpace.xs,
-                      AppSpace.page,
-                      AppSpace.sm,
-                    ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '共 ${notes.length} 条',
-                        style: TextStyle(
-                          fontSize: AppFontSize.caption,
-                          letterSpacing: 0.2,
-                          color: colors.tertiary,
+                  ContentFrame(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpace.page,
+                        AppSpace.xs,
+                        AppSpace.page,
+                        AppSpace.sm,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '共 ${notes.length} 条',
+                          style: TextStyle(
+                            fontSize: AppFontSize.caption,
+                            letterSpacing: 0.2,
+                            color: colors.tertiary,
+                          ),
                         ),
                       ),
                     ),
@@ -1152,25 +1161,26 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.md),
           Text(
-            '点右下角的笔开始',
+            PlatformFeatures.isDesktop ? '点右下角的笔，或按 ⌘N' : '点右下角的笔开始',
             style: TextStyle(
               fontSize: AppFontSize.labelLg,
               height: 1.75,
               color: colors.secondary,
             ),
           ),
-          Text(
-            '或从桌面小组件直接记录',
-            style: TextStyle(
-              fontSize: AppFontSize.labelLg,
-              height: 1.75,
-              color: colors.secondary,
+          if (!PlatformFeatures.isDesktop)
+            Text(
+              '或从桌面小组件直接记录',
+              style: TextStyle(
+                fontSize: AppFontSize.labelLg,
+                height: 1.75,
+                color: colors.secondary,
+              ),
             ),
-          ),
           // 空态是唯一不打扰的"教学位"：提前告诉用户长按能做什么，
           // 否则置顶/标签这些能力很难被自己发现。
           Text(
-            '写下后长按可置顶、加标签',
+            PlatformFeatures.isDesktop ? '写下后右键可置顶、加标签' : '写下后长按可置顶、加标签',
             style: TextStyle(
               fontSize: AppFontSize.labelLg,
               height: 1.75,

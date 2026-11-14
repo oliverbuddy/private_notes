@@ -10,11 +10,14 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules">
+        <!-- 不再强制竖屏：平板/折叠屏需要横屏空间。
+             fullUser = 跟随系统的「自动旋转」开关：手机端多数用户关着
+             自动旋转，行为与之前一致；打开了才允许横屏。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:screenOrientation="portrait"
+            android:screenOrientation="fullUser"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"

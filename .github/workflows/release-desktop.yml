@@ -1,0 +1,122 @@
+name: Release Desktop
+
+# 桌面端正式包：macOS（通用二进制）+ Windows（x64）。
+#
+# 触发方式与 Android 一致：推 v* 标签或手动触发。
+# 全部构建在 GitHub 托管的机器上完成，本地不需要 Xcode / Visual Studio。
+#
+# 签名策略（与「不把签名材料放线上」一致）：
+#   - macOS：ad-hoc 签名（codesign --sign -），不公证、不需要 Apple 开发者账号。
+#     用户首次打开需右键 →「打开」，或在终端执行
+#     `xattr -dr com.apple.quarantine /Applications/小记.app`。
+#   - Windows：不签名（无代码签名证书）。SmartScreen 会提示「更多信息 → 仍要运行」。
+#   - 仓库里没有任何证书/密钥；将来要正式签名，再按 Android 的方式
+#     从 Secrets 读取，绝不把 p12/pfx 提交进仓库。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build macOS app
+        run: |
+          flutter pub get
+          flutter build macos --release
+
+      - name: Ad-hoc sign and package
+        run: |
+          APP="build/macos/Build/Products/Release/xiaoji.app"
+          # ad-hoc 签名：未公证的包在 macOS 上至少要有个签名，
+          # 否则会被直接判定为「已损坏」而不是「无法验证开发者」。
+          codesign --force --deep --sign - \
+            --options runtime \
+            --entitlements macos/Runner/Release.entitlements "$APP"
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          NAME="xiaoji-${VERSION}-macos-universal.zip"
+          # ditto 保留资源分支与权限位，解压后 .app 可直接拖进「应用程序」。
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$NAME"
+          shasum -a 256 "$NAME" > "$NAME.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaoji-macos
+          path: |
+            xiaoji-*-macos-universal.zip
+            xiaoji-*-macos-universal.zip.sha256
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Android 工作流负责写 Release 说明，这里只补文件。
+          # 两个工作流可能同时创建同一个 Release，创建失败不影响后续上传。
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --title "小记 $GITHUB_REF_NAME" --notes "桌面端构建产物" || true
+          gh release upload "$GITHUB_REF_NAME" \
+            xiaoji-*-macos-universal.zip \
+            xiaoji-*-macos-universal.zip.sha256 --clobber
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Windows app
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Package and checksum
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Split('+')[0]
+          $name = "xiaoji-$version-windows-x64.zip"
+          # 整个 Release 目录都要打进去：exe 依赖同级的 data/ 与 flutter_windows.dll。
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $name -Force
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -FilePath "$name.sha256" -Encoding ascii -NoNewline
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaoji-windows
+          path: |
+            xiaoji-*-windows-x64.zip
+            xiaoji-*-windows-x64.zip.sha256
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --title "小记 $env:GITHUB_REF_NAME" --notes "桌面端构建产物"
+            if ($LASTEXITCODE -ne 0) { Write-Host "Release 已由另一个工作流创建，继续上传" }
+          }
+          gh release upload $env:GITHUB_REF_NAME (Get-ChildItem "xiaoji-*-windows-x64.zip*" | ForEach-Object { $_.Name }) --clobber

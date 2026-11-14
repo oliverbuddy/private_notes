@@ -19,6 +19,7 @@ class AppPressable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
+    this.onSecondaryTap,
     this.behavior = HitTestBehavior.opaque,
     this.pressedOpacity = 0.55,
     this.pressedScale = 0.98,
@@ -29,6 +30,10 @@ class AppPressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// 鼠标右键（桌面端）：主流桌面 App 用右键代替移动端的长按菜单。
+  final VoidCallback? onSecondaryTap;
+
   final HitTestBehavior behavior;
 
   /// 按下时的不透明度（iOS 约 50%–65%）。
@@ -90,6 +95,7 @@ class _AppPressableState extends State<AppPressable> {
         behavior: widget.behavior,
         onTap: widget.enabled ? widget.onTap : null,
         onLongPress: widget.enabled ? widget.onLongPress : null,
+        onSecondaryTap: widget.enabled ? widget.onSecondaryTap : null,
         child: AnimatedOpacity(
           opacity: active ? widget.pressedOpacity : 1,
           duration: AppMotion.fast,

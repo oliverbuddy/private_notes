@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../editor/block.dart';
 import '../editor/markdown_view.dart';
 import '../models/note.dart';
+import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import '../ui/pressable.dart';
 import '../ui/quote_block.dart';
@@ -90,6 +91,8 @@ class NoteTileComfortable extends StatelessWidget {
           child: AppPressable(
             onTap: onTap,
             onLongPress: onLongPress,
+            // 桌面端右键 = 移动端长按：同一份动作菜单，不另做一套。
+            onSecondaryTap: PlatformFeatures.isDesktop ? onLongPress : null,
             // 卡片不缩放，整块轻微压暗/提亮（鸿蒙卡片的按压手感）；
             // 用蒙层而不是整体降透明度：正文和缩略图不会跟着闪。
             pressedScale: 1,

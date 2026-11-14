@@ -14,6 +14,7 @@ import 'package:super_editor/super_editor.dart';
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
 import '../../data/note_store.dart';
+import '../../platform/platform_features.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
@@ -2308,7 +2309,10 @@ class _NewEditorPageState extends State<NewEditorPage>
   Future<void> _handleAttachAction(MarkdownAttachAction action) async {
     switch (action) {
       case MarkdownAttachAction.camera:
-        await _pickImage(ImageSource.camera);
+        // 桌面没有摄像头：万一入口被别处调用，退回文件选择而不是报错。
+        await _pickImage(PlatformFeatures.isDesktop
+            ? ImageSource.gallery
+            : ImageSource.camera);
         break;
       case MarkdownAttachAction.gallery:
         await _pickImage(ImageSource.gallery);
