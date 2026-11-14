@@ -2154,6 +2154,14 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_handlingImePaste) {
       return false;
     }
+    // ⌘V 已经由页面自己处理并插入过一次：紧接着的这次输入法上报是同一次
+    // 粘贴的「回声」，再插一次就是内容重复两份（用户反馈「复制两遍」）。
+    final DateTime? handledAt = _lastPasteHandledAt;
+    if (handledAt != null &&
+        DateTime.now().difference(handledAt) <
+            const Duration(milliseconds: 700)) {
+      return true;
+    }
     _handlingImePaste = true;
     try {
       final String? snapshot = _clipboardText;
@@ -2172,6 +2180,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         ops: _ops,
       ).pasteContent(content);
       if (handled) {
+        _lastImePasteAt = DateTime.now();
         _notifyMarkdownPaste();
       }
       return handled;
@@ -2207,6 +2216,12 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   DateTime? _lastMarkdownPasteHint;
 
+  /// 页面自己完成粘贴的时间：用来吞掉输入法紧随其后的「粘贴回声」。
+  DateTime? _lastPasteHandledAt;
+
+  /// 输入法完成粘贴的时间：⌘V 若晚到，不再重复插入。
+  DateTime? _lastImePasteAt;
+
   /// 右键前的选区（内核会把右键也当成「落光标」，选中会被清掉）。
   DocumentSelection? _rememberedSelection;
 
@@ -2226,6 +2241,12 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
   Future<bool> _pasteFromClipboard() async {
+    // 输入法刚刚同步处理过这次粘贴（IME 先到、⌘V 后到）：不重复插入。
+    final DateTime? imeAt = _lastImePasteAt;
+    if (imeAt != null &&
+        DateTime.now().difference(imeAt) < const Duration(milliseconds: 700)) {
+      return false;
+    }
     try {
       final bool handled = await MarkdownPaster(
         editor: _editor,
@@ -2234,6 +2255,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         ops: _ops,
       ).paste();
       if (handled) {
+        _lastPasteHandledAt = DateTime.now();
         _notifyMarkdownPaste();
       } else {
         _ops.paste();
@@ -2563,6 +2585,17 @@ class _NewEditorPageState extends State<NewEditorPage>
         event.logicalKey == LogicalKeyboardKey.keyV &&
         _composer.selection != null) {
       unawaited(_pasteFromClipboard());
+      return true;
+    }
+
+    // ⌘S / Ctrl+S：小记是自动保存，但用户按保存就想「立刻落盘」。
+    if (command &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isAltPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyS) {
+      _saveDebounce?.cancel();
+      unawaited(_flushSave());
+      _showHint('已保存');
       return true;
     }
 
