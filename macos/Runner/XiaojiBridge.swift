@@ -73,10 +73,40 @@ final class XiaojiBridge {
       saveImage(path: args["path"] as? String ?? "", result: result)
     case "shareImage":
       shareImage(path: args["path"] as? String ?? "", result: result)
+    case "appInfo":
+      // 桌面端没有 PackageManager：版本直接读 Info.plist，
+      // 与 pubspec.yaml 的 CFBundleShortVersionString 保持同一来源。
+      let info = Bundle.main.infoDictionary ?? [:]
+      let versionName = info["CFBundleShortVersionString"] as? String ?? ""
+      let versionCode = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
+      let bundleId = Bundle.main.bundleIdentifier ?? "com.xiaoji.xiaoji"
+      result([
+        "versionName": versionName,
+        "versionCode": versionCode,
+        "packageName": bundleId,
+      ])
+    case "toggleFullscreen":
+      toggleFullscreen(result: result)
     default:
       // 其余（分享导入、桌面小组件、SAF 目录等）是移动端专属能力，
       // Dart 侧已按 MissingPluginException 回退，这里明确不实现。
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  // MARK: - 窗口
+
+  /// 桌面习惯：F11 / ⌃⌘F 切换全屏，走系统原生全屏（绿点同款）。
+  private func toggleFullscreen(result: @escaping FlutterResult) {
+    DispatchQueue.main.async {
+      guard let window = NSApp.keyWindow
+        ?? NSApp.mainWindow
+        ?? NSApp.windows.first else {
+        result(false)
+        return
+      }
+      window.toggleFullScreen(nil)
+      result(true)
     }
   }
 

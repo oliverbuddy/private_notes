@@ -12,6 +12,7 @@ import 'models/note_settings.dart';
 import 'platform/platform_features.dart';
 import 'security/app_lock_gate.dart';
 import 'theme/app_theme.dart';
+import 'util/desktop_window.dart';
 
 /// 启动时的逻辑宽度。取不到视图时按「窄屏」处理，保持旧行为。
 double _startupWidth() {
@@ -191,7 +192,8 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
 
 /// 桌面端全局快捷键。
 ///
-/// 只做一件手机上没有、桌面上每天都要用的事：⌘N / Ctrl+N 新建。
+/// - ⌘N / Ctrl+N：新建小记（手机上没有的日常动作）；
+/// - F11、⌃⌘F：切换全屏（Windows 习惯 / macOS 系统全屏快捷键）。
 /// 其余（⌘W 关窗、⌘Q 退出、⌘Z 撤销）由系统与 Flutter 默认行为提供，
 /// 不再重复实现 —— 快捷键和系统习惯打架比没有更难用。
 class _DesktopShortcuts extends StatelessWidget {
@@ -209,12 +211,24 @@ class _DesktopShortcuts extends StatelessWidget {
         SingleActivator(LogicalKeyboardKey.keyN, meta: true): _NewNoteIntent(),
         SingleActivator(LogicalKeyboardKey.keyN, control: true):
             _NewNoteIntent(),
+        SingleActivator(LogicalKeyboardKey.f11): _ToggleFullscreenIntent(),
+        SingleActivator(
+          LogicalKeyboardKey.keyF,
+          meta: true,
+          control: true,
+        ): _ToggleFullscreenIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
           _NewNoteIntent: CallbackAction<_NewNoteIntent>(
             onInvoke: (_) {
               newNoteRequests.value++;
+              return null;
+            },
+          ),
+          _ToggleFullscreenIntent: CallbackAction<_ToggleFullscreenIntent>(
+            onInvoke: (_) {
+              toggleDesktopFullscreen();
               return null;
             },
           ),
@@ -227,6 +241,10 @@ class _DesktopShortcuts extends StatelessWidget {
 
 class _NewNoteIntent extends Intent {
   const _NewNoteIntent();
+}
+
+class _ToggleFullscreenIntent extends Intent {
+  const _ToggleFullscreenIntent();
 }
 
 class _StartupFailureApp extends StatelessWidget {

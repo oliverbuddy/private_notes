@@ -18,6 +18,49 @@
 
 namespace {
 
+// CMake 会注入 FLUTTER_VERSION / FLUTTER_VERSION_BUILD；保底避免未定义。
+#ifndef FLUTTER_VERSION
+#define FLUTTER_VERSION "0.0.0"
+#endif
+#ifndef FLUTTER_VERSION_BUILD
+#define FLUTTER_VERSION_BUILD 0
+#endif
+
+// 全屏状态：Windows 走无边框覆盖当前显示器，退出时恢复原样式与位置。
+bool g_fullscreen = false;
+WINDOWPLACEMENT g_saved_placement = {sizeof(WINDOWPLACEMENT)};
+LONG_PTR g_saved_style = 0;
+
+void ToggleFullscreen(HWND window) {
+  if (window == nullptr) {
+    return;
+  }
+  if (!g_fullscreen) {
+    g_saved_style = GetWindowLongPtr(window, GWL_STYLE);
+    g_saved_placement.length = sizeof(WINDOWPLACEMENT);
+    GetWindowPlacement(window, &g_saved_placement);
+    MONITORINFO monitor = {sizeof(MONITORINFO)};
+    if (!GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY),
+                        &monitor)) {
+      return;
+    }
+    SetWindowLongPtr(window, GWL_STYLE, g_saved_style & ~WS_OVERLAPPEDWINDOW);
+    SetWindowPos(window, HWND_TOP, monitor.rcMonitor.left,
+                 monitor.rcMonitor.top,
+                 monitor.rcMonitor.right - monitor.rcMonitor.left,
+                 monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    g_fullscreen = true;
+    return;
+  }
+  SetWindowLongPtr(window, GWL_STYLE, g_saved_style);
+  SetWindowPlacement(window, &g_saved_placement);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER |
+                   SWP_FRAMECHANGED);
+  g_fullscreen = false;
+}
+
 // 与 Android BackupBridge / macOS XiaojiBridge 保持一致的格式常量。
 constexpr char kEncMagic[] = "XJENC1";
 constexpr size_t kEncSaltBytes = 16;
@@ -586,6 +629,30 @@ void XiaojiBridge::HandleMethodCall(
     }
     ::CopyFileW(source.c_str(), buffer, FALSE);
     result->Success(flutter::EncodableValue());
+    return;
+  }
+
+  if (method == "appInfo") {
+    // 版本来自 CMake 注入的 FLUTTER_VERSION（同 pubspec），不另写常量。
+    std::string version = FLUTTER_VERSION;
+    const size_t plus = version.find('+');
+    if (plus != std::string::npos) {
+      version = version.substr(0, plus);
+    }
+    flutter::EncodableMap info;
+    info[flutter::EncodableValue("versionName")] =
+        flutter::EncodableValue(version);
+    info[flutter::EncodableValue("versionCode")] =
+        flutter::EncodableValue(static_cast<int32_t>(FLUTTER_VERSION_BUILD));
+    info[flutter::EncodableValue("packageName")] =
+        flutter::EncodableValue(std::string("com.xiaoji.xiaoji"));
+    result->Success(flutter::EncodableValue(info));
+    return;
+  }
+
+  if (method == "toggleFullscreen") {
+    ToggleFullscreen(window_);
+    result->Success(flutter::EncodableValue(true));
     return;
   }
 

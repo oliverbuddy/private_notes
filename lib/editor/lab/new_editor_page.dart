@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:follow_the_leader/follow_the_leader.dart' show LeaderLink;
 import 'package:flutter/services.dart';
@@ -44,6 +45,7 @@ import 'image_display_size.dart';
 import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'markdown_paste.dart';
+import 'markdown_shortcut.dart';
 import 'paste_ime_decorator.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
@@ -220,6 +222,12 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// （主流编辑器 Word / Notion 同语义）。
   String? _typingStyleNodeId;
 
+  /// Markdown 快捷输入兜底是否已排队（每帧最多检查一次）。
+  bool _shortcutScheduled = false;
+
+  /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
+  bool _draggingFiles = false;
+
   /// SuperEditor 自己的焦点节点。面板关闭后（选区可能被清空）用
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
   final FocusNode _editorFocus = FocusNode(debugLabel: 'xiaoji-editor');
@@ -385,6 +393,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         _refreshActiveCommands();
         _syncHistoryButtons();
         _syncDocumentEmpty();
+        _scheduleMarkdownShortcut();
       }),
     );
     // 选区变化：块级激活态跟着光标所在行走，只需要监听 composer。
@@ -2343,6 +2352,90 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
+  /// 桌面端 Markdown 快捷输入兜底（规则见 [matchMarkdownShortcut]）。
+  ///
+  /// 内核已经处理了 ASCII 的 `# ` / `- ` / `1. ` / `> `；这里只补桌面端
+  /// 容易踩到的差异（全角空格/记号、`[] ` 待办），并且**只在桌面启用**，
+  /// 移动端保持内核原有行为，不叠加第二套转换逻辑。
+  void _scheduleMarkdownShortcut() {
+    if (!PlatformFeatures.isDesktop || _shortcutScheduled || _disposed) {
+      return;
+    }
+    _shortcutScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _shortcutScheduled = false;
+      _applyMarkdownShortcut();
+    });
+  }
+
+  void _applyMarkdownShortcut() {
+    if (_disposed || !mounted) {
+      return;
+    }
+    // 组词期间不碰文档：下一次输入法提交会把改写覆盖回去。
+    if (_composer.composingRegion.value != null) {
+      return;
+    }
+    final DocumentSelection? selection = _composer.selection;
+    if (selection == null || !selection.isCollapsed) {
+      return;
+    }
+    if (selection.base.nodeId != selection.extent.nodeId) {
+      return;
+    }
+    final DocumentNode? node = _document.getNodeById(selection.extent.nodeId);
+    if (node is! ParagraphNode) {
+      return;
+    }
+    // 已经是标题/列表/引用/待办：内核已转换，不重复处理。
+    if (node.getMetadataValue(NodeMetadata.blockType) != null) {
+      return;
+    }
+    final NodePosition position = selection.extent.nodePosition;
+    if (position is! TextNodePosition) {
+      return;
+    }
+    final String text = node.text.toPlainText();
+    if (position.offset != text.length) {
+      return;
+    }
+    final MarkdownShortcutMatch? match = matchMarkdownShortcut(text);
+    if (match == null) {
+      return;
+    }
+    final MarkdownCommand command = switch (match.shortcut) {
+      MarkdownShortcut.h1 => MarkdownCommand.h1,
+      MarkdownShortcut.h2 => MarkdownCommand.h2,
+      MarkdownShortcut.h3 => MarkdownCommand.h3,
+      MarkdownShortcut.bullet => MarkdownCommand.bullet,
+      MarkdownShortcut.ordered => MarkdownCommand.ordered,
+      MarkdownShortcut.quote => MarkdownCommand.quote,
+      MarkdownShortcut.todo => MarkdownCommand.todo,
+    };
+    final DocumentPosition start = DocumentPosition(
+      nodeId: node.id,
+      nodePosition: const TextNodePosition(offset: 0),
+    );
+    _editor.execute(<EditRequest>[
+      DeleteContentRequest(
+        documentRange: DocumentRange(
+          start: start,
+          end: DocumentPosition(
+            nodeId: node.id,
+            nodePosition: TextNodePosition(offset: match.length),
+          ),
+        ),
+      ),
+      ChangeSelectionRequest(
+        DocumentSelection.collapsed(position: start),
+        SelectionChangeType.placeCaret,
+        SelectionReason.userInteraction,
+      ),
+    ]);
+    _commands.handleCommand(command);
+    _refreshActiveCommands();
+  }
+
   void _hideKeyboard() {
     // 子菜单必须先收起：工具栏马上要滑走，挂着面板会看起来像没收干净。
     _closePanel(showKeyboard: false);
@@ -2382,21 +2475,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         _restoreEditingSelection();
         return;
       }
-      final relative = await widget.repository.store.importAttachment(
-        noteId: widget.note.id,
-        sourcePath: file.path,
-      );
-      if (!mounted) {
-        return;
-      }
-      // 选择器/相机可能把焦点和选区抢走：插入前把快照选区还回来，
-      // 图片才会落在用户原本的光标处。
-      _restoreEditingSelection();
-      // 新插入的图片默认用小图：正文里先给一个不打断阅读的缩略，
-      // 需要看细节时再通过图片菜单切「大图」（对齐主流笔记 App）。
-      _commands.insertImageNode(
-        imageUrlWithSize(relative, ImageDisplaySize.small),
-      );
+      await _insertImageFromPath(file.path);
     } catch (error) {
       // 图片插入失败不能崩编辑页：提示后照常继续编辑。
       _restoreEditingSelection();
@@ -2405,6 +2484,119 @@ class _NewEditorPageState extends State<NewEditorPage>
       }
       showSnack(context, message: '插入图片失败：$error');
     }
+  }
+
+  /// 把指定路径的图片拷进附件目录并插入图片块。
+  ///
+  /// 选图与桌面拖拽共用这一条路径，避免两套插入逻辑出现行为差异。
+  Future<void> _insertImageFromPath(String sourcePath) async {
+    try {
+      final relative = await widget.repository.store.importAttachment(
+        noteId: widget.note.id,
+        sourcePath: sourcePath,
+      );
+      if (!mounted) {
+        return;
+      }
+      // 选择器/拖拽可能把焦点和选区抢走：插入前把快照选区还回来，
+      // 图片才会落在用户原本的光标处。
+      _restoreEditingSelection();
+      // 新插入的图片默认用小图：正文里先给一个不打断阅读的缩略，
+      // 需要看细节时再通过图片菜单切「大图」（对齐主流笔记 App）。
+      _commands.insertImageNode(
+        imageUrlWithSize(relative, ImageDisplaySize.small),
+      );
+    } catch (error) {
+      _restoreEditingSelection();
+      if (!mounted) {
+        return;
+      }
+      showSnack(context, message: '插入图片失败：$error');
+    }
+  }
+
+  /// 把指定路径的文件拷进附件目录并插入附件行。
+  Future<void> _insertAttachmentFromPath(String sourcePath, String name) async {
+    try {
+      final relative = await widget.repository.store.importAttachment(
+        noteId: widget.note.id,
+        sourcePath: sourcePath,
+      );
+      if (!mounted) {
+        return;
+      }
+      _restoreEditingSelection();
+      _commands.insertAttachment(name, relative);
+    } catch (error) {
+      _restoreEditingSelection();
+      if (!mounted) {
+        return;
+      }
+      showSnack(context, message: '插入附件失败：$error');
+    }
+  }
+
+  /// 桌面拖拽文件：图片插入图片块，其余作为附件。
+  Future<void> _handleDroppedFiles(DropDoneDetails details) async {
+    if (mounted) {
+      setState(() => _draggingFiles = false);
+    }
+    if (!mounted || details.files.isEmpty) {
+      return;
+    }
+    _editorFocus.requestFocus();
+    const Set<String> imageExts = <String>{
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.webp',
+      '.heic',
+      '.bmp',
+    };
+    for (final XFile file in details.files) {
+      final String path = file.path;
+      final int dot = path.lastIndexOf('.');
+      final String ext = dot >= 0 ? path.substring(dot).toLowerCase() : '';
+      if (imageExts.contains(ext)) {
+        await _insertImageFromPath(path);
+      } else {
+        await _insertAttachmentFromPath(path, file.name);
+      }
+    }
+  }
+
+  /// 拖拽悬停提示：盖在编辑区中央，不拦截任何指针事件。
+  Widget _buildDropHint(AppColors colors) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            decoration: BoxDecoration(
+              color: colors.page.withValues(alpha: 0.94),
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: colors.accent, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(Icons.file_download_outlined,
+                    size: AppIcon.action, color: colors.accent),
+                const SizedBox(width: 10),
+                Text(
+                  '松开以插入到笔记',
+                  style: TextStyle(
+                    fontSize: AppFontSize.label,
+                    color: colors.text,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// 文件附件：拷进附件目录 → 插入 `[文件名](相对路径)` 链接行。
@@ -2420,18 +2612,10 @@ class _NewEditorPageState extends State<NewEditorPage>
         _restoreEditingSelection();
         return;
       }
-      final relative = await widget.repository.store.importAttachment(
-        noteId: widget.note.id,
-        sourcePath: path,
-      );
-      if (!mounted) {
-        return;
-      }
       // 不能直接插字面量 `[名](路径)`：新内核里那只是一段文本，不会变成
       // 可点的链接，也不会被 AttachmentComponent 识别。插带 LinkAttribution
       // 的文本，显示/落盘才是完整的附件。
-      _restoreEditingSelection();
-      _commands.insertAttachment(picked.name, relative);
+      await _insertAttachmentFromPath(path, picked.name);
     } catch (error) {
       _restoreEditingSelection();
       if (!mounted) {
@@ -2569,7 +2753,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                                 ? (constraints.maxWidth - contentWidth) / 2 +
                                     AppSpace.page
                                 : AppSpace.page;
-                            return Stack(
+                            final Widget editorStack = Stack(
                               children: <Widget>[
                                 SuperEditorAndroidControlsScope(
                                   controller: _androidControls,
@@ -2609,7 +2793,27 @@ class _NewEditorPageState extends State<NewEditorPage>
                                     ),
                                   ),
                                 ),
+                                // 桌面拖拽：有文件悬停时给一个明确的落点提示。
+                                if (_draggingFiles) _buildDropHint(colors),
                               ],
+                            );
+                            if (!PlatformFeatures.isDesktop) {
+                              return editorStack;
+                            }
+                            // 桌面端接住文件拖拽：图片进正文，其余作为附件。
+                            return DropTarget(
+                              onDragEntered: (_) {
+                                if (mounted) {
+                                  setState(() => _draggingFiles = true);
+                                }
+                              },
+                              onDragExited: (_) {
+                                if (mounted) {
+                                  setState(() => _draggingFiles = false);
+                                }
+                              },
+                              onDragDone: _handleDroppedFiles,
+                              child: editorStack,
                             );
                           },
                         ),
@@ -3065,6 +3269,13 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Stylesheet _buildStylesheet(AppColors colors, double contentWidth) {
+    // 桌面阅读尺度：正文同号但行距更松，标题拉大一档。
+    // 移动端沿用精读字阶（24/20/16），不因桌面改动而变化。
+    final bool desktop = PlatformFeatures.isDesktop;
+    final double h1Size = desktop ? 28 : AppFontSize.titleLg;
+    final double h2Size = desktop ? 22 : AppFontSize.heading;
+    final double h3Size = desktop ? 19 : AppFontSize.bodyLg;
+    final double paragraphHeight = desktop ? 1.7 : 1.6;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -3156,7 +3367,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.textStyle: const TextStyle(height: 1.6),
+            Styles.textStyle: TextStyle(height: paragraphHeight),
             Styles.padding: const CascadingPadding.only(top: 12),
           },
         ),
@@ -3212,7 +3423,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header1'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.titleLg,
+              fontSize: h1Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.3,
@@ -3226,7 +3437,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header2'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.heading,
+              fontSize: h2Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.25,
@@ -3240,7 +3451,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header3'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.bodyLg,
+              fontSize: h3Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.2,

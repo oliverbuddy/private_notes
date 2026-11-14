@@ -248,6 +248,34 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    testWidgets('窗口跨过双栏阈值时自动切换布局', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('选择一条小记开始阅读'), findsOneWidget);
+
+      // 拖窄到 820：低于 900 阈值，回到单栏。
+      tester.view.physicalSize = const Size(820, 700);
+      await _pumpFrames(tester);
+      expect(find.text('选择一条小记开始阅读'), findsNothing);
+
+      // 再拖宽：双栏恢复。
+      tester.view.physicalSize = const Size(1280, 800);
+      await _pumpFrames(tester);
+      expect(find.text('选择一条小记开始阅读'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
     testWidgets('桌面宽屏：列表与详情并排，点笔记在右侧打开', (
       WidgetTester tester,
     ) async {
