@@ -199,6 +199,26 @@ String plainSummary(String markdown) {
     if (RegExp(r'^\s*(?:-{3,}|\*{3,}|_{3,})\s*$').hasMatch(line)) {
       continue;
     }
+    // 表格：分隔行（`| --- | :---: |`）没有信息量，直接跳过；数据行压成
+    // 「名称 · 数量」一行，列表里就不会出现一屏竖线和减号（用户反馈
+    // 「列表显示表格效果有问题」）。
+    final String tableTrimmed = line.trim();
+    if (tableTrimmed.contains('-') &&
+        RegExp(r'^[|\s:-]+$').hasMatch(tableTrimmed)) {
+      continue;
+    }
+    if (tableTrimmed.startsWith('|') || tableTrimmed.endsWith('|')) {
+      final List<String> cells = tableTrimmed
+          .replaceAll(RegExp(r'^\||\|$'), '')
+          .split('|')
+          .map((String cell) => cell.trim())
+          .where((String cell) => cell.isNotEmpty)
+          .toList(growable: false);
+      if (cells.isEmpty) {
+        continue;
+      }
+      line = cells.join(' · ');
+    }
 
     line = line.replaceAllMapped(
       RegExp(r'!\[[^\]]*\]\([^)]*\)'),
@@ -217,6 +237,10 @@ String plainSummary(String markdown) {
       (match) => match.group(1) ?? '',
     );
     line = line.replaceAllMapped(
+      RegExp(r'==(.+?)=='),
+      (match) => match.group(1) ?? '',
+    );
+    line = line.replaceAllMapped(
       RegExp(r'\*(.+?)\*'),
       (match) => match.group(1) ?? '',
     );
@@ -230,7 +254,6 @@ String plainSummary(String markdown) {
 
   return lines.join('\n');
 }
-
 
 /// 有序列表行：`^\s*(\d+)([.)])\s`。
 final RegExp _orderedLinePattern = RegExp(r'^(\s*)(\d+)([.)])(\s)');
@@ -291,8 +314,7 @@ class OrderedListNumberingCursor {
       final number = int.tryParse(digits) ?? 1;
 
       // 先弹掉比当前行更深的层：缩进回浅，子列表就此结束。
-      while (_stack.isNotEmpty &&
-          _stack.last.indent.length > indent.length) {
+      while (_stack.isNotEmpty && _stack.last.indent.length > indent.length) {
         _stack.removeLast();
       }
       // 找同层级（同缩进 + 同分隔符）的编号帧；找不到 = 这一层重新开始，
@@ -355,9 +377,8 @@ class _NumberingFrame {
   final lastLine = blockText.substring(lineStart);
   final head = blockText.substring(0, lineStart);
 
-  final match =
-      RegExp(r'^(\s*)([-*+]|(\d+)([.)]))\s+(\[[ xX]\]\s+)?')
-          .firstMatch(lastLine);
+  final match = RegExp(r'^(\s*)([-*+]|(\d+)([.)]))\s+(\[[ xX]\]\s+)?')
+      .firstMatch(lastLine);
   if (match == null) {
     if (RegExp(r'^\s*>\s+').hasMatch(lastLine)) {
       return (strippedBlock: blockText, initialText: '> ');
