@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HapticFeedback, KeyDownEvent, LogicalKeyboardKey;
@@ -22,6 +26,7 @@ import '../ui/note_actions.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
+import '../util/native_file_drag.dart';
 import '../util/share.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
@@ -395,6 +400,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 标签筛选按钮的位置锚点：桌面端弹出贴住按钮的小菜单。
   final GlobalKey _tagMenuKey = GlobalKey();
+
+  /// 桌面拖出：按下起点、是否已发起拖拽、拖拽后短暂抑制点击。
+  Offset? _dragOrigin;
+  bool _dragStarted = false;
+  DateTime? _suppressTapUntil;
 
   /// 标题栏标签按钮 → 「按标签筛选」弹层。
   ///
@@ -1152,6 +1162,76 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /// 拖拽刚结束的 400ms 内不再响应点击，避免「拖出后顺手打开笔记」。
+  bool get _tapSuppressed {
+    final DateTime? until = _suppressTapUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  /// 桌面：把笔记导出成临时 Markdown 并交给原生拖出会话。
+  Future<void> _startNoteDrag(Note note, Offset position) async {
+    _suppressTapUntil = DateTime.now().add(const Duration(milliseconds: 400));
+    try {
+      final String body =
+          note.locked ? '' : await _repo.store.readNoteBody(note);
+      final Directory dir =
+          Directory('${Directory.systemTemp.path}/xiaoji-drag');
+      await dir.create(recursive: true);
+      String name =
+          note.locked ? '已锁定笔记' : plainSummary(body).split('\n').first.trim();
+      if (name.isEmpty) {
+        name = '小记-${note.id}';
+      }
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (name.length > 40) {
+        name = name.substring(0, 40);
+      }
+      final File file = File('${dir.path}/$name.md');
+      await file.writeAsString(
+        body.isEmpty ? '# $name\n' : body,
+        flush: true,
+      );
+      await beginFileDrag(paths: <String>[file.path], position: position);
+    } catch (error) {
+      debugPrint('拖出笔记失败: $error');
+    }
+  }
+
+  /// 桌面拖出：指针移动超过 12dp 即视为拖拽（不抢滚动：只监听，不参与手势竞技场）。
+  Widget _withNoteDragOut(Widget tile, Note note) {
+    if (!PlatformFeatures.isDesktop) {
+      return tile;
+    }
+    return Listener(
+      onPointerDown: (PointerDownEvent event) {
+        if (event.buttons == kPrimaryMouseButton) {
+          _dragOrigin = event.position;
+          _dragStarted = false;
+        }
+      },
+      onPointerMove: (PointerMoveEvent event) {
+        final Offset? origin = _dragOrigin;
+        if (origin == null || _dragStarted) {
+          return;
+        }
+        if ((event.position - origin).distance < 12) {
+          return;
+        }
+        _dragStarted = true;
+        unawaited(_startNoteDrag(note, event.position));
+      },
+      onPointerUp: (_) {
+        _dragOrigin = null;
+        _dragStarted = false;
+      },
+      onPointerCancel: (_) {
+        _dragOrigin = null;
+        _dragStarted = false;
+      },
+      child: tile,
+    );
+  }
+
   Widget _buildList(AppColors colors, List<Note> notes, ListDensity density) {
     // 紧凑档铺在 page 底上，分隔线用 dividerStrong 才压得住；
     // 舒适档卡片之间的间隙不需要分隔线，保留淡档。
@@ -1219,7 +1299,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             thumbnailPaths: paths,
             imageCount: images.length,
             hasAttachment: !note.locked && hasLocalAttachment(note.body),
-            onTap: () => _openEditor(note),
+            onTap: () {
+              if (_tapSuppressed) {
+                return;
+              }
+              _openEditor(note);
+            },
             onLongPress: () => _showNoteActions(note),
             onSecondaryTapAt: (Offset pos) =>
                 _showNoteActions(note, anchorPosition: pos),
@@ -1234,12 +1319,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             maxSummaryLines: _repo.isSearching ? 2 : (paths.isEmpty ? 5 : 3),
             thumbnailPaths: paths,
             hiddenThumbnailCount: images.length > 3 ? images.length - 3 : 0,
-            onTap: () => _openEditor(note),
+            onTap: () {
+              if (_tapSuppressed) {
+                return;
+              }
+              _openEditor(note);
+            },
             onLongPress: () => _showNoteActions(note),
             onSecondaryTapAt: (Offset pos) =>
                 _showNoteActions(note, anchorPosition: pos),
           );
         }
+
+        // 桌面：按住卡片横向/纵向拖出即导出为 .md（拖到 Finder 即为一份副本）。
+        tile = _withNoteDragOut(tile, note);
 
         // 选中项挂一个锚点：键盘 ↑/↓ 切换后据此把它滚进可视区。
         if (selected) {

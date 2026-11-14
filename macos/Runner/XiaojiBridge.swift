@@ -91,6 +91,8 @@ final class XiaojiBridge {
       setWindowChrome(args, result: result)
     case "previewImage":
       previewImage(args, result: result)
+    case "beginFileDrag":
+      beginFileDrag(args, result: result)
     default:
       // 其余（分享导入、桌面小组件、SAF 目录等）是移动端专属能力，
       // Dart 侧已按 MissingPluginException 回退，这里明确不实现。
@@ -196,6 +198,68 @@ final class XiaojiBridge {
           self?.imageWindows.removeAll { $0.window === window }
         }
       controller.showWindow(nil)
+      result(true)
+    }
+  }
+
+  // MARK: - 拖出文件
+
+  /// 把文件拖出到 Finder。
+  ///
+  /// Flutter 没有跨应用拖拽能力，必须由原生发起 `NSDraggingSession`。
+  /// Dart 在指针移动超过阈值时调用这里；`NSApp.currentEvent` 在通道回调
+  /// 时机往往已经结束，所以按 Flutter 传来的坐标合成一个 mouseDown 事件
+  /// 再开会话（macOS 上这是标准做法，Finder 会接管后续拖拽）。
+  private func beginFileDrag(_ args: [String: Any], result: @escaping FlutterResult) {
+    guard let paths = args["paths"] as? [String], !paths.isEmpty else {
+      result(false)
+      return
+    }
+    let x = args["x"] as? Double ?? 0
+    let y = args["y"] as? Double ?? 0
+
+    DispatchQueue.main.async {
+      guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+            let view = window.contentView else {
+        result(false)
+        return
+      }
+      let location = NSPoint(x: x, y: max(0, view.bounds.height - y))
+      guard let event = NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: location,
+        modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 1,
+        pressure: 1
+      ) else {
+        result(false)
+        return
+      }
+
+      let items: [NSDraggingItem] = paths.compactMap { path in
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+          return nil
+        }
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        item.setDraggingFrame(
+          NSRect(x: location.x - 32, y: location.y - 32, width: 64, height: 64),
+          contents: NSWorkspace.shared.icon(forFile: url.path))
+        return item
+      }
+      guard !items.isEmpty else {
+        result(false)
+        return
+      }
+      let session = view.beginDraggingSession(
+        with: items,
+        event: event,
+        source: FileDragSource.shared)
+      session.animatesToStartingPositionsOnCancelOrFail = true
       result(true)
     }
   }
@@ -524,5 +588,17 @@ final class XiaojiBridge {
       index += 1
     }
     return candidate
+  }
+}
+
+/// 拖出文件的会话源：统一按「复制」处理（拖到 Finder 是复制一份，不移动原件）。
+final class FileDragSource: NSObject, NSDraggingSource {
+  static let shared = FileDragSource()
+
+  func draggingSession(
+    _ session: NSDraggingSession,
+    sourceOperationMaskFor context: NSDraggingContext
+  ) -> NSDragOperation {
+    return .copy
   }
 }
