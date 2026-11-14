@@ -39,20 +39,35 @@ Future<T?> showXiaojiSheet<T>({
       barrierColor: Colors.black.withValues(alpha: 0.32),
       builder: (BuildContext dialogContext) {
         final AppColors colors = AppColors.of(dialogContext);
+        // 桌面观感（macOS 原生面板）：12 圆角 + 0.5 描边 + 柔和投影，
+        // 不再是「一块纯色方块浮在遮罩上」。
         return Dialog(
-          backgroundColor: colors.page,
+          backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
+          elevation: 0,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 32,
             vertical: 48,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.block),
-          ),
-          child: ConstrainedBox(
+          child: Container(
             constraints: const BoxConstraints(
+              // 确认 / 重命名这类短内容也要有像样的宽度，不再缩成一小条。
+              minWidth: 380,
               maxWidth: kXiaojiSheetMaxWidth,
               maxHeight: 640,
+            ),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: colors.page,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.divider, width: 0.5),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.14),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
             // 内容可能带 TextField（重命名、改标签）或较长列表（历史版本）：
             // 对话框高度受限，统一交给滚动区，不出现溢出条纹。
@@ -142,19 +157,31 @@ Future<T?> showXiaojiPanel<T>({
       builder: (BuildContext dialogContext) {
         final AppColors colors = AppColors.of(dialogContext);
         return Dialog(
-          backgroundColor: colors.page,
+          backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
+          elevation: 0,
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 32,
             vertical: 48,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.block),
-          ),
-          child: ConstrainedBox(
+          child: Container(
             constraints: BoxConstraints(
+              minWidth: 380,
               maxWidth: maxWidth,
               maxHeight: maxHeight,
+            ),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: colors.page,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.divider, width: 0.5),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.14),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
             child: builder(dialogContext),
           ),
@@ -189,7 +216,7 @@ Future<bool?> showXiaojiConfirmSheet({
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,7 +225,7 @@ Future<bool?> showXiaojiConfirmSheet({
                 title,
                 style: AppText.sheetTitle.copyWith(color: colors.text),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Text(
                 message,
                 style: TextStyle(

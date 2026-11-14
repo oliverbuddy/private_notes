@@ -233,6 +233,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 行内 Markdown（`**粗**` / `` `码` `` / 链接）识别是否已排队。
   bool _inlineScheduled = false;
 
+  /// 粘贴后「补齐行内标记」是否已排队（每帧最多扫一次文档）。
+  bool _inlineSweepScheduled = false;
+
   /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
   bool _draggingFiles = false;
 
@@ -2195,6 +2198,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       return false;
     } finally {
       _handlingImePaste = false;
+      // 走内核默认粘贴（跨块选区等）时标记会以字面量落库，下一帧补齐。
+      _scheduleInlineMarkdownSweep();
     }
   }
 
@@ -2266,10 +2271,14 @@ class _NewEditorPageState extends State<NewEditorPage>
       } else {
         _ops.paste();
       }
+      // 无论走小记解析器还是内核默认粘贴，插入完成后补一遍行内标记：
+      // 跨块选区、非文本块等场景内核会原样插入 `**粗体**`。
+      _scheduleInlineMarkdownSweep();
       return handled;
     } catch (error, stack) {
       debugPrint('智能粘贴异常，回退默认粘贴: $error\n$stack');
       _ops.paste();
+      _scheduleInlineMarkdownSweep();
       return false;
     }
   }
@@ -2495,6 +2504,83 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     _editor.execute(requests);
     _refreshActiveCommands();
+  }
+
+  /// 粘贴后，在下一帧补齐正文里的行内标记。
+  void _scheduleInlineMarkdownSweep() {
+    if (_inlineSweepScheduled || _disposed) {
+      return;
+    }
+    _inlineSweepScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _inlineSweepScheduled = false;
+      _sweepInlineMarkdown();
+    });
+  }
+
+  /// 把正文里残留的行内标记就地转成样式（规则见 [findAllInlineMarkdown]）。
+  ///
+  /// 粘贴若走内核默认链路（跨块选区、表格单元格等）不会经过小记的解析器，
+  /// `**粗体**` 会以字面量留在正文里 —— 用户看到的就是「保存重进才识别」
+  /// 「光标放到标记后面才识别」。这里在插入完成后的下一帧整体扫一遍：
+  /// 只改真的有标记的块，代码块与组词中的内容跳过。
+  ///
+  /// 每次粘贴最多跑一次，不做逐键全量扫描：逐键的场景已经由
+  /// [_applyInlineMarkdown] 覆盖，两者叠加只会打碎撤销栈。
+  void _sweepInlineMarkdown() {
+    if (_disposed || !mounted) {
+      return;
+    }
+    // 组词期间不碰文档，否则输入法下一次提交会把改写覆盖回去。
+    if (_composer.composingRegion.value != null) {
+      return;
+    }
+    final DocumentSelection? selection = _composer.selection;
+    final List<String> nodeIds = <String>[];
+    final Map<String, String> texts = <String, String>{};
+    for (final DocumentNode node in _document) {
+      if (node is! TextNode) {
+        continue;
+      }
+      if (node.getMetadataValue(NodeMetadata.blockType) == codeAttribution) {
+        continue;
+      }
+      final String text = node.text.toPlainText();
+      // 快速跳过：没有任何标记字符的正文不参与扫描（长文粘贴后也不慢）。
+      if (!text.contains('*') &&
+          !text.contains('~') &&
+          !text.contains('=') &&
+          !text.contains('`') &&
+          !text.contains('[')) {
+        continue;
+      }
+      nodeIds.add(node.id);
+      texts[node.id] = text;
+    }
+    if (nodeIds.isEmpty) {
+      return;
+    }
+    bool changed = false;
+    for (final String id in nodeIds) {
+      final NodePosition? caretPosition = selection != null &&
+              selection.isCollapsed &&
+              selection.extent.nodeId == id
+          ? selection.extent.nodePosition
+          : null;
+      final List<EditRequest>? requests = allInlineMarkdownRequests(
+        nodeId: id,
+        text: texts[id]!,
+        caret: caretPosition is TextNodePosition ? caretPosition.offset : null,
+      );
+      if (requests == null) {
+        continue;
+      }
+      _editor.execute(requests);
+      changed = true;
+    }
+    if (changed) {
+      _refreshActiveCommands();
+    }
   }
 
   void _applyMarkdownShortcut() {
@@ -3199,6 +3285,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 表格是整块选中、没有逐单元格光标：右键给它单独的「编辑 / 复制」入口。
     final DocumentNode? selectedNode = _selectionNode();
     if (selectedNode is TableBlockNode) {
+      // 右键落在哪个单元格：结构操作要按目标行列执行。单元格由表格组件
+      // 在指针按下时上报；拿不到（例如整块选中后从空白处右键）就置灰。
+      final ({String tableId, int row, int column})? cell =
+          _lastTableCell?.tableId == selectedNode.id ? _lastTableCell : null;
+      final int targetRow = cell?.row ?? 0;
+      final int targetColumn = cell?.column ?? 0;
+      final bool hasCell = cell != null;
       final String? tableAction = await showMenu<String>(
         context: context,
         position: RelativeRect.fromLTRB(
@@ -3207,14 +3300,48 @@ class _NewEditorPageState extends State<NewEditorPage>
           overlay.size.width - globalPosition.dx,
           overlay.size.height - globalPosition.dy,
         ),
-        items: const <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(value: 'editTable', child: Text('编辑表格')),
-          PopupMenuItem<String>(
+        items: <PopupMenuEntry<String>>[
+          const PopupMenuItem<String>(value: 'editTable', child: Text('编辑表格')),
+          const PopupMenuItem<String>(
             value: 'copyTable',
             child: Text('复制表格（Markdown）'),
           ),
-          PopupMenuDivider(),
-          PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
+          const PopupMenuDivider(),
+          // 行列操作与 Notion / 语雀 的右键菜单一致：就地增删，不用改源码。
+          PopupMenuItem<String>(
+            value: 'insertRowAbove',
+            enabled: hasCell,
+            child: const Text('上方插入行'),
+          ),
+          PopupMenuItem<String>(
+            value: 'insertRowBelow',
+            enabled: hasCell,
+            child: const Text('下方插入行'),
+          ),
+          PopupMenuItem<String>(
+            value: 'deleteRow',
+            // 表头行不能删：删掉表格就没有语义基准了。
+            enabled: hasCell && targetRow > 0,
+            child: const Text('删除本行'),
+          ),
+          const PopupMenuDivider(),
+          PopupMenuItem<String>(
+            value: 'insertColumnLeft',
+            enabled: hasCell,
+            child: const Text('左侧插入列'),
+          ),
+          PopupMenuItem<String>(
+            value: 'insertColumnRight',
+            enabled: hasCell,
+            child: const Text('右侧插入列'),
+          ),
+          PopupMenuItem<String>(
+            value: 'deleteColumn',
+            enabled: hasCell && selectedNode.columnCount > 1,
+            child: const Text('删除本列'),
+          ),
+          const PopupMenuDivider(),
+          const PopupMenuItem<String>(value: 'paste', child: Text('粘贴')),
         ],
       );
       if (!mounted || tableAction == null) {
@@ -3225,6 +3352,48 @@ class _NewEditorPageState extends State<NewEditorPage>
           await _editTableAsMarkdown(selectedNode);
         case 'copyTable':
           await _copyTableAsMarkdown(selectedNode);
+        case 'insertRowAbove':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.insertRowAbove,
+            targetRow,
+            targetColumn,
+          );
+        case 'insertRowBelow':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.insertRowBelow,
+            targetRow,
+            targetColumn,
+          );
+        case 'insertColumnLeft':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.insertColumnLeft,
+            targetRow,
+            targetColumn,
+          );
+        case 'insertColumnRight':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.insertColumnRight,
+            targetRow,
+            targetColumn,
+          );
+        case 'deleteRow':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.deleteRow,
+            targetRow,
+            targetColumn,
+          );
+        case 'deleteColumn':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.deleteColumn,
+            targetRow,
+            targetColumn,
+          );
         case 'paste':
           await _pasteFromClipboard();
       }
@@ -3447,19 +3616,55 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 表格节点整体重建后，内核会按「旧布局」重算一次光标；文本光标可能
     // 停在错位的位置（用户反馈「表格编辑后光标错位」）。这里显式把选区
     // 收敛到表格块本身：块级选中不画文本光标，下次点正文再落新位置。
+    _selectTableBlock(node);
+  }
+
+  /// 把选区收敛到整张表（块级选中，不画文本光标）。
+  void _selectTableBlock(TableBlockNode table) {
     _composer.setSelectionWithReason(
       DocumentSelection(
         base: DocumentPosition(
-          nodeId: node.id,
-          nodePosition: node.beginningPosition,
+          nodeId: table.id,
+          nodePosition: table.beginningPosition,
         ),
         extent: DocumentPosition(
-          nodeId: node.id,
-          nodePosition: node.endPosition,
+          nodeId: table.id,
+          nodePosition: table.endPosition,
         ),
       ),
       SelectionReason.userInteraction,
     );
+  }
+
+  /// 最近一次在表格单元格上按下指针的位置（右键菜单按它定位行列）。
+  ({String tableId, int row, int column})? _lastTableCell;
+
+  void _rememberTableCellPointer(String tableId, int row, int column) {
+    _lastTableCell = (tableId: tableId, row: row, column: column);
+  }
+
+  /// 表格结构操作：插入 / 删除行列。
+  ///
+  /// 重建逻辑抽在 [rebuildTableNode]（纯函数、可单测），这里只负责落库：
+  /// 走 [ReplaceNodeRequest] 保证 ⌘Z 能撤销，并把选区收回表格块。
+  void _mutateTable(
+    String tableId,
+    TableCellAction action,
+    int row,
+    int column,
+  ) {
+    final DocumentNode? node = _document.getNodeById(tableId);
+    if (node is! TableBlockNode) {
+      return;
+    }
+    final TableBlockNode? next = rebuildTableNode(node, action, row, column);
+    if (next == null) {
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
+    ]);
+    _selectTableBlock(next);
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -3569,9 +3774,10 @@ class _NewEditorPageState extends State<NewEditorPage>
                 left: 0,
                 top: 0,
                 bottom: 0,
-                // 覆盖顶栏左侧整段（箭头 + 标题区），与主流桌面应用一致：
-                // 点左上角任意位置都能返回，而不是只认 24vp 的箭头。
-                right: 96,
+                // 铺满整条顶栏：箭头、居中标题与空白都能点返回（用户反馈
+                // 「标题点不动」）。右侧图标按钮是 Stack 里更靠后的子项，
+                // 命中测试先于本层，因此不会被这块热区抢走点击。
+                right: 0,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => Navigator.of(context).maybePop(),
@@ -3745,6 +3951,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                 cursorColor: colors.accent,
                 editorBackground: colors.page,
                 onCellCommitted: _replaceTableCell,
+                onCellStructure: _mutateTable,
+                onCellPointerDown: _rememberTableCellPointer,
               )
             else
               _AdaptiveTableComponentBuilder(

@@ -181,11 +181,13 @@ final class XiaojiBridge {
       window.isReleasedWhenClosed = false
       window.backgroundColor = .black
 
-      let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-      imageView.image = image
-      imageView.imageScaling = .scaleProportionallyUpOrDown
-      imageView.autoresizingMask = [.width, .height]
-      window.contentView = imageView
+      // 自绘视图：支持滚轮 / 捏合缩放、拖动平移、双击复位。
+      // NSImageView 只能等比铺满，做不了「以指针为锚点」的缩放。
+      let zoomView = ZoomableImageView(
+        image: image,
+        frame: NSRect(x: 0, y: 0, width: width, height: height))
+      zoomView.fitToWindow()
+      window.contentView = zoomView
       window.center()
 
       let controller = NSWindowController(window: window)
@@ -607,5 +609,164 @@ final class FileDragSource: NSObject, NSDraggingSource {
     sourceOperationMaskFor context: NSDraggingContext
   ) -> NSDragOperation {
     return .copy
+  }
+}
+
+/// 可缩放 / 可平移的图片视图（对齐系统「预览」的手感）。
+///
+/// 预览 App 的交互是：鼠标滚轮缩放、触控板双指滚动平移、捏合缩放、
+/// 按住拖动平移、双击在「适应窗口」与「实际大小」之间切换。
+/// NSImageView 只会等比铺满，做不了「以指针为锚点」的缩放，所以自绘。
+final class ZoomableImageView: NSView {
+  private let image: NSImage
+  private var scale: CGFloat = 1
+  private var offset = NSPoint.zero
+  private var isPanning = false
+  private var panStart = NSPoint.zero
+  private var offsetStart = NSPoint.zero
+  private let minScale: CGFloat = 0.05
+  private let maxScale: CGFloat = 8
+
+  init(image: NSImage, frame: NSRect) {
+    self.image = image
+    super.init(frame: frame)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.black.cgColor
+  }
+
+  required init?(coder: NSCoder) {
+    return nil
+  }
+
+  /// 翻转坐标系：y 向下，滚轮 / 拖动的位移方向与手指一致。
+  override var isFlipped: Bool {
+    return true
+  }
+
+  /// 图片刚好铺满窗口（contain）时的缩放比例；小图不强行放大。
+  private var fitScale: CGFloat {
+    guard image.size.width > 0, image.size.height > 0,
+          bounds.width > 0, bounds.height > 0 else { return 1 }
+    let contain = min(bounds.width / image.size.width, bounds.height / image.size.height)
+    return min(1, contain)
+  }
+
+  private var imageRect: NSRect {
+    let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+    return NSRect(
+      x: (bounds.width - size.width) / 2 + offset.x,
+      y: (bounds.height - size.height) / 2 + offset.y,
+      width: size.width,
+      height: size.height)
+  }
+
+  func fitToWindow() {
+    scale = fitScale
+    offset = .zero
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    NSColor.black.setFill()
+    bounds.fill()
+    image.draw(
+      in: imageRect,
+      from: .zero,
+      operation: .sourceOver,
+      fraction: 1,
+      respectFlipped: true,
+      hints: [.interpolation: NSImageInterpolation.high])
+  }
+
+  /// 以 [anchor]（视图坐标）为中心缩放，锚点下的图像内容保持不动。
+  private func zoom(by factor: CGFloat, anchor: NSPoint) {
+    guard factor > 0 else { return }
+    let newScale = min(max(scale * factor, minScale), maxScale)
+    guard newScale != scale else { return }
+    let pointInImage = NSPoint(
+      x: (anchor.x - imageRect.minX) / scale,
+      y: (anchor.y - imageRect.minY) / scale)
+    scale = newScale
+    let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+    offset = NSPoint(
+      x: anchor.x - pointInImage.x * scale - (bounds.width - size.width) / 2,
+      y: anchor.y - pointInImage.y * scale - (bounds.height - size.height) / 2)
+    offset = clampedOffset()
+    needsDisplay = true
+  }
+
+  /// 平移不许把图片拖出视野：单轴不超出一屏时居中，超出时夹在边界内。
+  private func clampedOffset() -> NSPoint {
+    let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+    let maxX = max(0, (size.width - bounds.width) / 2)
+    let maxY = max(0, (size.height - bounds.height) / 2)
+    return NSPoint(
+      x: min(max(offset.x, -maxX), maxX),
+      y: min(max(offset.y, -maxY), maxY))
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    if event.hasPreciseScrollingDeltas {
+      // 触控板双指滚动：平移（与系统预览一致），捏合才缩放。
+      offset = clampedOffset()
+      offset.x += event.scrollingDeltaX
+      offset.y -= event.scrollingDeltaY
+      offset = clampedOffset()
+      needsDisplay = true
+      return
+    }
+    // 鼠标滚轮：缩放。
+    let anchor = convert(event.locationInWindow, from: nil)
+    zoom(by: event.scrollingDeltaY > 0 ? 1.1 : 0.9, anchor: anchor)
+  }
+
+  override func magnify(with event: NSEvent) {
+    let anchor = convert(event.locationInWindow, from: nil)
+    zoom(by: 1 + event.magnification, anchor: anchor)
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    if event.clickCount == 2 {
+      // 双击：在「适应窗口」与「实际大小」之间切换。
+      if abs(scale - fitScale) < 0.01 {
+        scale = 1
+      } else {
+        scale = fitScale
+      }
+      offset = .zero
+      needsDisplay = true
+      return
+    }
+    isPanning = true
+    panStart = convert(event.locationInWindow, from: nil)
+    offsetStart = offset
+    NSCursor.closedHand.push()
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    guard isPanning else { return }
+    let point = convert(event.locationInWindow, from: nil)
+    offset = NSPoint(
+      x: offsetStart.x + point.x - panStart.x,
+      y: offsetStart.y + point.y - panStart.y)
+    offset = clampedOffset()
+    needsDisplay = true
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    guard isPanning else { return }
+    isPanning = false
+    NSCursor.pop()
+  }
+
+  override func resetCursorRects() {
+    addCursorRect(bounds, cursor: isPanning ? .closedHand : .openHand)
+  }
+
+  override func viewDidEndLiveResize() {
+    super.viewDidEndLiveResize()
+    // 窗口尺寸变了保持当前缩放，只把偏移夹回可见范围。
+    offset = clampedOffset()
+    needsDisplay = true
   }
 }

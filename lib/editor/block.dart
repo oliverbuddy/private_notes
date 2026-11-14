@@ -173,7 +173,9 @@ String plainSummary(String markdown) {
   }
 
   final lines = <String>[];
-  for (final rawLine in markdown.split('\n')) {
+  final List<String> rawLines = markdown.split('\n');
+  for (var index = 0; index < rawLines.length; index++) {
+    final String rawLine = rawLines[index];
     var line = rawLine;
 
     // 代码围栏本身没有信息量，跳过。
@@ -199,21 +201,28 @@ String plainSummary(String markdown) {
     if (RegExp(r'^\s*(?:-{3,}|\*{3,}|_{3,})\s*$').hasMatch(line)) {
       continue;
     }
-    // 表格：分隔行（`| --- | :---: |`）没有信息量，直接跳过；数据行压成
-    // 「名称 · 数量」一行，列表里就不会出现一屏竖线和减号（用户反馈
-    // 「列表显示表格效果有问题」）。
+    // 表格：分隔行（`| --- | :---: |`）没有信息量，直接跳过。
     final String tableTrimmed = line.trim();
     if (tableTrimmed.contains('-') &&
         RegExp(r'^[|\s:-]+$').hasMatch(tableTrimmed)) {
       continue;
     }
-    if (tableTrimmed.startsWith('|') || tableTrimmed.endsWith('|')) {
-      final List<String> cells = tableTrimmed
-          .replaceAll(RegExp(r'^\||\|$'), '')
-          .split('|')
-          .map((String cell) => cell.trim())
-          .where((String cell) => cell.isNotEmpty)
-          .toList(growable: false);
+    // 完整 GFM 表格（表头 + 分隔行）：整块只产出一行表头摘要，
+    // 数据行不再逐行占位 —— 否则列表卡片会被一张表撑成十几行竖线。
+    final int tableEnd = _tableBlockEnd(rawLines, index);
+    if (tableEnd > index) {
+      final String summary = _tableSummaryOf(rawLines, index, tableEnd);
+      if (summary.isNotEmpty) {
+        lines.add(summary);
+      }
+      // for 循环还会再 +1，这里退一格让游标停在表格最后一行。
+      index = tableEnd - 1;
+      continue;
+    }
+    // 缺少分隔行的残缺表格行：同样压成「名称 · 数量」一行，
+    // 兼容没有首尾管道的 `a | b` 写法（旧版只认带管道边框的行）。
+    if (tableTrimmed.contains('|')) {
+      final List<String> cells = _splitTableCells(tableTrimmed);
       if (cells.isEmpty) {
         continue;
       }
@@ -253,6 +262,73 @@ String plainSummary(String markdown) {
   }
 
   return lines.join('\n');
+}
+
+/// 表格块结束下标（不含）。[start] 不是「表头 + 分隔行」形态时返回 -1。
+///
+/// 摘要是「扫一眼」用的，不引入完整的 Markdown 解析：只认 GFM 的
+/// 最小特征（表头行含管道、下一行是分隔行），随后把所有连续管道行
+/// 都算作同一张表，一起折叠成一行。
+int _tableBlockEnd(List<String> lines, int start) {
+  if (start + 1 >= lines.length) {
+    return -1;
+  }
+  if (!lines[start].contains('|') || !_isTableSeparatorLine(lines[start + 1])) {
+    return -1;
+  }
+  var end = start + 2;
+  while (end < lines.length && lines[end].trim().contains('|')) {
+    end++;
+  }
+  return end;
+}
+
+bool _isTableSeparatorLine(String line) {
+  final String trimmed = line.trim();
+  // 没有管道的 `---` 是分割线 / setext 标题，不是表格分隔行。
+  if (!trimmed.contains('|')) {
+    return false;
+  }
+  return RegExp(r'^[|\s:-]+$').hasMatch(trimmed) &&
+      RegExp(r'-{3,}').hasMatch(trimmed);
+}
+
+/// 一张表 → 一行摘要：优先表头单元格，表头全空时退到第一行数据。
+String _tableSummaryOf(List<String> lines, int start, int end) {
+  String joinCells(String line) => _splitTableCells(line.trim())
+      .where((String cell) => cell.isNotEmpty)
+      .join(' · ');
+  final String header = joinCells(lines[start]);
+  if (header.isNotEmpty) {
+    return header;
+  }
+  if (start + 2 < end) {
+    return joinCells(lines[start + 2]);
+  }
+  return '';
+}
+
+/// 按管道拆单元格：`\|` 是内容里的竖线（粘贴时会把原文的 `|` 转义），
+/// 不能当成列分隔符。首尾管道产生的空单元格会被丢弃。
+List<String> _splitTableCells(String line) {
+  final List<String> cells = <String>[];
+  final StringBuffer buffer = StringBuffer();
+  for (var i = 0; i < line.length; i++) {
+    final String ch = line[i];
+    if (ch == r'\' && i + 1 < line.length && line[i + 1] == '|') {
+      buffer.write('|');
+      i++;
+      continue;
+    }
+    if (ch == '|') {
+      cells.add(buffer.toString().trim());
+      buffer.clear();
+      continue;
+    }
+    buffer.write(ch);
+  }
+  cells.add(buffer.toString().trim());
+  return cells;
 }
 
 /// 有序列表行：`^\s*(\d+)([.)])\s`。

@@ -13,6 +13,7 @@ import 'xiaoji_markdown.dart';
 /// 的块类型，其余请求原样交回默认链路（不复制、不重写 super_editor 逻辑）。
 final List<EditRequestHandler> xiaojiRequestHandlers =
     List<EditRequestHandler>.unmodifiable(<EditRequestHandler>[
+  _horizontalRuleHandler,
   _codeFenceOpeningHandler,
   _codeBlockNewlineHandler,
   _blockquoteContinuationHandler,
@@ -41,6 +42,88 @@ Editor createXiaojiEditor({
     historyGroupingPolicy: defaultMergePolicy,
     isHistoryEnabled: isHistoryEnabled,
   );
+}
+
+/// 手打分割线（`---` / `***` / `___`）后回车 → 生成真正的分割线。
+///
+/// 主流编辑器（Typora / Obsidian / 语雀）都是这个语义：整段只有一个
+/// 分割线记号时，回车就把它变成分隔线。只认「整段文本就是分割线」，
+/// `- 列表项` 这类带正文的行不受影响；只有一个 `-` 也不会命中（需要 3 个）。
+EditCommand? _horizontalRuleHandler(Editor editor, EditRequest request) {
+  if (request is! InsertNewlineAtCaretRequest) {
+    return null;
+  }
+  final selection = editor.composer.selection;
+  if (selection == null || !selection.isCollapsed) {
+    return null;
+  }
+  final node = editor.document.getNodeById(selection.extent.nodeId);
+  if (node is! ParagraphNode) {
+    return null;
+  }
+  final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+  if (blockType != null && blockType != paragraphAttribution) {
+    return null;
+  }
+  final position = selection.extent.nodePosition;
+  if (position is! TextNodePosition) {
+    return null;
+  }
+  final String text = node.text.toPlainText();
+  if (position.offset != text.length || !isHorizontalRuleLine(text)) {
+    return null;
+  }
+  return _HorizontalRuleCommand(
+    nodeId: node.id,
+    newNodeId: request.newNodeId,
+  );
+}
+
+/// 把「手打的分割线段落」换成 [HorizontalRuleNode]，并在其后垫一个空段落
+/// 接住光标（分割线本身没有文本光标）。
+class _HorizontalRuleCommand extends EditCommand {
+  const _HorizontalRuleCommand({
+    required this.nodeId,
+    required this.newNodeId,
+  });
+
+  final String nodeId;
+  final String newNodeId;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  String describe() => 'Horizontal rule - $nodeId';
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    executor
+      ..executeCommand(
+        ReplaceNodeCommand(
+          existingNodeId: nodeId,
+          newNode: HorizontalRuleNode(id: nodeId),
+        ),
+      )
+      ..executeCommand(
+        InsertNodeAfterNodeCommand(
+          existingNodeId: nodeId,
+          newNode: ParagraphNode(id: newNodeId, text: AttributedText()),
+        ),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: newNodeId,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.insertContent,
+          SelectionReason.userInteraction,
+        ),
+      );
+  }
 }
 
 /// 手打代码围栏（``` / ```dart）后回车 → 直接生成代码块。

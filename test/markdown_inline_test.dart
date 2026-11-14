@@ -135,6 +135,154 @@ void main() {
     });
   });
 
+  group('整段扫描（粘贴后补齐）', () {
+    test('多标记混排按出现顺序全部命中', () {
+      const String text = '前**粗**中`码`后~~删~~与==高亮==和[链接](https://a.com)';
+      final List<InlineMarkdownMatch> matches = findAllInlineMarkdown(text);
+      expect(
+        matches.map((InlineMarkdownMatch m) => m.kind).toList(),
+        <InlineMarkdownKind>[
+          InlineMarkdownKind.bold,
+          InlineMarkdownKind.code,
+          InlineMarkdownKind.strikethrough,
+          InlineMarkdownKind.highlight,
+          InlineMarkdownKind.link,
+        ],
+      );
+    });
+
+    test('普通算式 / 未闭合标记不误判', () {
+      expect(findAllInlineMarkdown('2 * 3 * 4'), isEmpty);
+      expect(findAllInlineMarkdown('a ** b'), isEmpty);
+      expect(findAllInlineMarkdown('普通文本'), isEmpty);
+      expect(findAllInlineMarkdown('**未闭合'), isEmpty);
+    });
+
+    test('落地：标记删除、样式生效、光标按删除量映射', () {
+      final MutableDocument document = MutableDocument(
+        nodes: <DocumentNode>[
+          ParagraphNode(id: 'p1', text: AttributedText('前**粗**后')),
+        ],
+      );
+      final MutableDocumentComposer composer = MutableDocumentComposer();
+      final Editor editor =
+          createXiaojiEditor(document: document, composer: composer);
+
+      const String text = '前**粗**后';
+      final List<EditRequest>? requests = allInlineMarkdownRequests(
+        nodeId: 'p1',
+        text: text,
+        caret: text.length,
+      );
+      expect(requests, isNotNull);
+      editor.execute(requests!);
+
+      final ParagraphNode node = document.getNodeById('p1')! as ParagraphNode;
+      expect(node.text.toPlainText(), '前粗后');
+      expect(
+        node.text.hasAttributionAt(1, attribution: boldAttribution),
+        isTrue,
+      );
+      // 光标在末尾：原文 7 个字符，删掉 4 个标记字符 → 3。
+      final TextNodePosition caret =
+          composer.selection!.extent.nodePosition as TextNodePosition;
+      expect(caret.offset, 3);
+    });
+
+    test('多块同帧补齐不会互相串位', () {
+      final MutableDocument document = MutableDocument(
+        nodes: <DocumentNode>[
+          ParagraphNode(id: 'p1', text: AttributedText('A**一**B')),
+          ParagraphNode(id: 'p2', text: AttributedText('C~~二~~D')),
+        ],
+      );
+      final Editor editor = createXiaojiEditor(
+        document: document,
+        composer: MutableDocumentComposer(),
+      );
+      editor.execute(allInlineMarkdownRequests(
+        nodeId: 'p1',
+        text: 'A**一**B',
+      )!);
+      editor.execute(allInlineMarkdownRequests(
+        nodeId: 'p2',
+        text: 'C~~二~~D',
+      )!);
+
+      expect(
+        (document.getNodeById('p1')! as ParagraphNode).text.toPlainText(),
+        'A一B',
+      );
+      expect(
+        (document.getNodeById('p2')! as ParagraphNode).text.toPlainText(),
+        'C二D',
+      );
+    });
+  });
+
+  group('手打分割线回车生成分割线', () {
+    late MutableDocument document;
+    late MutableDocumentComposer composer;
+    late Editor editor;
+
+    setUp(() {
+      document = MutableDocument(
+        nodes: <DocumentNode>[
+          ParagraphNode(id: 'p1', text: AttributedText()),
+        ],
+      );
+      composer = MutableDocumentComposer();
+      editor = createXiaojiEditor(document: document, composer: composer);
+    });
+
+    void setParagraph(String text) {
+      editor.execute(<EditRequest>[
+        ReplaceNodeRequest(
+          existingNodeId: 'p1',
+          newNode: ParagraphNode(id: 'p1', text: AttributedText(text)),
+        ),
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: 'p1',
+              nodePosition: TextNodePosition(offset: text.length),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+      ]);
+    }
+
+    test('识别规则', () {
+      expect(isHorizontalRuleLine('---'), isTrue);
+      expect(isHorizontalRuleLine('***'), isTrue);
+      expect(isHorizontalRuleLine('___'), isTrue);
+      expect(isHorizontalRuleLine('  ---  '), isTrue);
+      expect(isHorizontalRuleLine('--'), isFalse);
+      expect(isHorizontalRuleLine('- 列表项'), isFalse);
+      expect(isHorizontalRuleLine('正文'), isFalse);
+    });
+
+    test('回车后变成 HorizontalRuleNode，光标落在其后的空段落', () {
+      setParagraph('---');
+      editor.execute(<EditRequest>[InsertNewlineAtCaretRequest()]);
+
+      expect(document.nodeCount, 2);
+      expect(document.getNodeAt(0), isA<HorizontalRuleNode>());
+      final ParagraphNode tail = document.getNodeAt(1)! as ParagraphNode;
+      expect(tail.text.toPlainText(), isEmpty);
+      expect(composer.selection!.extent.nodeId, tail.id);
+    });
+
+    test('普通列表行回车不受影响', () {
+      setParagraph('- 一项');
+      editor.execute(<EditRequest>[InsertNewlineAtCaretRequest()]);
+
+      expect(document.getNodeAt(0), isNot(isA<HorizontalRuleNode>()));
+    });
+  });
+
   group('代码围栏回车生成代码块', () {
     late MutableDocument document;
     late MutableDocumentComposer composer;

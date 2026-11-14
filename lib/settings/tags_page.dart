@@ -368,9 +368,17 @@ class TagsPage extends StatelessWidget {
       child: Row(
         children: <Widget>[
           const AppBackButton(),
-          Text(
-            '标签管理',
-            style: AppText.sheetTitle.copyWith(color: colors.text),
+          // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Text(
+                '标签管理',
+                style: AppText.sheetTitle.copyWith(color: colors.text),
+              ),
+            ),
           ),
         ],
       ),

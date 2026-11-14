@@ -291,6 +291,172 @@ List<EditRequest>? inlineMarkdownRequests({
   ];
 }
 
+/// 整段扫描用的合并模式：按「链接 → 行内码 → 加粗 → 删除线 → 高亮 →
+/// 斜体」的优先级排列，正则天然取最左命中且不重叠，避免 `**粗**` 被
+/// 斜体规则截胡。
+final RegExp _scanPattern = RegExp(
+  r'\[([^\[\]\n]+)\]\(([^()\n\s]+)\)'
+  r'|`([^`\n]+)`'
+  r'|\*\*([^*\n]+)\*\*'
+  r'|~~([^~\n]+)~~'
+  r'|==([^=\n]+)=='
+  r'|(?<!\*)\*([^*\n]+)\*(?!\*)',
+);
+
+/// 标记内容是否有效：非空、首尾不能是空白（`2 * 3 * 4` 这类不算斜体）。
+bool _isInlineContent(String content) =>
+    content.trim().isNotEmpty && content.trim() == content;
+
+/// 整段扫描所有**已闭合**的行内标记（按出现顺序、互不重叠）。
+///
+/// 与 [matchInlineMarkdown] 的区别：后者只看「光标前刚闭合的那一个」，
+/// 用于手打即时成型；这里扫整段文本，用于粘贴 / 一次性插入之后补齐样式
+/// —— 否则 `**粗体**` 会以字面量留在正文里，只能存盘重进才被解析。
+List<InlineMarkdownMatch> findAllInlineMarkdown(String text) {
+  if (text.isEmpty) {
+    return const <InlineMarkdownMatch>[];
+  }
+  final List<InlineMarkdownMatch> matches = <InlineMarkdownMatch>[];
+  for (final RegExpMatch match in _scanPattern.allMatches(text)) {
+    final String? url = match.group(2);
+    if (url != null) {
+      final String label = match.group(1)!;
+      matches.add(
+        InlineMarkdownMatch(
+          kind: InlineMarkdownKind.link,
+          openStart: match.start,
+          openLength: 1,
+          contentStart: match.start + 1,
+          contentEnd: match.start + 1 + label.length,
+          closeLength: match.end - (match.start + 1 + label.length),
+          linkUrl: url,
+        ),
+      );
+      continue;
+    }
+    final InlineMarkdownKind kind;
+    final int length;
+    final String content;
+    if (match.group(3) != null) {
+      kind = InlineMarkdownKind.code;
+      length = 1;
+      content = match.group(3)!;
+    } else if (match.group(4) != null) {
+      kind = InlineMarkdownKind.bold;
+      length = 2;
+      content = match.group(4)!;
+    } else if (match.group(5) != null) {
+      kind = InlineMarkdownKind.strikethrough;
+      length = 2;
+      content = match.group(5)!;
+    } else if (match.group(6) != null) {
+      kind = InlineMarkdownKind.highlight;
+      length = 2;
+      content = match.group(6)!;
+    } else {
+      kind = InlineMarkdownKind.italic;
+      length = 1;
+      content = match.group(7)!;
+    }
+    if (!_isInlineContent(content)) {
+      continue;
+    }
+    matches.add(
+      InlineMarkdownMatch(
+        kind: kind,
+        openStart: match.start,
+        openLength: length,
+        contentStart: match.start + length,
+        contentEnd: match.end - length,
+        closeLength: length,
+      ),
+    );
+  }
+  return matches;
+}
+
+/// 整段文本 → 一批编辑请求；没有可转换的标记返回 null。
+///
+/// 请求按**从右到左**排列：同一 `execute` 内先删靠后的闭合标记，靠前的
+/// 命中项下标仍然指向原文，不用做偏移换算。样式先加、标记后删，删标记
+/// 不会波及内容区间。`caret` 给出时按实际删除量映射回新位置。
+List<EditRequest>? allInlineMarkdownRequests({
+  required String nodeId,
+  required String text,
+  int? caret,
+}) {
+  final List<InlineMarkdownMatch> matches = findAllInlineMarkdown(text);
+  if (matches.isEmpty) {
+    return null;
+  }
+  DocumentPosition at(int offset) => DocumentPosition(
+        nodeId: nodeId,
+        nodePosition: TextNodePosition(offset: offset),
+      );
+  final List<EditRequest> requests = <EditRequest>[];
+  for (final InlineMarkdownMatch match in matches.reversed) {
+    final Set<Attribution> attributions = match.kind == InlineMarkdownKind.link
+        ? <Attribution>{LinkAttribution(match.linkUrl!)}
+        : <Attribution>{match.attribution!};
+    requests
+      ..add(
+        AddTextAttributionsRequest(
+          documentRange: DocumentRange(
+            start: at(match.contentStart),
+            end: at(match.contentEnd),
+          ),
+          attributions: attributions,
+        ),
+      )
+      ..add(
+        DeleteContentRequest(
+          documentRange: DocumentRange(
+            start: at(match.contentEnd),
+            end: at(match.contentEnd + match.closeLength),
+          ),
+        ),
+      )
+      ..add(
+        DeleteContentRequest(
+          documentRange: DocumentRange(
+            start: at(match.openStart),
+            end: at(match.openStart + match.openLength),
+          ),
+        ),
+      );
+  }
+  if (caret != null) {
+    int mapped = caret;
+    for (final InlineMarkdownMatch match in matches) {
+      final int removedEnd = match.contentEnd + match.closeLength;
+      if (removedEnd <= caret) {
+        // 标记整体在光标之前：起始 + 闭合标记都删掉了。
+        mapped -= match.openLength + match.closeLength;
+      } else if (caret > match.openStart && caret <= match.contentEnd) {
+        // 光标落在内容里：只扣掉起始标记。
+        mapped -= match.openLength;
+      }
+    }
+    requests.add(
+      ChangeSelectionRequest(
+        DocumentSelection.collapsed(position: at(mapped)),
+        SelectionChangeType.placeCaret,
+        SelectionReason.userInteraction,
+      ),
+    );
+  }
+  return requests;
+}
+
+/// 整段文本是否为分割线（`---` / `***` / `___`）；用于「回车生成分割线」。
+bool isHorizontalRuleLine(String text) {
+  final String trimmed = text.trim();
+  if (trimmed.length < 3) {
+    return false;
+  }
+  return RegExp(r'^(?:-{3,}|\*{3,}|_{3,})$').hasMatch(trimmed);
+}
+
 /// 代码围栏开头（` ``` ` / ` ```dart `）；用于「回车生成代码块」。
 ///
 /// 只认整段文本恰好是围栏：` ```dart ` 后面再跟内容说明用户是在写正文。

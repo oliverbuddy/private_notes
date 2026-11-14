@@ -1,9 +1,96 @@
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show kDoubleTapTimeout, kTouchSlop;
+import 'package:flutter/gestures.dart'
+    show kDoubleTapTimeout, kTouchSlop, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/super_editor.dart';
+
+/// 表格结构操作（右键菜单 / Tab 加行共用）。
+enum TableCellAction {
+  insertRowAbove,
+  insertRowBelow,
+  insertColumnLeft,
+  insertColumnRight,
+  deleteRow,
+  deleteColumn,
+}
+
+/// 按 [action] 重建表格节点；不允许的操作返回 null（菜单负责置灰）。
+///
+/// 内核的 [TableBlockNode] 不可变，插入 / 删除行列都要整表重建：未改动的
+/// 单元格复用原 [TextNode]（id 不变，撤销与光标映射都更稳），新单元格
+/// 用 [Editor.createNodeId] 生成。表头行不能删除（表格必须保留表头），
+/// 最后一列也不能删。
+TableBlockNode? rebuildTableNode(
+  TableBlockNode table,
+  TableCellAction action,
+  int row,
+  int column,
+) {
+  final int rowCount = table.rowCount;
+  final int columnCount = table.columnCount;
+  if (rowCount == 0 || columnCount == 0) {
+    return null;
+  }
+  if (row < 0 || row >= rowCount || column < 0 || column >= columnCount) {
+    return null;
+  }
+
+  List<List<TextNode>> snapshot() => <List<TextNode>>[
+        for (int r = 0; r < rowCount; r++)
+          <TextNode>[
+            for (int c = 0; c < columnCount; c++)
+              table.getCell(rowIndex: r, columnIndex: c),
+          ],
+      ];
+  TextNode emptyCell() =>
+      TextNode(id: Editor.createNodeId(), text: AttributedText());
+
+  final List<List<TextNode>> cells;
+  switch (action) {
+    case TableCellAction.insertRowAbove:
+      cells = snapshot()
+        ..insert(
+          row,
+          List<TextNode>.generate(columnCount, (_) => emptyCell()),
+        );
+    case TableCellAction.insertRowBelow:
+      cells = snapshot()
+        ..insert(
+          row + 1,
+          List<TextNode>.generate(columnCount, (_) => emptyCell()),
+        );
+    case TableCellAction.insertColumnLeft:
+    case TableCellAction.insertColumnRight:
+      final int at = action == TableCellAction.insertColumnLeft
+          ? column
+          : column + 1;
+      cells = snapshot();
+      for (final List<TextNode> rowCells in cells) {
+        rowCells.insert(at, emptyCell());
+      }
+    case TableCellAction.deleteRow:
+      // 表头是表格的语义基准，删掉就没有表格了。
+      if (row == 0 || rowCount <= 1) {
+        return null;
+      }
+      cells = snapshot()..removeAt(row);
+    case TableCellAction.deleteColumn:
+      if (columnCount <= 1) {
+        return null;
+      }
+      cells = snapshot();
+      for (final List<TextNode> rowCells in cells) {
+        rowCells.removeAt(column);
+      }
+  }
+  return TableBlockNode(
+    id: table.id,
+    cells: cells,
+    metadata: Map<String, dynamic>.from(table.metadata),
+  );
+}
 
 /// 列宽 = 内容自适应，但每条列最多 [maxWidth]，超出的单元格内换行。
 ///
@@ -39,6 +126,8 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
     this.columnMax = 240,
     this.fillWidth = false,
     this.onCellCommitted,
+    this.onCellStructure,
+    this.onCellPointerDown,
   }) : super(fit: TableComponentFit.scroll);
 
   /// 正文内容区宽度（已扣掉页面左右页边距）。
@@ -64,6 +153,18 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
   /// 单元格内容提交回调；为 null 时不启用双击编辑。
   final void Function(String tableNodeId, int row, int column, String text)?
       onCellCommitted;
+
+  /// 表格结构操作（插入 / 删除行列）；为 null 时右键菜单不提供结构操作。
+  final void Function(
+    String tableNodeId,
+    TableCellAction action,
+    int row,
+    int column,
+  )? onCellStructure;
+
+  /// 指针在单元格上按下：右键菜单需要知道「哪一行哪一列」。
+  final void Function(String tableNodeId, int row, int column)?
+      onCellPointerDown;
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -102,6 +203,8 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
       editorBackground: editorBackground,
       fillWidth: fillWidth,
       onCellCommitted: onCellCommitted,
+      onCellStructure: onCellStructure,
+      onCellPointerDown: onCellPointerDown,
     );
   }
 }
@@ -116,6 +219,8 @@ class EditableTableComponent extends StatefulWidget {
     required this.editorBackground,
     this.fillWidth = false,
     this.onCellCommitted,
+    this.onCellStructure,
+    this.onCellPointerDown,
   });
 
   final GlobalKey componentKey;
@@ -127,6 +232,18 @@ class EditableTableComponent extends StatefulWidget {
   final bool fillWidth;
   final void Function(String tableNodeId, int row, int column, String text)?
       onCellCommitted;
+
+  /// 结构操作回调（Tab 到末格加行 / 右键菜单）；组件本身不改文档。
+  final void Function(
+    String tableNodeId,
+    TableCellAction action,
+    int row,
+    int column,
+  )? onCellStructure;
+
+  /// 指针按下时上报单元格位置（右键菜单定位目标行列）。
+  final void Function(String tableNodeId, int row, int column)?
+      onCellPointerDown;
 
   @override
   State<EditableTableComponent> createState() => _EditableTableComponentState();
@@ -158,7 +275,23 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
-    if (!_editable || _editRow != null) {
+    if (!_editable) {
+      return;
+    }
+    // 右键：把「哪一行哪一列」上报给页面，右键菜单据此做结构操作
+    // （插入 / 删除行列）。菜单本身由页面统一弹，避免两个菜单同时出现。
+    if (event.buttons == kSecondaryMouseButton) {
+      final (int, int)? cell = _cellAt(event.position);
+      if (cell != null) {
+        widget.onCellPointerDown?.call(
+          widget.viewModel.nodeId,
+          cell.$1,
+          cell.$2,
+        );
+      }
+      return;
+    }
+    if (_editRow != null) {
       return;
     }
     final DateTime now = DateTime.now();
@@ -277,11 +410,14 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
   /// 提交编辑。[cancel] 为真时丢弃输入。
   ///
-  /// [moveNext] / [movePrevious] 用于 Tab / Shift+Tab：提交后按行列顺序
-  /// 切到下一格继续编辑（表格里最常用的连续录入方式）。
+  /// 与竞品一致的连续录入方式：
+  ///  - Enter：提交后光标下移到同列下一行；已在最后一行则新增一行；
+  ///  - Tab / Shift+Tab：按行列顺序前后切换，最后一格再 Tab 新增一行；
+  ///  - Esc：放弃本次输入。
   void _commitEditing({
     bool moveNext = false,
     bool movePrevious = false,
+    bool moveDown = false,
     bool cancel = false,
   }) {
     final int? row = _editRow;
@@ -295,15 +431,26 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     final String original = cells[row][column].text.toPlainText();
     final String text = controller.text.replaceAll('\n', ' ');
 
+    final int rowCount = cells.length;
+    final int columnCount = cells[row].length;
     int? nextRow;
     int? nextColumn;
-    if (moveNext || movePrevious) {
-      final int rowCount = cells.length;
-      final int columnCount = cells[row].length;
-      int index = row * columnCount + column + (moveNext ? 1 : -1);
+    bool addRow = false;
+    if (moveDown) {
+      // 表格里最常用的录入方向是「往下填同一列」，不是回车退出。
+      nextRow = row + 1;
+      nextColumn = column;
+      addRow = nextRow >= rowCount;
+    } else if (moveNext || movePrevious) {
+      final int index = row * columnCount + column + (moveNext ? 1 : -1);
       if (index >= 0 && index < rowCount * columnCount) {
         nextRow = index ~/ columnCount;
         nextColumn = index % columnCount;
+      } else if (moveNext) {
+        // 最后一格再 Tab：新增一行并落到新行首列。
+        addRow = true;
+        nextRow = rowCount;
+        nextColumn = 0;
       }
     }
 
@@ -313,16 +460,38 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     if (!cancel && text != original) {
       widget.onCellCommitted!(widget.viewModel.nodeId, row, column, text);
     }
+    if (!cancel && addRow) {
+      widget.onCellStructure?.call(
+        widget.viewModel.nodeId,
+        TableCellAction.insertRowBelow,
+        rowCount - 1,
+        0,
+      );
+    }
     if (!cancel && nextRow != null && nextColumn != null) {
       final int targetRow = nextRow;
       final int targetColumn = nextColumn;
-      // 等内核把新表格重建出来，再在新单元格上开编辑框。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _beginEditing(targetRow, targetColumn);
-        }
-      });
+      // 新增行时表格要等内核重建完才有新单元格，这里带重试地等下一帧。
+      _beginEditingAfterRebuild(targetRow, targetColumn);
     }
+  }
+
+  /// 等表格重建完成后在新单元格上开编辑框（最多重试 3 帧）。
+  void _beginEditingAfterRebuild(int row, int column, {int attempt = 0}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final List<List<MarkdownTableCellViewModel>> cells =
+          widget.viewModel.cells;
+      if (row < cells.length && column < cells[row].length) {
+        _beginEditing(row, column);
+        return;
+      }
+      if (attempt < 3) {
+        _beginEditingAfterRebuild(row, column, attempt: attempt + 1);
+      }
+    });
   }
 
   @override
@@ -460,8 +629,8 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
           textAlign: cell.textAlign,
           cursorColor: widget.cursorColor,
           maxLines: 1,
-          // 回车提交：表格单元格是单行内容，换行会破坏 Markdown 表格。
-          onSubmitted: (_) => _commitEditing(),
+          // 回车提交并下移：与 Excel / 语雀 的表格录入一致。
+          onSubmitted: (_) => _commitEditing(moveDown: true),
           onTapOutside: (_) => _commitEditing(),
           decoration: const InputDecoration(
             isDense: true,
