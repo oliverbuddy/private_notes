@@ -57,6 +57,39 @@
     return null;
   }
 
+  // 访问设备识别：主下载按钮按平台直接给对应安装包（主流官网做法）。
+  //
+  // 顺序很重要：Android UA 里含 Linux；iPadOS 13+ 的 Safari 会伪装成
+  // MacIntel，只能靠 maxTouchPoints 区分。
+  function detectPlatform() {
+    var ua = navigator.userAgent || '';
+    var platform = '';
+    if (navigator.userAgentData && navigator.userAgentData.platform) {
+      platform = navigator.userAgentData.platform;
+    } else if (navigator.platform) {
+      platform = navigator.platform;
+    }
+    if (/Android/i.test(ua)) {
+      return 'android';
+    }
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      return 'ios';
+    }
+    if (/Mac/i.test(platform) && navigator.maxTouchPoints > 1) {
+      return 'ios';
+    }
+    if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+      return 'windows';
+    }
+    if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) {
+      return 'macos';
+    }
+    if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+      return 'linux';
+    }
+    return 'unknown';
+  }
+
   fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
     headers: { Accept: 'application/vnd.github+json' },
   })
@@ -77,16 +110,45 @@
         return /arm64-v8a\.apk$/i.test(asset.name);
       })[0] || apks[0];
 
-      fill('[data-latest-version]', release.tag_name || release.name);
-      fill('[data-latest-date]', formatDate(release.published_at));
-      if (apk) {
-        fill('[data-latest-size]', formatSize(apk.size));
-        link('[data-download-link]', apk.browser_download_url);
-      }
-
       // 桌面端：macOS 通用 DMG、Windows x64 安装器。缺失时保持指向 Releases 页。
       var mac = findAsset(assets, /-macos-universal\.dmg$/i);
       var win = findAsset(assets, /-windows-x64-setup\.exe$/i);
+
+      // 主按钮按访问平台给对应安装包，文案同步成「下载 macOS 版」等。
+      // iOS / Linux 没有对应包：按钮改为「查看全部版本」，避免误下 APK。
+      var platform = detectPlatform();
+      var primary = null;
+      var label = '下载最新版';
+      if (platform === 'android') {
+        primary = apk;
+        label = '下载 Android APK';
+      } else if (platform === 'macos') {
+        primary = mac;
+        label = '下载 macOS 版';
+      } else if (platform === 'windows') {
+        primary = win;
+        label = '下载 Windows 版';
+      } else if (platform === 'ios' || platform === 'linux') {
+        label = '查看全部版本';
+      } else if (apk) {
+        // 无法识别的系统：保留原来的 APK 兜底。
+        primary = apk;
+        label = '下载 Android APK';
+      }
+
+      fill('[data-latest-version]', release.tag_name || release.name);
+      fill('[data-latest-date]', formatDate(release.published_at));
+      if (primary) {
+        fill('[data-latest-size]', formatSize(primary.size));
+        link('[data-download-link]', primary.browser_download_url);
+      } else if (platform === 'ios' || platform === 'linux') {
+        link(
+          '[data-download-link]',
+          'https://github.com/' + REPO + '/releases/latest'
+        );
+      }
+      fill('[data-download-label]', label);
+
       link('[data-macos-download]', mac && mac.browser_download_url);
       link('[data-windows-download]', win && win.browser_download_url);
     })
