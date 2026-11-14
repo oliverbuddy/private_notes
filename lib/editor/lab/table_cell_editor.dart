@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/super_editor.dart';
 
+import '../../theme/app_theme.dart';
+import '../../ui/pressable.dart';
+
 /// 表格结构操作（右键菜单 / Tab 加行共用）。
 enum TableCellAction {
   insertRowAbove,
@@ -213,7 +216,7 @@ class EditableTableComponentBuilder extends MarkdownTableComponentBuilder {
   }
 }
 
-/// 表格组件本体：绘制与内核一致，单元格支持双击就地编辑。
+/// 表格组件本体：绘制与内核一致，单元格单击进入编辑。
 class EditableTableComponent extends StatefulWidget {
   const EditableTableComponent({
     super.key,
@@ -268,6 +271,10 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
   /// 本次编辑开始的时间：用来区分「内核抢焦点」和「用户点走」。
   DateTime _editingStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 当前悬停的单元格（桌面端浮动工具条用）。
+  int? _hoverRow;
+  int? _hoverColumn;
 
   bool get _editable => widget.onCellCommitted != null;
 
@@ -337,6 +344,15 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       if (row >= cells.length || column >= cells[row].length) {
         _resetEditing();
       }
+    }
+    // 悬停位置也要跟着表格一起收敛，避免工具条指向已经不存在的行列。
+    final int? hoverRow = _hoverRow;
+    if (hoverRow != null &&
+        (hoverRow >= widget.viewModel.cells.length ||
+            (_hoverColumn ?? 0) >=
+                widget.viewModel.cells[hoverRow].length)) {
+      _hoverRow = null;
+      _hoverColumn = null;
     }
   }
 
@@ -447,7 +463,8 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   /// 提交编辑。[cancel] 为真时丢弃输入。
   ///
   /// 与竞品一致的连续录入方式：
-  ///  - Enter：提交后光标下移到同列下一行；已在最后一行则新增一行；
+  ///  - Enter / ↓：提交后光标下移到同列下一行；已在最后一行则新增一行；
+  ///  - ↑：提交后上移一行（第一行时不关闭编辑）；
   ///  - Tab / Shift+Tab：按行列顺序前后切换，最后一格再 Tab 新增一行；
   ///  - Esc：放弃本次输入。
   void _commitEditing({
@@ -567,35 +584,141 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     );
   }
 
-  /// 可交互的表格主体：单击选表交给内核，双击进入单元格编辑。
+  /// 可交互的表格主体：单击单元格进入编辑，悬停显示增删行列的工具条。
   Widget _buildInteractiveTable(BuildContext context) {
+    // MouseRegion 必须包住工具条：否则指针移到工具条上会触发表格的
+    // onExit，工具条刚出现就消失（闪一下）。
     return MouseRegion(
       cursor: SystemMouseCursors.basic,
       hitTestBehavior: HitTestBehavior.translucent,
-      // Listener 只观察指针、不参与手势竞技场：双击进入单元格编辑，
-      // 单击仍然完整交给内核去选中整表（与官方组件同一套行为）。
-      child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _handlePointerDown,
-        // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
-        // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
-        child: IgnorePointer(
-          ignoring: _editRow == null,
-          child: SelectableBox(
-            selection: widget.viewModel.selection?.nodeSelection
-                    is UpstreamDownstreamNodeSelection
-                ? widget.viewModel.selection?.nodeSelection
-                    as UpstreamDownstreamNodeSelection
-                : null,
-            selectionColor: widget.viewModel.selectionColor,
-            child: BoxComponent(
-              key: widget.componentKey,
-              opacity: widget.viewModel.opacity,
-              child: _buildTable(context),
+      onHover: _handleHover,
+      onExit: (_) {
+        if (_hoverRow != null) {
+          setState(() {
+            _hoverRow = null;
+            _hoverColumn = null;
+          });
+        }
+      },
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          // Listener 只观察指针、不参与手势竞技场：单击单元格进入编辑，
+          // 拖选文字交给编辑框。
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _handlePointerDown,
+            // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
+            // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
+            child: IgnorePointer(
+              ignoring: _editRow == null,
+              child: SelectableBox(
+                selection: widget.viewModel.selection?.nodeSelection
+                        is UpstreamDownstreamNodeSelection
+                    ? widget.viewModel.selection?.nodeSelection
+                        as UpstreamDownstreamNodeSelection
+                    : null,
+                selectionColor: widget.viewModel.selectionColor,
+                child: BoxComponent(
+                  key: widget.componentKey,
+                  opacity: widget.viewModel.opacity,
+                  child: _buildTable(context),
+                ),
+              ),
             ),
           ),
+          // 悬停工具条：竞品（Notion / 语雀）都把增删行列放在表格边角的
+          // 浮层上，不必先右键。移出表格即消失。
+          if (_editable && _hoverRow != null)
+            Positioned(top: 2, right: 2, child: _buildHoverBar(context)),
+        ],
+      ),
+    );
+  }
+
+  void _handleHover(PointerHoverEvent event) {
+    if (!_editable) {
+      return;
+    }
+    final (int, int)? cell = _cellAt(event.position);
+    if (cell?.$1 == _hoverRow && cell?.$2 == _hoverColumn) {
+      return;
+    }
+    setState(() {
+      _hoverRow = cell?.$1;
+      _hoverColumn = cell?.$2;
+    });
+  }
+
+  /// 表格右上角的浮动工具条：插入 / 删除行列。
+  Widget _buildHoverBar(BuildContext context) {
+    final AppColors colors = AppColors.of(context);
+    final int row = _hoverRow!;
+    final int columns = widget.viewModel.cells[row].length;
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        height: 26,
+        decoration: BoxDecoration(
+          color: colors.page,
+          borderRadius: BorderRadius.circular(AppRadius.block),
+          border: Border.all(color: colors.chipBorder, width: 0.5),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _HoverAction(
+              label: '＋行',
+              tooltip: '在下方插入行',
+              onTap: () => _runStructure(TableCellAction.insertRowBelow),
+            ),
+            _HoverAction(
+              label: '＋列',
+              tooltip: '在右侧插入列',
+              onTap: () => _runStructure(TableCellAction.insertColumnRight),
+            ),
+            _HoverAction(
+              label: '−行',
+              tooltip: '删除本行',
+              // 表头行不能删。
+              enabled: row > 0,
+              onTap: () => _runStructure(TableCellAction.deleteRow),
+            ),
+            _HoverAction(
+              label: '−列',
+              tooltip: '删除本列',
+              enabled: columns > 1,
+              onTap: () => _runStructure(TableCellAction.deleteColumn),
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  /// 悬停工具条执行结构操作：先把正在编辑的内容提交掉，避免两次整表重建
+  /// 互相覆盖。
+  void _runStructure(TableCellAction action) {
+    final int? row = _hoverRow;
+    final int? column = _hoverColumn;
+    if (row == null || column == null) {
+      return;
+    }
+    if (_editRow != null) {
+      _commitEditing();
+    }
+    widget.onCellStructure?.call(
+      widget.viewModel.nodeId,
+      action,
+      row,
+      column,
     );
   }
 
@@ -687,6 +810,52 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
             border: InputBorder.none,
             contentPadding: EdgeInsets.symmetric(horizontal: 2),
             counterText: '',
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 表格悬停工具条上的小按钮（26 高、11.5 号字）。
+class _HoverAction extends StatelessWidget {
+  const _HoverAction({
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+    this.enabled = true,
+  });
+
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppColors colors = AppColors.of(context);
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: AppPressable(
+        enabled: enabled,
+        onTap: enabled ? onTap : null,
+        pressedScale: 1,
+        pressedColor: AppPress.overlay(context),
+        child: SizedBox(
+          height: 26,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 7),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1,
+                  color: enabled ? colors.text : colors.tertiary,
+                ),
+              ),
+            ),
           ),
         ),
       ),
