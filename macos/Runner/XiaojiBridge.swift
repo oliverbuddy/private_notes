@@ -207,61 +207,68 @@ final class XiaojiBridge {
   /// 把文件拖出到 Finder。
   ///
   /// Flutter 没有跨应用拖拽能力，必须由原生发起 `NSDraggingSession`。
-  /// Dart 在指针移动超过阈值时调用这里；`NSApp.currentEvent` 在通道回调
-  /// 时机往往已经结束，所以按 Flutter 传来的坐标合成一个 mouseDown 事件
-  /// 再开会话（macOS 上这是标准做法，Finder 会接管后续拖拽）。
+  /// 通道回调时 `NSApp.currentEvent` 往往已失效，所以这里只登记路径，
+  /// 由本地事件监听器在下一次真实 mouseDragged 时开会话。
   private func beginFileDrag(_ args: [String: Any], result: @escaping FlutterResult) {
     guard let paths = args["paths"] as? [String], !paths.isEmpty else {
       result(false)
       return
     }
-    let x = args["x"] as? Double ?? 0
-    let y = args["y"] as? Double ?? 0
+    // 不在通道回调里直接开会话：拿不到有效的 NSEvent。这里只「预登记」
+    // 路径，等下一个真实的 leftMouseDragged 事件由本地监听器发起拖拽。
+    pendingDragPaths = paths
+    installDragMonitorIfNeeded()
+    result(true)
+  }
 
-    DispatchQueue.main.async {
-      guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
-            let view = window.contentView else {
-        result(false)
-        return
-      }
-      let location = NSPoint(x: x, y: max(0, view.bounds.height - y))
-      guard let event = NSEvent.mouseEvent(
-        with: .leftMouseDown,
-        location: location,
-        modifierFlags: [],
-        timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: window.windowNumber,
-        context: nil,
-        eventNumber: 0,
-        clickCount: 1,
-        pressure: 1
-      ) else {
-        result(false)
-        return
-      }
+  private var pendingDragPaths: [String]?
+  private var dragEventMonitor: Any?
 
-      let items: [NSDraggingItem] = paths.compactMap { path in
-        let url = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-          return nil
-        }
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-        item.setDraggingFrame(
-          NSRect(x: location.x - 32, y: location.y - 32, width: 64, height: 64),
-          contents: NSWorkspace.shared.icon(forFile: url.path))
-        return item
-      }
-      guard !items.isEmpty else {
-        result(false)
-        return
-      }
-      let session = view.beginDraggingSession(
-        with: items,
-        event: event,
-        source: FileDragSource.shared)
-      session.animatesToStartingPositionsOnCancelOrFail = true
-      result(true)
+  private func installDragMonitorIfNeeded() {
+    guard dragEventMonitor == nil else {
+      return
     }
+    dragEventMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDragged, .leftMouseUp]
+    ) { [weak self] event in
+      guard let self = self, let paths = self.pendingDragPaths else {
+        return event
+      }
+      if event.type == .leftMouseUp {
+        self.pendingDragPaths = nil
+        return event
+      }
+      self.pendingDragPaths = nil
+      self.startDragSession(paths: paths, event: event)
+      // 这一下拖动已经被拖拽会话接管，不再交给 Flutter 处理。
+      return nil
+    }
+  }
+
+  private func startDragSession(paths: [String], event: NSEvent) {
+    guard let view = (event.window ?? NSApp.keyWindow)?.contentView else {
+      return
+    }
+    let location = view.convert(event.locationInWindow, from: nil)
+    let items: [NSDraggingItem] = paths.compactMap { path in
+      let url = URL(fileURLWithPath: path)
+      guard FileManager.default.fileExists(atPath: url.path) else {
+        return nil
+      }
+      let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+      item.setDraggingFrame(
+        NSRect(x: location.x - 32, y: location.y - 32, width: 64, height: 64),
+        contents: NSWorkspace.shared.icon(forFile: url.path))
+      return item
+    }
+    guard !items.isEmpty else {
+      return
+    }
+    let session = view.beginDraggingSession(
+      with: items,
+      event: event,
+      source: FileDragSource.shared)
+    session.animatesToStartingPositionsOnCancelOrFail = true
   }
 
   // MARK: - 身份验证

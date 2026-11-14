@@ -2,8 +2,10 @@
 
 #include <bcrypt.h>
 #include <knownfolders.h>
+#include <ole2.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <wincrypt.h>
 
 #include <algorithm>
@@ -30,6 +32,89 @@ namespace {
 bool g_fullscreen = false;
 WINDOWPLACEMENT g_saved_placement = {sizeof(WINDOWPLACEMENT)};
 LONG_PTR g_saved_style = 0;
+
+// 拖出文件：OLE 只需初始化一次；DoDragDrop 期间由系统接管鼠标。
+bool g_ole_ready = false;
+
+class FileDropSource : public IDropSource {
+ public:
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+    if (riid == IID_IUnknown || riid == IID_IDropSource) {
+      *ppv = static_cast<IDropSource*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_; }
+  ULONG STDMETHODCALLTYPE Release() override {
+    ULONG count = --ref_;
+    if (count == 0) {
+      delete this;
+    }
+    return count;
+  }
+  HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape,
+                                              DWORD key_state) override {
+    if (escape) {
+      return DRAGDROP_S_CANCEL;
+    }
+    if ((key_state & MK_LBUTTON) == 0) {
+      return DRAGDROP_S_DROP;
+    }
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override {
+    return DRAGDROP_S_USEDEFAULTCURSORS;
+  }
+
+ private:
+  ULONG ref_ = 1;
+};
+
+// 用资源管理器拖放协议把文件拖出（与 macOS 的 NSDraggingSession 对等）。
+bool StartFileDrag(const std::vector<std::wstring>& paths) {
+  if (paths.empty()) {
+    return false;
+  }
+  if (!g_ole_ready) {
+    OleInitialize(nullptr);
+    g_ole_ready = true;
+  }
+  std::vector<PIDLIST_ABSOLUTE> pidls;
+  for (const std::wstring& path : paths) {
+    PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(path.c_str());
+    if (pidl != nullptr) {
+      pidls.push_back(pidl);
+    }
+  }
+  if (pidls.empty()) {
+    return false;
+  }
+  IDataObject* data = nullptr;
+  IShellItemArray* items = nullptr;
+  HRESULT hr = SHCreateShellItemArrayFromIDLists(
+      static_cast<UINT>(pidls.size()),
+      const_cast<PCIDLIST_ABSOLUTE*>(pidls.data()), &items);
+  if (SUCCEEDED(hr) && items != nullptr) {
+    hr = SHCreateDataObject(nullptr, 0, nullptr, items, IID_IDataObject,
+                            reinterpret_cast<void**>(&data));
+    items->Release();
+  }
+  for (PIDLIST_ABSOLUTE pidl : pidls) {
+    ILFree(pidl);
+  }
+  if (FAILED(hr) || data == nullptr) {
+    return false;
+  }
+  auto* source = new FileDropSource();
+  DWORD effect = 0;
+  hr = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
+  source->Release();
+  data->Release();
+  return hr == DRAGDROP_S_DROP;
+}
 
 void ToggleFullscreen(HWND window) {
   if (window == nullptr) {
@@ -653,6 +738,25 @@ void XiaojiBridge::HandleMethodCall(
   if (method == "toggleFullscreen") {
     ToggleFullscreen(window_);
     result->Success(flutter::EncodableValue(true));
+    return;
+  }
+
+  if (method == "beginFileDrag") {
+    std::vector<std::wstring> paths;
+    if (const auto* args = std::get_if<flutter::EncodableMap>(call.arguments())) {
+      const auto it = args->find(flutter::EncodableValue("paths"));
+      if (it != args->end()) {
+        if (const auto* list =
+                std::get_if<flutter::EncodableList>(&it->second)) {
+          for (const flutter::EncodableValue& value : *list) {
+            if (const auto* path = std::get_if<std::string>(&value)) {
+              paths.push_back(Utf8ToWide(*path));
+            }
+          }
+        }
+      }
+    }
+    result->Success(flutter::EncodableValue(StartFileDrag(paths)));
     return;
   }
 
