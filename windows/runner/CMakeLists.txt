@@ -34,6 +34,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+# 源码里含中文注释与提示文案：统一按 UTF-8 编译，否则 MSVC 会按
+# 本地代码页解析，配合 /WX 直接编译失败。
+target_compile_options(${BINARY_NAME} PRIVATE "/utf-8")
+
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # 原生通道：BCrypt(AES-GCM/PBKDF2)、DPAPI(CryptProtectData)、
 # 系统目录/Shell 打开链接。

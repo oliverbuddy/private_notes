@@ -69,8 +69,22 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       break;
     case WM_GETMINMAXINFO: {
       // 最小窗口：低于这个尺寸「列表 + 正文」就挤成一团了。
+      // 尺寸是物理像素，高 DPI 下要按缩放比放大；用 GetProcAddress 取
+      // GetDpiForWindow，避免旧 SDK 头文件里没有声明导致编译不过。
       auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-      const double scale = ::GetDpiForWindow(hwnd) / 96.0;
+      double scale = 1.0;
+      HMODULE user32 = ::GetModuleHandleW(L"user32.dll");
+      if (user32 != nullptr) {
+        using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+        auto get_dpi = reinterpret_cast<GetDpiForWindowFn>(
+            ::GetProcAddress(user32, "GetDpiForWindow"));
+        if (get_dpi != nullptr) {
+          const UINT dpi = get_dpi(hwnd);
+          if (dpi > 0) {
+            scale = dpi / 96.0;
+          }
+        }
+      }
       info->ptMinTrackSize.x = static_cast<LONG>(560 * scale);
       info->ptMinTrackSize.y = static_cast<LONG>(480 * scale);
       return 0;
