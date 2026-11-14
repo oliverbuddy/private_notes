@@ -1860,13 +1860,12 @@ class _NewEditorPageState extends State<NewEditorPage>
       _showHint('还没有历史版本');
       return;
     }
-    final NoteVersion? picked = await showModalBottomSheet<NoteVersion>(
+    final NoteVersion? picked = await showXiaojiPanel<NoteVersion>(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
       builder: (BuildContext sheetContext) => _VersionHistorySheet(
         versions: versions,
         locked: _currentNote.locked,
+        dialog: PlatformFeatures.isDesktop,
       ),
     );
     if (picked == null || !mounted) {
@@ -1877,14 +1876,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (!mounted) {
       return;
     }
-    final bool? confirmed = await showModalBottomSheet<bool>(
+    final bool? confirmed = await showXiaojiPanel<bool>(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
       builder: (BuildContext sheetContext) => _VersionPreviewSheet(
         note: preview,
         time: picked.time,
         locked: _currentNote.locked,
+        dialog: PlatformFeatures.isDesktop,
       ),
     );
     if (confirmed != true || !mounted) {
@@ -5036,21 +5034,30 @@ class _CaretAwareScrollPosition extends ScrollPositionWithSingleContext {
 
 /// 历史版本列表：时间 + 体积，点一条进入预览。
 class _VersionHistorySheet extends StatelessWidget {
-  const _VersionHistorySheet({required this.versions, required this.locked});
+  const _VersionHistorySheet({
+    required this.versions,
+    required this.locked,
+    this.dialog = false,
+  });
 
   final List<NoteVersion> versions;
   final bool locked;
+
+  /// 桌面端以居中对话框呈现：不带顶部留白、四角都收圆。
+  final bool dialog;
 
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     return Container(
-      margin: const EdgeInsets.only(top: 90),
+      margin: dialog ? EdgeInsets.zero : const EdgeInsets.only(top: 90),
       decoration: BoxDecoration(
         color: colors.page,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(AppRadius.sheet),
-        ),
+        borderRadius: dialog
+            ? BorderRadius.circular(AppRadius.block)
+            : const BorderRadius.vertical(
+                top: Radius.circular(AppRadius.sheet),
+              ),
       ),
       // SafeArea 放在卡片内部：底色一直铺到屏幕最底部（含手势指示器
       // 区域），内容再按底部 insets 避开手势条。之前 SafeArea 包在
@@ -5155,28 +5162,35 @@ class _VersionPreviewSheet extends StatelessWidget {
     required this.note,
     required this.time,
     required this.locked,
+    this.dialog = false,
   });
 
   final Note? note;
   final DateTime time;
   final bool locked;
 
+  /// 桌面端以居中对话框呈现：不带顶部留白、四角都收圆。
+  final bool dialog;
+
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final double maxHeight = MediaQuery.sizeOf(context).height * 0.75;
+    final double maxHeight =
+        dialog ? double.infinity : MediaQuery.sizeOf(context).height * 0.75;
     final List<String> blocks = (locked || note == null)
         ? const <String>[]
         : note!.body.split(RegExp(r'\n{2,}'));
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Container(
-        margin: const EdgeInsets.only(top: 70),
+        margin: dialog ? EdgeInsets.zero : const EdgeInsets.only(top: 70),
         decoration: BoxDecoration(
           color: colors.page,
-          borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(AppRadius.sheet),
-          ),
+          borderRadius: dialog
+              ? BorderRadius.circular(AppRadius.block)
+              : const BorderRadius.vertical(
+                  top: Radius.circular(AppRadius.sheet),
+                ),
         ),
         // 与历史版本列表同一处理：SafeArea 放进卡片里，底色铺到屏幕底部。
         child: SafeArea(

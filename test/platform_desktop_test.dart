@@ -41,6 +41,29 @@ Future<void> _pressWithMeta(
   await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
 }
 
+/// 面板测试的最小宿主页：一个按钮打开 [showXiaojiPanel]。
+Future<void> _pumpPanelHost(WidgetTester tester) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: AppTheme.light(),
+      home: Builder(
+        builder: (BuildContext context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => showXiaojiPanel<void>(
+                context: context,
+                builder: (BuildContext panelContext) =>
+                    const SizedBox(height: 120, child: Text('面板内容')),
+              ),
+              child: const Text('打开面板'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 void main() {
   group('桌面端：备份 zip 往返', () {
     late Directory root;
@@ -648,6 +671,31 @@ void main() {
       // 表格重建后选区收敛到表格块：不残留错位的文本光标（用户反馈）。
       expect(find.byKey(xiaojiCaretKey), findsNothing);
       expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('桌面大面板（历史版本等）用居中对话框', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      await _pumpPanelHost(tester);
+      await tester.tap(find.text('打开面板'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('面板内容'), findsOneWidget);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('移动端大面板仍是底部弹层', (WidgetTester tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      await _pumpPanelHost(tester);
+      await tester.tap(find.text('打开面板'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
       debugDefaultTargetPlatformOverride = null;
     });
 

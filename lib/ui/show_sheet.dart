@@ -123,6 +123,54 @@ Future<T?> showXiaojiSheet<T>({
   );
 }
 
+/// 大面板入口：历史版本、版本预览这类「标题 + 长列表 + 底部按钮」的面板。
+///
+/// 与 [showXiaojiSheet] 的差别只在尺寸：面板需要更大的高度，桌面用
+/// 居中对话框（可到 680×640），移动端仍是底部弹层（内容自己带圆角与
+/// 抓手，所以这里传透明底）。两端共用同一个 builder，避免出现
+/// 「PC 一套内容、手机另一套内容」。
+Future<T?> showXiaojiPanel<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  double maxWidth = 680,
+  double maxHeight = 640,
+}) {
+  if (PlatformFeatures.isDesktop) {
+    return showDialog<T>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.32),
+      builder: (BuildContext dialogContext) {
+        final AppColors colors = AppColors.of(dialogContext);
+        return Dialog(
+          backgroundColor: colors.page,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: 48,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.block),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
+            ),
+            child: builder(dialogContext),
+          ),
+        );
+      },
+    );
+  }
+  return showModalBottomSheet<T>(
+    context: context,
+    // 面板内容自己画底色与圆角（底部弹层要露出手势条背景）。
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: builder,
+  );
+}
+
 /// 统一的确认弹层（原 AlertDialog 的替代品）。
 ///
 /// 危险操作（删除）用实心红按钮，是国内 App 的惯例；普通确认（移除附件）
