@@ -30,6 +30,7 @@ import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
 import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
+import '../../util/native_image_window.dart';
 import '../markdown_toolbar.dart';
 import '../markdown_view.dart';
 import '../editor_zoom.dart';
@@ -4401,11 +4402,22 @@ class _LabImageComponentBuilder implements ComponentBuilder {
   }
 
   /// 捕获图片块当前的全局矩形，打开大图查看器。
+  ///
+  /// 桌面端优先交给原生窗口（系统预览式独立窗口）；原生不可用或移动端
+  /// 才走应用内的飞行转场查看器。
   void _openViewer(
     SingleColumnDocumentComponentContext componentContext,
     String absolutePath,
     String alt,
   ) {
+    if (PlatformFeatures.isDesktop) {
+      unawaited(_openViewerInNativeWindow(
+        componentContext,
+        absolutePath,
+        alt,
+      ));
+      return;
+    }
     Rect sourceRect = Rect.zero;
     final renderObject =
         componentContext.componentKey.currentContext?.findRenderObject();
@@ -4413,6 +4425,39 @@ class _LabImageComponentBuilder implements ComponentBuilder {
         renderObject.attached &&
         renderObject.hasSize) {
       sourceRect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
+    }
+    Navigator.of(componentContext.context).push(
+      buildImageViewerRoute(
+        sourceRect: sourceRect,
+        absolutePath: absolutePath,
+        alt: alt,
+      ),
+    );
+  }
+
+  /// 桌面端独立图片窗口；原生打不开时回退到应用内查看器。
+  Future<void> _openViewerInNativeWindow(
+    SingleColumnDocumentComponentContext componentContext,
+    String absolutePath,
+    String alt,
+  ) async {
+    final bool opened = await openImageInNativeWindow(
+      path: absolutePath,
+      title: alt,
+    );
+    if (opened) {
+      return;
+    }
+    Rect sourceRect = Rect.zero;
+    final renderObject =
+        componentContext.componentKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox &&
+        renderObject.attached &&
+        renderObject.hasSize) {
+      sourceRect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
+    }
+    if (!componentContext.context.mounted) {
+      return;
     }
     Navigator.of(componentContext.context).push(
       buildImageViewerRoute(

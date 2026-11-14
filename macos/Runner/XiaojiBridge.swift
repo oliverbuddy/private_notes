@@ -89,6 +89,8 @@ final class XiaojiBridge {
       toggleFullscreen(result: result)
     case "setWindowChrome":
       setWindowChrome(args, result: result)
+    case "previewImage":
+      previewImage(args, result: result)
     default:
       // 其余（分享导入、桌面小组件、SAF 目录等）是移动端专属能力，
       // Dart 侧已按 MissingPluginException 回退，这里明确不实现。
@@ -137,6 +139,63 @@ final class XiaojiBridge {
       }
       window.titlebarAppearsTransparent = true
       window.backgroundColor = color
+      result(true)
+    }
+  }
+
+  // MARK: - 独立图片窗口
+
+  /// 用独立窗口预览图片（系统「预览」App 的交互：单独窗口、可缩放、可关闭）。
+  ///
+  /// 之前是在应用内弹一个全屏查看器，桌面用户会觉得「图片被嵌在 App 里」。
+  /// 这里直接开一个 NSWindow，图片按屏幕 90% 上限等比缩放，黑底居中。
+  private var imageWindows: [NSWindowController] = []
+
+  private func previewImage(_ args: [String: Any], result: @escaping FlutterResult) {
+    guard let path = args["path"] as? String, !path.isEmpty,
+          let image = NSImage(contentsOfFile: path) else {
+      result(false)
+      return
+    }
+    let title = (args["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else {
+        result(false)
+        return
+      }
+      let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+      var width = max(image.size.width, 320)
+      var height = max(image.size.height, 240)
+      let scale = min(1.0, min(screen.width * 0.9 / width, screen.height * 0.9 / height))
+      width *= scale
+      height *= scale
+
+      let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+        styleMask: [.titled, .closable, .resizable, .miniaturizable],
+        backing: .buffered,
+        defer: false)
+      window.title = title.isEmpty ? "图片" : title
+      window.isReleasedWhenClosed = false
+      window.backgroundColor = .black
+
+      let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+      imageView.image = image
+      imageView.imageScaling = .scaleProportionallyUpOrDown
+      imageView.autoresizingMask = [.width, .height]
+      window.contentView = imageView
+      window.center()
+
+      let controller = NSWindowController(window: window)
+      self.imageWindows.append(controller)
+      // 关窗后释放，避免反复预览同一张图越堆越多。
+      NotificationCenter.default.addObserver(
+        forName: NSWindow.willCloseNotification,
+        object: window,
+        queue: .main) { [weak self] _ in
+          self?.imageWindows.removeAll { $0.window === window }
+        }
+      controller.showWindow(nil)
       result(true)
     }
   }
