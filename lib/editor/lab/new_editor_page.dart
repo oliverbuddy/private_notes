@@ -4464,12 +4464,18 @@ class _LabImageViewModel extends SingleColumnLayoutComponentViewModel {
 
   @override
   SingleColumnLayoutComponentViewModel copy() {
+    // maxWidth / padding / opacity 必须一起带过来：样式管线每一步都会
+    // copy 一次，丢失 maxWidth 后布局会退回「整窗宽度」——图片从窗口
+    // 最左铺到最右，和正文列完全不对齐（用户反馈「图片贴着左上角边框」）。
     return _LabImageViewModel(
       nodeId: nodeId,
       imageUrl: imageUrl,
       altText: altText,
       repository: repository,
-    );
+    )
+      ..maxWidth = maxWidth
+      ..padding = padding
+      ..opacity = opacity;
   }
 }
 
