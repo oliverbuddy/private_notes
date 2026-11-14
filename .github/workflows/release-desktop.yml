@@ -110,7 +110,12 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
+          # Windows 上不再复用 Flutter SDK 缓存：v1.10.9 起每次都在
+          # 「Build Windows app」失败，而 v1.10.8 与本版本的 Dart / 原生
+          # 代码完全一致（仅有版本号与文档差异），符合「缓存被写坏后
+          # 反复命中」的特征。关掉缓存后强制每次重新下载 SDK，
+          # 构建时间略长，但不影响产物。
+          cache: false
 
       - name: Build Windows app
         run: |
