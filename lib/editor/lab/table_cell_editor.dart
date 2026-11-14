@@ -276,6 +276,15 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   int? _hoverRow;
   int? _hoverColumn;
 
+  /// 拖拽表头分隔线后的自定义列宽；null 表示各列等分。
+  ///
+  /// 列宽只作用于当前编辑会话：Markdown 表格没有列宽的语法，重新打开会
+  /// 回到等分（与语雀导出的 md 一致）。
+  List<double>? _columnWidths;
+
+  /// 表格可用宽度（LayoutBuilder 每帧更新，用于换算分隔线位置）。
+  double _tableWidth = 0;
+
   bool get _editable => widget.onCellCommitted != null;
 
   /// 每个单元格的锚点：按下时用它把指针坐标换算成「第几行第几列」。
@@ -309,8 +318,41 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     // 进编辑后单元格里的文字可以拖选、⌘C 复制，不再只能整表选中。
     final (int, int)? cell = _cellAt(event.position);
     if (cell != null) {
-      _beginEditing(cell.$1, cell.$2);
+      _beginEditing(cell.$1, cell.$2, tapPosition: event.position);
     }
+  }
+
+  /// 把点击位置换算成单元格文字里的光标偏移。
+  ///
+  /// 单击进入编辑时不再无脑全选：点在哪个字附近就把光标放到哪里
+  /// （与语雀一致），双击选词由输入框自己处理。
+  int _caretOffsetAt(
+    Offset globalPosition,
+    int row,
+    int column,
+    MarkdownTableCellViewModel cell,
+  ) {
+    final String plain = cell.text.toPlainText();
+    final RenderObject? renderObject =
+        _cellKey(row, column).currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) {
+      return plain.length;
+    }
+    final Offset local = renderObject.globalToLocal(globalPosition);
+    final EdgeInsets padding = cell.padding.resolve(TextDirection.ltr);
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: plain,
+        style: cell.textStyleBuilder(const <Attribution>{}),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: cell.textAlign,
+    )..layout(maxWidth: math.max(0, renderObject.size.width - padding.horizontal));
+    final TextPosition position = painter.getPositionForOffset(
+      Offset(local.dx - padding.left, local.dy - padding.top),
+    );
+    painter.dispose();
+    return position.offset.clamp(0, plain.length);
   }
 
   /// 指针落在哪个单元格上；不在表格内返回 null。
@@ -354,6 +396,12 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       _hoverRow = null;
       _hoverColumn = null;
     }
+    // 列数变了（插入 / 删除列）或换成另一张表：拖过的列宽失效，回到等分。
+    if (_columnWidths != null &&
+        (_columnWidths!.length != _columnCount ||
+            oldWidget.viewModel.nodeId != widget.viewModel.nodeId)) {
+      _columnWidths = null;
+    }
   }
 
   @override
@@ -375,7 +423,7 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     focusNode?.dispose();
   }
 
-  void _beginEditing(int row, int column) {
+  void _beginEditing(int row, int column, {Offset? tapPosition}) {
     if (!_editable) {
       return;
     }
@@ -470,11 +518,16 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     });
     widget.onCellEditingChanged?.call(true);
     _grabFocus();
-    // 全选原内容：点开编辑后直接输入就是「替换这一格」。
-    controller.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: controller.text.length,
-    );
+    // 单击：光标落在点击位置（不再全选）；Tab / Enter 切过来：全选便于替换。
+    if (tapPosition != null) {
+      final int offset = _caretOffsetAt(tapPosition, row, column, cell);
+      controller.selection = TextSelection.collapsed(offset: offset);
+    } else {
+      controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: controller.text.length,
+      );
+    }
   }
 
   /// 连续几帧确认焦点落在单元格输入框上。
@@ -633,52 +686,149 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
   Widget _buildInteractiveTable(BuildContext context) {
     // MouseRegion 必须包住工具条：否则指针移到工具条上会触发表格的
     // onExit，工具条刚出现就消失（闪一下）。
-    return MouseRegion(
-      cursor: SystemMouseCursors.basic,
-      hitTestBehavior: HitTestBehavior.translucent,
-      onHover: _handleHover,
-      onExit: (_) {
-        if (_hoverRow != null) {
-          setState(() {
-            _hoverRow = null;
-            _hoverColumn = null;
-          });
-        }
-      },
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          // Listener 只观察指针、不参与手势竞技场：单击单元格进入编辑，
-          // 拖选文字交给编辑框。
-          Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: _handlePointerDown,
-            // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
-            // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
-            child: IgnorePointer(
-              ignoring: _editRow == null,
-              child: SelectableBox(
-                selection: widget.viewModel.selection?.nodeSelection
-                        is UpstreamDownstreamNodeSelection
-                    ? widget.viewModel.selection?.nodeSelection
-                        as UpstreamDownstreamNodeSelection
-                    : null,
-                selectionColor: widget.viewModel.selectionColor,
-                child: BoxComponent(
-                  key: widget.componentKey,
-                  opacity: widget.viewModel.opacity,
-                  child: _buildTable(context),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        _tableWidth = constraints.maxWidth;
+        final List<double>? widths = _effectiveWidths(constraints.maxWidth);
+        return MouseRegion(
+          cursor: SystemMouseCursors.basic,
+          hitTestBehavior: HitTestBehavior.translucent,
+          onHover: _handleHover,
+          onExit: (_) {
+            if (_hoverRow != null) {
+              setState(() {
+                _hoverRow = null;
+                _hoverColumn = null;
+              });
+            }
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              // Listener 只观察指针、不参与手势竞技场：单击单元格进入编辑，
+              // 拖选文字交给编辑框。
+              Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _handlePointerDown,
+                // 非编辑态保持忽略指针（官方组件的做法，保证点按选表不被
+                // 内容层吃掉）；进入编辑后放开，编辑框才能正常点选文字。
+                child: IgnorePointer(
+                  ignoring: _editRow == null,
+                  child: SelectableBox(
+                    selection: widget.viewModel.selection?.nodeSelection
+                            is UpstreamDownstreamNodeSelection
+                        ? widget.viewModel.selection?.nodeSelection
+                            as UpstreamDownstreamNodeSelection
+                        : null,
+                    selectionColor: widget.viewModel.selectionColor,
+                    child: BoxComponent(
+                      key: widget.componentKey,
+                      opacity: widget.viewModel.opacity,
+                      child: _buildTable(context, widths),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              // 悬停时显示列宽拖拽把手（语雀 / Notion 都支持拖表头调列宽）。
+              if (_editable && _hoverRow != null)
+                for (var i = 1; i < _columnCount; i++)
+                  Positioned(
+                    left: _columnBoundary(i, widths) - 3,
+                    top: 0,
+                    bottom: 0,
+                    width: 6,
+                    child: _buildResizeHandle(i),
+                  ),
+              // 悬停工具条：竞品（Notion / 语雀）都把增删行列放在表格边角的
+              // 浮层上，不必先右键。移出表格即消失。
+              if (_editable && _hoverRow != null)
+                Positioned(top: 2, right: 2, child: _buildHoverBar(context)),
+            ],
           ),
-          // 悬停工具条：竞品（Notion / 语雀）都把增删行列放在表格边角的
-          // 浮层上，不必先右键。移出表格即消失。
-          if (_editable && _hoverRow != null)
-            Positioned(top: 2, right: 2, child: _buildHoverBar(context)),
-        ],
+        );
+      },
+    );
+  }
+
+  int get _columnCount =>
+      widget.viewModel.cells.isEmpty ? 0 : widget.viewModel.cells.first.length;
+
+  /// 实际生效的列宽：有自定义宽度时按可用宽度等比缩放。
+  List<double>? _effectiveWidths(double available) {
+    final List<double>? widths = _columnWidths;
+    if (widths == null || widths.length != _columnCount || available <= 0) {
+      return null;
+    }
+    final double sum =
+        widths.fold<double>(0, (double total, double w) => total + w);
+    if (sum <= 0) {
+      return null;
+    }
+    if ((sum - available).abs() < 0.5) {
+      return widths;
+    }
+    final double scale = available / sum;
+    return <double>[for (final double w in widths) w * scale];
+  }
+
+  /// 第 [index] 条列边界距左边的像素位置。
+  double _columnBoundary(int index, List<double>? widths) {
+    if (widths != null) {
+      double x = 0;
+      for (var i = 0; i < index && i < widths.length; i++) {
+        x += widths[i];
+      }
+      return x;
+    }
+    if (_columnCount == 0) {
+      return 0;
+    }
+    return _tableWidth / _columnCount * index;
+  }
+
+  Widget _buildResizeHandle(int index) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) => _startResizing(),
+        onHorizontalDragUpdate: (DragUpdateDetails details) =>
+            _resizeColumns(index, details.delta.dx),
+        child: const SizedBox.expand(),
       ),
     );
+  }
+
+  /// 第一次拖拽时把「等分」固化成具体宽度表。
+  void _startResizing() {
+    if (_columnWidths != null && _columnWidths!.length == _columnCount) {
+      return;
+    }
+    final int columns = _columnCount;
+    if (columns == 0) {
+      return;
+    }
+    final double width = _tableWidth > 0 ? _tableWidth : 600;
+    setState(() {
+      _columnWidths = List<double>.filled(columns, width / columns);
+    });
+  }
+
+  /// 拖动第 [boundary] 条边界：左右两列此消彼长，并限制最小宽度。
+  void _resizeColumns(int boundary, double dx) {
+    final List<double>? widths = _columnWidths;
+    if (widths == null || boundary <= 0 || boundary >= widths.length) {
+      return;
+    }
+    const double minWidth = 56;
+    if (widths[boundary - 1] + dx < minWidth ||
+        widths[boundary] - dx < minWidth) {
+      return;
+    }
+    setState(() {
+      widths[boundary - 1] += dx;
+      widths[boundary] -= dx;
+    });
   }
 
   void _handleHover(PointerHoverEvent event) {
@@ -767,11 +917,18 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     );
   }
 
-  Widget _buildTable(BuildContext context) {
+  Widget _buildTable(BuildContext context, List<double>? widths) {
     final List<List<MarkdownTableCellViewModel>> cells = widget.viewModel.cells;
     return Table(
       border: widget.viewModel.border ?? TableBorder.all(),
       defaultColumnWidth: widget.viewModel.columnWidth,
+      // 拖过列宽后按固定宽度渲染；没拖过仍是等分（Flex）。
+      columnWidths: widths == null
+          ? null
+          : <int, TableColumnWidth>{
+              for (var i = 0; i < widths.length; i++)
+                i: FixedColumnWidth(widths[i]),
+            },
       children: <TableRow>[
         for (int row = 0; row < cells.length; row++)
           TableRow(

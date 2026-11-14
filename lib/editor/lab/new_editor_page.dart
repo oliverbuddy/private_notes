@@ -1737,21 +1737,38 @@ class _NewEditorPageState extends State<NewEditorPage>
         for (final _OutlineEntry entry in entries)
           PopupMenuItem<String>(
             value: entry.nodeId,
-            height: entry.level == 1 ? 42 : 38,
+            height: switch (entry.level) {
+              1 => 44,
+              2 => 40,
+              _ => 38,
+            },
             child: Padding(
-              padding: EdgeInsets.only(left: (entry.level - 1) * 16.0),
+              // 层级差要看得出来：一级 0，二级 24，三级 44。
+              padding: EdgeInsets.only(
+                left: switch (entry.level) {
+                  1 => 0,
+                  2 => 24,
+                  _ => 44,
+                },
+              ),
               child: Text(
                 entry.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: entry.level == 1
-                      ? AppFontSize.body
-                      : AppFontSize.labelLg,
+                  fontSize: switch (entry.level) {
+                    1 => AppFontSize.body,
+                    2 => AppFontSize.labelLg,
+                    _ => 13,
+                  },
                   fontWeight: entry.level == 1
                       ? AppWeight.medium
                       : AppWeight.regular,
-                  color: entry.level == 1 ? colors.text : colors.secondary,
+                  color: switch (entry.level) {
+                    1 => colors.text,
+                    2 => colors.secondary,
+                    _ => colors.tertiary,
+                  },
                 ),
               ),
             ),
@@ -3556,9 +3573,13 @@ class _NewEditorPageState extends State<NewEditorPage>
       items: items,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _restoreSelectionBeforeContextMenu();
+      if (!mounted) {
+        return;
       }
+      // 菜单路由拿走了焦点，SuperEditor 会因此收起选区。把焦点还给编辑器：
+      // 菜单仍然开着（PopupMenu 不监听焦点），但蓝色选中底会恢复显示。
+      _editorFocus.requestFocus();
+      _restoreSelectionBeforeContextMenu();
     });
     for (final int delay in const <int>[120, 400]) {
       Future<void>.delayed(Duration(milliseconds: delay), () {

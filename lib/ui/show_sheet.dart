@@ -215,6 +215,64 @@ Future<bool?> showXiaojiConfirmSheet({
   required String confirmLabel,
   bool destructive = false,
 }) {
+  // 桌面端：模仿 macOS 原生警告框 —— 标题、说明、右下角两个小按钮，
+  // 而不是移动端那种「两个等宽大按钮铺满一行」。
+  if (PlatformFeatures.isDesktop) {
+    return showXiaojiSheet<bool>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        final AppColors colors = AppColors.of(sheetContext);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.35,
+                  fontWeight: AppWeight.semibold,
+                  color: colors.text,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.55,
+                  color: colors.secondary,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  _ConfirmButton(
+                    label: '取消',
+                    background: colors.surface2,
+                    foreground: colors.text,
+                    onTap: () => Navigator.of(sheetContext).pop(false),
+                  ),
+                  const SizedBox(width: 8),
+                  _ConfirmButton(
+                    label: confirmLabel,
+                    background:
+                        destructive ? colors.danger : colors.accent,
+                    foreground: destructive ? colors.onDanger : Colors.white,
+                    onTap: () => Navigator.of(sheetContext).pop(true),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   return showXiaojiSheet<bool>(
     context: context,
     builder: (BuildContext sheetContext) {
@@ -268,6 +326,47 @@ Future<bool?> showXiaojiConfirmSheet({
       );
     },
   );
+}
+
+/// 桌面确认框里的小按钮：32 高、7 圆角、13 号字（macOS 警告框规格）。
+class _ConfirmButton extends StatelessWidget {
+  const _ConfirmButton({
+    required this.label,
+    required this.background,
+    required this.foreground,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppPressable(
+      onTap: onTap,
+      pressedScale: 0.98,
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.center,
+        decoration: ShapeDecoration(
+          color: background,
+          shape: AppShape.continuous(7),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            height: 1,
+            fontWeight: AppWeight.medium,
+            color: foreground,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 弹层里的并排按钮：鸿蒙 40 高、20 连续圆角、16 Medium。
