@@ -50,9 +50,14 @@
     })
     .then(function (release) {
       var assets = release.assets || [];
-      var apk = assets.filter(function (asset) {
+      var apks = assets.filter(function (asset) {
         return /\.apk$/i.test(asset.name);
-      })[0];
+      });
+      // 按 ABI 拆包后优先指向 arm64（绝大多数设备），老设备在 Release 页
+      // 里手动选 armeabi-v7a。
+      var apk = apks.filter(function (asset) {
+        return /arm64-v8a\.apk$/i.test(asset.name);
+      })[0] || apks[0];
 
       fill('[data-latest-version]', release.tag_name || release.name);
       fill('[data-latest-date]', formatDate(release.published_at));

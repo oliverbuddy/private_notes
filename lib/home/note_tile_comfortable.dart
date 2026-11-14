@@ -90,9 +90,11 @@ class NoteTileComfortable extends StatelessWidget {
           child: AppPressable(
             onTap: onTap,
             onLongPress: onLongPress,
-            // 大片内容不做缩放，只轻微变暗（鸿蒙卡片的按压手感）。
+            // 卡片不缩放，整块轻微压暗/提亮（鸿蒙卡片的按压手感）；
+            // 用蒙层而不是整体降透明度：正文和缩略图不会跟着闪。
             pressedScale: 1,
-            pressedOpacity: 0.88,
+            pressedOpacity: 1,
+            pressedColor: AppPress.overlay(context),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpace.lg,
@@ -641,7 +643,9 @@ class _MetaRow extends StatelessWidget {
           ),
         Text(
           formatListTime(note.updated),
-          style: AppText.meta.copyWith(color: colors.tertiary),
+          // 时间用 secondary：tertiary 在米底/深底上偏淡（12 号字对比不足），
+          // 与紧凑档保持一致。
+          style: AppText.meta.copyWith(color: colors.secondary),
         ),
         if (visibleTags.isNotEmpty) ...<Widget>[
           const SizedBox(width: 10),

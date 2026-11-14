@@ -1685,43 +1685,53 @@ class _NewEditorPageState extends State<NewEditorPage>
     _jumpToDocumentNode(node);
   }
 
-  /// 把光标放到目标标题开头，并把标题滚到视口上方。
+  /// 把目标标题滚到视口上方。
   ///
-  /// 先落光标（复用已有的 caret 机制），再按布局坐标平滑滚动；拿不到坐标时
-  /// 退回「保证光标可见」，不会出现点了没反应。
+  /// 只滚动、不落光标：目录是「浏览导航」，跳过去还留一个闪烁光标会让
+  /// 用户以为误触进了编辑态，也会把键盘拉起来（用户反馈）。
+  /// 近处用 220ms 缓出，远处直接瞬时到位 —— 与语雀/Notion 的目录一致，
+  /// 长文不会「滑很久才到」。
   void _jumpToDocumentNode(DocumentNode node) {
+    if (_disposed || !mounted || !_editorScroll.hasClients) {
+      return;
+    }
     final DocumentPosition position = DocumentPosition(
       nodeId: node.id,
       nodePosition: const TextNodePosition(offset: 0),
     );
-    _editor.execute(<EditRequest>[
-      ChangeSelectionRequest(
-        DocumentSelection.collapsed(position: position),
-        SelectionChangeType.placeCaret,
-        SelectionReason.userInteraction,
-      ),
-    ]);
-    if (_disposed || !mounted || !_editorScroll.hasClients) {
-      return;
-    }
+    Rect? rect;
     try {
       final DocumentLayoutEditable layoutEditable =
           _editor.context.find<DocumentLayoutEditable>(Editor.layoutKey);
-      final Rect? rect =
-          layoutEditable.documentLayout.getRectForPosition(position);
-      if (rect == null) {
-        _ensureCaretVisible(forceComfort: true);
-        return;
-      }
-      final ScrollPosition scroll = _editorScroll.position;
-      final double target = (rect.top - 12).clamp(
-        scroll.minScrollExtent,
-        scroll.maxScrollExtent,
-      );
-      _requestCaretScroll(target);
+      rect = layoutEditable.documentLayout.getRectForPosition(position);
     } catch (_) {
-      _ensureCaretVisible(forceComfort: true);
+      // 布局未就绪（刚打开文档）：直接放弃，不落光标、不退化成键盘弹出。
+      rect = null;
     }
+    if (rect == null) {
+      return;
+    }
+    // 目录跳转会打断逐帧光标跟随，避免两套滚动驱动互相打架。
+    _stopCaretScroll();
+    final ScrollPosition scroll = _editorScroll.position;
+    final double target = (rect.top - 12).clamp(
+      scroll.minScrollExtent,
+      scroll.maxScrollExtent,
+    );
+    final double distance = (target - scroll.pixels).abs();
+    if (distance < 1) {
+      return;
+    }
+    if (distance > scroll.viewportDimension * 2) {
+      // 长文跨越多屏：瞬时到位（主流目录交互），不做长距离滑动动画。
+      scroll.jumpTo(target);
+      return;
+    }
+    scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _showEditorMenu() async {
@@ -2730,7 +2740,10 @@ class _NewEditorPageState extends State<NewEditorPage>
                 // "这块是干什么的"的负担。
                 if (_outline.length >= 2)
                   AppIconButton(
-                    icon: Icons.toc_rounded,
+                    // 「文档 + 列表」：比旧版的 toc 更见名知义 —— 一眼能看出
+                    // 是「按标题列出的全文导航」，与语雀/Notion 的目录图标
+                    // 同一语义。
+                    icon: Icons.list_alt_rounded,
                     onTap: _showOutline,
                     tooltip: '目录',
                   ),

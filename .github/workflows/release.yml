@@ -51,18 +51,21 @@ jobs:
       - name: Build release APK
         run: |
           flutter pub get
-          # 只打真机用得到的两种 ABI：默认三 ABI 会把 Flutter 引擎和 Dart
-          # 产物各拷三份（55MB）；去掉仅供模拟器的 x86_64 后约 41MB
-          # （含 FTS5 搜索所需的 SQLite 原生库）。
+          # 按 ABI 拆包：合并包会把 Flutter 引擎和 Dart 产物各拷一份
+          # （两 ABI 合计 42MB 左右），拆开后单个安装包约 20MB。
+          # 只打真机用得到的两种 ABI；x86_64 只剩模拟器需要，一并去掉。
           flutter build apk --release \
+            --split-per-abi \
             --target-platform android-arm,android-arm64
 
-      - name: Rename artifact and checksum
+      - name: Rename artifacts and checksums
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          APK="private_notes-${VERSION}.apk"
-          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
-          sha256sum "$APK" > "$APK.sha256"
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          for ABI in arm64-v8a armeabi-v7a; do
+            APK="private_notes-${VERSION}-${ABI}.apk"
+            cp "build/app/outputs/flutter-apk/app-${ABI}-release.apk" "$APK"
+            sha256sum "$APK" > "$APK.sha256"
+          done
 
       # 手动触发：构建产物挂在 workflow run 的 Artifacts 区供下载。
       - name: Upload artifact
@@ -84,7 +87,9 @@ jobs:
           {
             echo "### 下载与安装"
             echo
-            echo "- 下载上面的 \`.apk\` 安装，Android 7.0 及以上。"
+            echo "- 按 CPU 架构拆分，安装包更小。绝大多数手机选 \`arm64-v8a\`；"
+            echo "  2016 年前的老设备选 \`armeabi-v7a\`。"
+            echo "- 下载对应的 \`.apk\` 安装，Android 7.0 及以上。"
             echo "- 覆盖安装即可升级，笔记与设置保留，无需卸载旧版。"
             echo "- 同名 \`.sha256\` 是安装包校验值，可用 \`sha256sum\` 核对。"
             echo "- 自动更新：在 Obtainium 中添加仓库 \`${GITHUB_REPOSITORY}\`。"

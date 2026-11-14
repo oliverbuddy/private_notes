@@ -511,6 +511,17 @@ abstract final class AppMotion {
   static const Curve accelerate = Cubic(0.4, 0, 1, 1);
 }
 
+/// 按压蒙层（卡片 / 列表行「被按住」时的整块底色）。
+///
+/// 叠加在内容上方，必须带透明度：浅色压 5% 黑、深色提 8% 白，
+/// 两种主题下都是「轻微变暗/提亮」，文字与缩略图保持清晰。
+abstract final class AppPress {
+  static Color overlay(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? const Color(0x14FFFFFF)
+          : const Color(0x0D000000);
+}
+
 /// 响应式断点：手机 / 平板 / 桌面。
 ///
 /// 目前先统一「内容最大宽度 + 居中」，后续做 Pad 双栏、PC 侧栏时

@@ -27,6 +27,20 @@ class NoteRepository extends ChangeNotifier {
   String _query = '';
   String? _activeTag;
 
+  /// `_notes` 的版本号：列表数据一变就 +1，作为 [visibleNotes] 缓存依据。
+  int _notesRevision = 0;
+
+  /// [visibleNotes] 的一次性缓存。
+  ///
+  /// 首页每次 rebuild 都会读一次，锁定计时、搜索计数也会读；没有缓存时
+  /// 几千条笔记会「每帧全量 where + sort」。这里按
+  /// 「数据版本 + 标签 + 搜索词 + 排序」做 key，命中就直接返回同一实例。
+  List<Note>? _visibleCache;
+  int _visibleCacheRevision = -1;
+  String? _visibleCacheTag;
+  String _visibleCacheKeyword = '';
+  SortOrder? _visibleCacheSort;
+
   /// 全文搜索索引；原生 SQLite 不可用时为 null（回退到线性扫描）。
   SearchIndex? _index;
 
@@ -70,6 +84,17 @@ class NoteRepository extends ChangeNotifier {
   List<Note> get visibleNotes {
     final keyword = _query.trim().toLowerCase();
     final tag = _activeTag;
+    final SortOrder sortOrder = _settings.sortOrder;
+
+    final List<Note>? cached = _visibleCache;
+    if (cached != null &&
+        _visibleCacheRevision == _notesRevision &&
+        _visibleCacheTag == tag &&
+        _visibleCacheKeyword == keyword &&
+        _visibleCacheSort == sortOrder) {
+      return cached;
+    }
+
     final Set<String>? hits = keyword.isEmpty ? null : _searchIds(keyword);
 
     final result = _notes.where((note) {
@@ -102,7 +127,7 @@ class NoteRepository extends ChangeNotifier {
         return a.pinned ? -1 : 1;
       }
       final int byTime;
-      switch (_settings.sortOrder) {
+      switch (sortOrder) {
         case SortOrder.updated:
           byTime = b.updated.compareTo(a.updated);
         case SortOrder.created:
@@ -115,6 +140,12 @@ class NoteRepository extends ChangeNotifier {
       // List.sort 不稳定，没有 tie-breaker 时刷新一次顺序就可能变。
       return a.id.compareTo(b.id);
     });
+
+    _visibleCache = result;
+    _visibleCacheRevision = _notesRevision;
+    _visibleCacheTag = tag;
+    _visibleCacheKeyword = keyword;
+    _visibleCacheSort = sortOrder;
     return result;
   }
 
@@ -124,6 +155,7 @@ class NoteRepository extends ChangeNotifier {
     final loaded = await _store.loadNotes();
     _settings = await _store.loadSettings();
     _notes = loaded;
+    _notesRevision++;
     _loading = false;
     _rebuildSearchIndex();
     notifyListeners();
@@ -313,6 +345,7 @@ class NoteRepository extends ChangeNotifier {
       next.add(stored);
     }
     _notes = next;
+    _notesRevision++;
     // 索引里存的是正文分词，锁定笔记会被移除。
     _index?.upsertNote(stored);
     _invalidateSearchCache();
@@ -322,6 +355,7 @@ class NoteRepository extends ChangeNotifier {
   Future<void> remove(Note note) async {
     await _store.deleteNote(note);
     _notes = _notes.where((item) => item.id != note.id).toList();
+    _notesRevision++;
     _index?.removeNote(note.id);
     _invalidateSearchCache();
     notifyListeners();

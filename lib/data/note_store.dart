@@ -104,11 +104,16 @@ class NoteStore {
   ///
   /// 单条解析失败就跳过：用户可能在「文件」App 里手改过某个 .md，
   /// 一条坏文件绝不能导致整个 app 白屏。
+  ///
+  /// 先收集文件再 8 路并发读取：串行 `await readAsString` 在几千条笔记
+  /// 时会把冷启动拖到秒级（每条都要等一次 I/O），并发后只剩最后一轮
+  /// 的耗时。结果按原顺序落位，列表顺序与旧版一致。
   Future<List<Note>> loadNotes() async {
     final result = <Note>[];
     if (!await notesDir.exists()) {
       return result;
     }
+    final List<File> files = <File>[];
     await for (final entity
         in notesDir.list(recursive: true, followLinks: false)) {
       if (entity is! File) {
@@ -117,23 +122,46 @@ class NoteStore {
       if (!entity.path.toLowerCase().endsWith('.md')) {
         continue;
       }
-      try {
-        final raw = await entity.readAsString();
-        final note = Note.decode(
-          raw,
-          fallbackId: p.basenameWithoutExtension(entity.path),
-        );
-        if (note != null) {
-          // 锁定笔记：正文是密文，内存里不能保留（否则列表摘要/搜索
-          // 会把 base64 当正文显示）。打开时再按需解密。
-          result.add(
-            note.locked && note.body.startsWith(Note.lockEnvelopePrefix)
-                ? note.copyWith(body: '')
-                : note,
-          );
+      files.add(entity);
+    }
+    final List<Note?> parsed = List<Note?>.filled(files.length, null);
+    int cursor = 0;
+    Future<void> worker() async {
+      while (true) {
+        // 取值与自增之间没有 await：单线程事件循环下不会重复领取。
+        final int index = cursor;
+        cursor++;
+        if (index >= files.length) {
+          return;
         }
-      } catch (_) {
-        // 忽略坏文件，继续读下一条。
+        try {
+          final raw = await files[index].readAsString();
+          final note = Note.decode(
+            raw,
+            fallbackId: p.basenameWithoutExtension(files[index].path),
+          );
+          if (note != null) {
+            // 锁定笔记：正文是密文，内存里不能保留（否则列表摘要/搜索
+            // 会把 base64 当正文显示）。打开时再按需解密。
+            parsed[index] = note.locked &&
+                    note.body.startsWith(Note.lockEnvelopePrefix)
+                ? note.copyWith(body: '')
+                : note;
+          }
+        } catch (_) {
+          // 忽略坏文件，继续读下一条。
+        }
+      }
+    }
+
+    // 8 路并发：手机存储的顺序读吞吐有限，再高收益很小，反而和 UI 抢 IO。
+    final int workers = files.length < 8 ? files.length : 8;
+    await Future.wait(<Future<void>>[
+      for (var i = 0; i < workers; i++) worker(),
+    ]);
+    for (final note in parsed) {
+      if (note != null) {
+        result.add(note);
       }
     }
     return result;

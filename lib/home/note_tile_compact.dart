@@ -16,7 +16,7 @@ import '../util/text_highlight.dart';
 /// 近黑正文压在白底上才清晰 —— 之前直接坐在 pageAlt 米底上，
 /// 文字和背景融成一片，整列看着发灰。时间用 secondary 而不是
 /// tertiary（tertiary 在米/深底上都快看不见了）。
-/// 不显示标签（这一档的唯一目标是**扫标题**），但保留一个 36dp 的
+/// 不显示标签（这一档的唯一目标是**扫标题**），但保留一个 40dp 的
 /// 首图缩略 + 图片总数；没有图但有附件时用回形针代替。
 class NoteTileCompact extends StatelessWidget {
   const NoteTileCompact({
@@ -33,7 +33,7 @@ class NoteTileCompact extends StatelessWidget {
   final Note note;
   final String query;
 
-  /// 最多取第一张，紧凑档只放一个 36dp 的方块。
+  /// 最多取第一张，紧凑档只放一个 40dp 的方块。
   final List<String> thumbnailPaths;
 
   /// 正文里的图片总数，用来在缩略图上盖 `+N`。
@@ -74,6 +74,9 @@ class NoteTileCompact extends StatelessWidget {
     return AppPressable(
       onTap: onTap,
       onLongPress: onLongPress,
+      // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
+      pressedColor: AppPress.overlay(context),
+      pressedOpacity: 1,
       pressedScale: 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(
@@ -137,7 +140,7 @@ class NoteTileCompact extends StatelessWidget {
   }
 }
 
-/// 紧凑档的单张缩略图：44dp 方格，多图时右下角盖 `+N`。
+/// 紧凑档的单张缩略图：40dp 方格，多图时右下角盖 `+N`。
 class _CompactThumbnail extends StatelessWidget {
   const _CompactThumbnail({required this.path, required this.hiddenCount});
 
@@ -147,7 +150,8 @@ class _CompactThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    const double size = 44;
+    // 40 而不是 44：行高 = 40 + 上下各 12 = 64，正好落在双行列表刻度上。
+    const double size = 40;
     final Widget image = ClipRRect(
       borderRadius: BorderRadius.circular(AppRadius.thumb),
       child: Image.file(

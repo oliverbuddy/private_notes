@@ -693,8 +693,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               child: Row(
                 children: <Widget>[
+                  // 搜索框是 40 高的行内容器，放大镜用 20 正好；24 会顶满
+                  // 上下留白，看起来比输入文字还重。
                   Icon(Icons.search_rounded,
-                      size: AppIcon.action, color: colors.tertiary),
+                      size: AppIcon.compact, color: colors.tertiary),
                   const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
@@ -919,7 +921,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           tile = NoteTileCompact(
             note: note,
             query: query,
-            // 紧凑档同样带图：右侧 36dp 小图 + 计数，有附件时退回回形针。
+            // 紧凑档同样带图：右侧 40dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
             hasAttachment: !note.locked && hasLocalAttachment(note.body),

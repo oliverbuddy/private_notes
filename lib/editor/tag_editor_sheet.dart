@@ -161,7 +161,7 @@ class _TagEditorSheetState extends State<_TagEditorSheet> {
                         onPressed: enabled ? _addFromInput : null,
                         tooltip: '添加标签',
                         icon: const Icon(Icons.add_rounded),
-                        iconSize: 22,
+                        iconSize: AppIcon.dense,
                         style: IconButton.styleFrom(
                           backgroundColor: colors.accent,
                           foregroundColor: colors.page,
@@ -327,7 +327,7 @@ class _TagCandidateChip extends StatelessWidget {
               const SizedBox(width: 4),
               Icon(
                 Icons.close_rounded,
-                size: 12,
+                size: AppIcon.badge,
                 color: tone.foreground.withValues(alpha: 0.8),
               ),
             ],

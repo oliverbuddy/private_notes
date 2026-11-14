@@ -10,7 +10,7 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/oliverbuddy/private_notes/releases/latest) 下载 `private_notes-<版本>.apk`（Android 7.0+），按提示允许安装未知来源应用。
+1. 从 [Releases](https://github.com/oliverbuddy/private_notes/releases/latest) 下载 `private_notes-<版本>-arm64-v8a.apk`（绝大多数手机；2016 年前的老设备用 `-armeabi-v7a`），Android 7.0+，按提示允许安装未知来源应用。
 2. 覆盖安装即可升级，笔记与设置保留。
 3. 想自动接收更新：在 [Obtainium](https://github.com/ImranR98/Obtainium) 里添加仓库 `oliverbuddy/private_notes`。
 
@@ -25,11 +25,11 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | 1.9.0 |
+| 版本 | 1.9.1 |
 | 平台 | Android（已出 APK）；iOS 工程未生成 |
-| 测试 | `flutter test` 431 / 431 通过 |
+| 测试 | `flutter test` 434 / 434 通过 |
 | 静态检查 | `flutter analyze` No issues found |
-| APK | `build/app/outputs/flutter-apk/app-release.apk`，约 42MB（arm64 + armv7 双 ABI，含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
+| APK | 按 ABI 拆包：`app-arm64-v8a-release.apk` 约 23MB、`app-armeabi-v7a-release.apk` 约 20MB（含 FTS5 所需的 SQLite 原生库），包名 `com.xiaoji.xiaoji` |
 | 验证 | Android 14 模拟器逐项实测：应用锁（系统 PIN / 指纹）、单篇锁定、回收站、备份/恢复、导出、桌面小组件入口（浅色/深色壁纸下的标题反色）、FTS5 搜索、外置文件夹导出、手势导航适配、关于页 |
 
 ## 功能
@@ -294,8 +294,8 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 flutter pub get
 flutter analyze
 flutter test
-# 只打真机 ABI（不带 --target-platform 会额外打包 x86_64，体积 55MB）
-flutter build apk --release --target-platform android-arm,android-arm64
+# 按 ABI 拆包（单包约 20–23MB；合并包 42MB，x86_64 只剩模拟器需要）
+flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64
 # 测试包（debug）同样用正式签名，可直接覆盖真机上的正式版做回归：
 flutter build apk --debug
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
