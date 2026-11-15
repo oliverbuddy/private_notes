@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
-import 'package:xiaoji/editor/lab/table_cell_editor.dart';
+import 'package:xiaoji/editor/lab/typora_table.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
 
 /// 桌面表格的结构操作：插入 / 删除行列（纯函数，便于单测）。

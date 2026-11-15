@@ -40,7 +40,7 @@ import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
 import '../../util/date_format.dart' show formatEditorTime, formatFileSize;
 import 'selection_toolbar.dart';
-import 'table_cell_editor.dart';
+import 'typora_table.dart';
 import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
 import 'caret_overlay.dart';
@@ -3824,16 +3824,19 @@ class _NewEditorPageState extends State<NewEditorPage>
     _showHint('表格已更新');
   }
 
-  /// 桌面：双击单元格就地编辑后回写。
+  /// 桌面：单元格就地编辑后回写。
   ///
   /// 内核的表格节点不可变，这里重建整个 [TableBlockNode]：单元格 id 与
   /// 其它单元格原样保留，只替换被编辑那一格的文本。走
   /// [ReplaceNodeRequest] 是为了让这次修改进入撤销栈（⌘Z 可回退）。
+  ///
+  /// [text] 是带行内属性的富文本：编辑时保留的粗体 / 行内码会原样写回，
+  /// 不会因为「点进去又点出来」把样式洗掉。
   void _replaceTableCell(
     String tableId,
     int row,
     int column,
-    String text,
+    AttributedText text,
   ) {
     final DocumentNode? node = _document.getNodeById(tableId);
     if (node is! TableBlockNode) {
@@ -3854,7 +3857,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           r == row && c == column
               ? TextNode(
                   id: cell.id,
-                  text: AttributedText(text),
+                  text: text,
                   metadata: Map<String, dynamic>.from(cell.metadata),
                 )
               : cell,
@@ -3871,11 +3874,11 @@ class _NewEditorPageState extends State<NewEditorPage>
           metadata: Map<String, dynamic>.from(node.metadata),
         ),
       ),
+      // 重建后内核会按旧布局重算一次光标，可能停在错位的位置；整表选中
+      // 又会在每次提交时闪一片蓝底。直接清空选区：编辑焦点在单元格
+      // 输入框上，正文不需要光标。
+      const ClearSelectionRequest(),
     ]);
-    // 表格节点整体重建后，内核会按「旧布局」重算一次光标；文本光标可能
-    // 停在错位的位置（用户反馈「表格编辑后光标错位」）。这里显式把选区
-    // 收敛到表格块本身：块级选中不画文本光标，下次点正文再落新位置。
-    _selectTableBlock(node);
   }
 
   /// 把选区收敛到整张表（块级选中，不画文本光标）。
@@ -4348,20 +4351,20 @@ class _NewEditorPageState extends State<NewEditorPage>
             // 放宽到 320：桌面表格再按手机的 240 封顶会显得又窄又挤，
             // 两三列表格不该出现横向滚动条。
             //
-            // 桌面用自建表格组件（双击单元格就地编辑）；移动端继续用内核的
-            // 只读表格组件，交互与观感都不变。
+            // 桌面用自建表格组件（Typora 式：点进格子就是光标，Tab 切格、
+            // Enter 格内换行、⌘↩ 插行）；移动端继续用内核的只读表格组件，
+            // 交互与观感都不变。
             if (PlatformFeatures.isDesktop)
-              EditableTableComponentBuilder(
+              TyporaTableComponentBuilder(
                 availableWidth: contentWidth - AppSpace.page * 2,
                 columnMax: 320,
-                // 桌面表格铺满正文宽度、各列等分（Notion / 语雀形态）。
+                // 桌面表格铺满正文宽度、各列等分。
                 fillWidth: true,
                 selectionColor: Color.alphaBlend(
                   colors.accent.withValues(alpha: 0.25),
                   colors.page,
                 ),
                 cursorColor: colors.accent,
-                editorBackground: colors.page,
                 onCellCommitted: _replaceTableCell,
                 onCellStructure: _mutateTable,
                 onCellPointerDown: _rememberTableCellPointer,
