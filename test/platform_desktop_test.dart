@@ -699,7 +699,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('桌面表格铺满正文宽度，不再按内容收缩', (
+    testWidgets('桌面表格按内容自适应列宽（Typora auto 布局）', (
       WidgetTester tester,
     ) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -716,16 +716,22 @@ void main() {
               id: 'pc-table-fill',
               created: DateTime(2026, 11, 1),
               updated: DateTime(2026, 11, 1),
-              body: '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+              body: '| 备注 | 数 |\n| --- | --- |\n| 这是一段比较长的备注文字 | 3 |',
             ),
           ),
         ),
       );
       await _pumpFrames(tester);
 
-      final Size table = tester.getSize(find.byType(Table));
-      // 正文列宽 760，扣掉页边距后表格应铺满（而不是按内容缩到一百多）。
-      expect(table.width, greaterThan(600));
+      final Rect tableRect = tester.getRect(find.byType(Table));
+      // 与 Typora 一致：表格宽度由内容决定，不再强行铺满正文（760）。
+      expect(tableRect.width, lessThan(600));
+      expect(tableRect.width, greaterThan(200));
+      // 列宽也按内容分配：长文本的第一列明显宽于只有一两个字的第二列。
+      final double secondColumnLeft =
+          tester.getTopLeft(find.text('数', findRichText: true)).dx -
+              tableRect.left;
+      expect(secondColumnLeft, greaterThan(tableRect.width * 0.6));
       expect(tester.takeException(), isNull);
       debugDefaultTargetPlatformOverride = null;
     });

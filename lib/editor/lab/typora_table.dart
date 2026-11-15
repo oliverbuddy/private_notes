@@ -8,14 +8,19 @@ import 'package:super_editor/super_editor.dart';
 
 import '../../theme/app_theme.dart';
 import '../../ui/pressable.dart';
-import 'markdown_inline.dart';
 
 /// 表格结构操作（右键菜单 / Tab 加行 / Cmd+Enter 加行共用）。
+///
+/// 与 Typora 的表格右键菜单一一对应：插入行列、移动行列、删除行列。
 enum TableCellAction {
   insertRowAbove,
   insertRowBelow,
   insertColumnLeft,
   insertColumnRight,
+  moveRowUp,
+  moveRowDown,
+  moveColumnLeft,
+  moveColumnRight,
   deleteRow,
   deleteColumn,
 }
@@ -68,6 +73,40 @@ TableBlockNode? rebuildTableNode(
       for (final List<TextNode> rowCells in cells) {
         rowCells.insert(at, emptyCell());
       }
+    case TableCellAction.moveRowUp:
+      // 第 0 行是表头，数据行只能移动到表头之下（Typora 的表格同样以
+      // 首行为表头）。
+      if (row <= 1) {
+        return null;
+      }
+      cells = snapshot();
+      final List<TextNode> movedUp = cells.removeAt(row);
+      cells.insert(row - 1, movedUp);
+    case TableCellAction.moveRowDown:
+      if (row < 1 || row >= rowCount - 1) {
+        return null;
+      }
+      cells = snapshot();
+      final List<TextNode> movedDown = cells.removeAt(row);
+      cells.insert(row + 1, movedDown);
+    case TableCellAction.moveColumnLeft:
+      if (column <= 0) {
+        return null;
+      }
+      cells = snapshot();
+      for (final List<TextNode> rowCells in cells) {
+        final TextNode moved = rowCells.removeAt(column);
+        rowCells.insert(column - 1, moved);
+      }
+    case TableCellAction.moveColumnRight:
+      if (column >= columnCount - 1) {
+        return null;
+      }
+      cells = snapshot();
+      for (final List<TextNode> rowCells in cells) {
+        final TextNode moved = rowCells.removeAt(column);
+        rowCells.insert(column + 1, moved);
+      }
     case TableCellAction.deleteRow:
       // 表头是表格的语义基准，删掉就没有表格了。
       if (row == 0 || rowCount <= 1) {
@@ -86,38 +125,6 @@ TableBlockNode? rebuildTableNode(
   return TableBlockNode(
     id: table.id,
     cells: cells,
-    metadata: Map<String, dynamic>.from(table.metadata),
-  );
-}
-
-/// 在 [belowRow] 下方插入一行，内容按 [cells] 填充：不足补空、超出截断。
-///
-/// 单元格文本里的行内标记（`**粗体**`、`[文字](url)`、`==高亮==`）会转成
-/// 样式，否则「复制本行 → 粘贴为新增行」会把标记以字面量带回来。
-TableBlockNode? insertTableRow(
-  TableBlockNode table,
-  int belowRow,
-  List<String> cells,
-) {
-  if (belowRow < 0 || belowRow >= table.rowCount || table.columnCount == 0) {
-    return null;
-  }
-  final List<List<TextNode>> grid = _tableGrid(table);
-  grid.insert(
-    belowRow + 1,
-    <TextNode>[
-      for (int c = 0; c < table.columnCount; c++)
-        TextNode(
-          id: Editor.createNodeId(),
-          text: c < cells.length
-              ? attributedTextFromInlineMarkdown(cells[c])
-              : AttributedText(),
-        ),
-    ],
-  );
-  return TableBlockNode(
-    id: table.id,
-    cells: grid,
     metadata: Map<String, dynamic>.from(table.metadata),
   );
 }
@@ -165,6 +172,7 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
     this.onCellCommitted,
     this.onCellStructure,
     this.onCellPointerDown,
+    this.onColumnAlign,
     this.onCellEditingChanged,
   }) : super(fit: TableComponentFit.scroll);
 
@@ -203,6 +211,10 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
   final void Function(String tableNodeId, int row, int column)?
       onCellPointerDown;
 
+  /// 整列对齐（Typora 表格工具条上的对齐按钮）。
+  final void Function(String tableNodeId, int column, String align)?
+      onColumnAlign;
+
   /// 单元格编辑状态变化（页面据此避免拦截 ⌘C / ⌘V，交给输入框自己处理）。
   final ValueChanged<bool>? onCellEditingChanged;
 
@@ -218,9 +230,9 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
     }
     viewModel.selectionColor = selectionColor;
     final int columns = node.columnCount;
-    if (fillWidth) {
-      viewModel.columnWidth = const FlexColumnWidth();
-    } else if (columns > 0 && availableWidth > 0) {
+    if (columns > 0 && availableWidth > 0) {
+      // 兜底宽度：真正的列宽由组件按「内容自适应」算（见 TyporaTable），
+      // 这里只保证 VM 有一个合理值。
       final double cap = (availableWidth / columns).clamp(96, columnMax);
       viewModel.columnWidth = CappedIntrinsicColumnWidth(cap.toDouble());
     }
@@ -243,6 +255,7 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
       onCellCommitted: onCellCommitted,
       onCellStructure: onCellStructure,
       onCellPointerDown: onCellPointerDown,
+      onColumnAlign: onColumnAlign,
       onCellEditingChanged: onCellEditingChanged,
     );
   }
@@ -267,6 +280,7 @@ class TyporaTable extends StatefulWidget {
     this.onCellCommitted,
     this.onCellStructure,
     this.onCellPointerDown,
+    this.onColumnAlign,
     this.onCellEditingChanged,
   });
 
@@ -291,6 +305,10 @@ class TyporaTable extends StatefulWidget {
 
   final void Function(String tableNodeId, int row, int column)?
       onCellPointerDown;
+
+  /// 整列对齐（Typora 表格工具条上的对齐按钮）。
+  final void Function(String tableNodeId, int column, String align)?
+      onColumnAlign;
 
   final ValueChanged<bool>? onCellEditingChanged;
 
@@ -524,6 +542,30 @@ class _TyporaTableState extends State<TyporaTable> {
       return KeyEventResult.handled;
     }
     // 普通 Enter / Shift+Enter：格内换行（写回 `<br>`），不切格。
+    // ⌥↑/↓/←/→：移动整行 / 整列（Typora 的表格快捷键）。
+    // 必须排在普通方向键之前，否则会被「上下切行」吃掉。
+    if (keyboard.isAltPressed) {
+      TableCellAction? move;
+      if (key == LogicalKeyboardKey.arrowUp) {
+        move = TableCellAction.moveRowUp;
+      } else if (key == LogicalKeyboardKey.arrowDown) {
+        move = TableCellAction.moveRowDown;
+      } else if (key == LogicalKeyboardKey.arrowLeft) {
+        move = TableCellAction.moveColumnLeft;
+      } else if (key == LogicalKeyboardKey.arrowRight) {
+        move = TableCellAction.moveColumnRight;
+      }
+      if (move != null) {
+        _commitEditing();
+        widget.onCellStructure?.call(
+          widget.viewModel.nodeId,
+          move,
+          row,
+          column,
+        );
+        return KeyEventResult.handled;
+      }
+    }
     if (key == LogicalKeyboardKey.arrowDown) {
       _commitEditing(moveDown: true);
       return KeyEventResult.handled;
@@ -533,6 +575,19 @@ class _TyporaTableState extends State<TyporaTable> {
       return KeyEventResult.handled;
     }
     final TextSelection selection = controller.selection;
+    // ⇧⌘⌫：删除本行（Typora 的 Delete Row）。
+    if (key == LogicalKeyboardKey.backspace &&
+        keyboard.isMetaPressed &&
+        keyboard.isShiftPressed) {
+      _commitEditing();
+      widget.onCellStructure?.call(
+        widget.viewModel.nodeId,
+        TableCellAction.deleteRow,
+        row,
+        column,
+      );
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowLeft &&
         selection.isValid &&
         selection.isCollapsed &&
@@ -832,6 +887,70 @@ class _TyporaTableState extends State<TyporaTable> {
     return _tableWidth / _columnCount * index;
   }
 
+  String? _contentWidthsKey;
+  List<double>? _contentWidthsCache;
+
+  /// 按内容算列宽：Typora 的表格是浏览器 auto 布局 —— 每列宽度由该列
+  /// 最长的一行文字决定，整体超过正文宽度时按比例压缩（单元格内换行）。
+  List<double> _contentWidths(double available) {
+    final List<List<MarkdownTableCellViewModel>> cells = widget.viewModel.cells;
+    final int columns = _columnCount;
+    if (columns == 0 || cells.isEmpty) {
+      return const <double>[];
+    }
+    // 内容 / 宽度 / 字号没变就复用，避免每帧重新排版。
+    final TextStyle probeStyle = cells.first.first.textStyleBuilder(
+      const <Attribution>{},
+    );
+    final String key = <String>[
+      widget.viewModel.nodeId,
+      available.toStringAsFixed(1),
+      '${probeStyle.fontSize}|${probeStyle.fontFamily}',
+      for (final List<MarkdownTableCellViewModel> row in cells)
+        row.map((MarkdownTableCellViewModel c) => c.text.toPlainText()).join('\u0001'),
+    ].join('\u0002');
+    if (_contentWidthsKey == key && _contentWidthsCache != null) {
+      return _contentWidthsCache!;
+    }
+
+    const double minWidth = 56;
+    final List<double> desired = List<double>.filled(columns, minWidth);
+    for (final List<MarkdownTableCellViewModel> row in cells) {
+      for (var c = 0; c < row.length && c < columns; c++) {
+        final MarkdownTableCellViewModel cell = row[c];
+        final TextStyle style = cell.textStyleBuilder(const <Attribution>{});
+        double widest = 0;
+        for (final String line in cell.text.toPlainText().split('\n')) {
+          final TextPainter painter = TextPainter(
+            text: TextSpan(text: line, style: style),
+            textDirection: TextDirection.ltr,
+            maxLines: 1,
+          )..layout();
+          widest = math.max(widest, painter.maxIntrinsicWidth);
+          painter.dispose();
+        }
+        desired[c] = math.max(
+          desired[c],
+          widest + cell.padding.horizontal,
+        );
+      }
+    }
+
+    final double total =
+        desired.fold<double>(0, (double sum, double w) => sum + w);
+    List<double> widths = desired;
+    if (available > 0 && total > available) {
+      final double scale = available / total;
+      widths = <double>[for (final double w in desired) w * scale];
+    }
+    if (available > 0) {
+      widths = <double>[for (final double w in widths) math.min(w, available)];
+    }
+    _contentWidthsKey = key;
+    _contentWidthsCache = widths;
+    return widths;
+  }
+
   Widget _buildResizeHandle(int index) {
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
@@ -943,10 +1062,44 @@ class _TyporaTableState extends State<TyporaTable> {
               enabled: columns > 1,
               onTap: () => _runStructure(TableCellAction.deleteColumn),
             ),
+            // Typora 的表格工具条上就是对齐按钮（左 / 中 / 右）。
+            Container(
+              width: 0.5,
+              height: 14,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              color: colors.chipBorder,
+            ),
+            _HoverAction(
+              label: '左',
+              tooltip: '本列左对齐',
+              onTap: () => _runAlign('left'),
+            ),
+            _HoverAction(
+              label: '中',
+              tooltip: '本列居中',
+              onTap: () => _runAlign('center'),
+            ),
+            _HoverAction(
+              label: '右',
+              tooltip: '本列右对齐',
+              onTap: () => _runAlign('right'),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// 工具条上的整列对齐。
+  void _runAlign(String align) {
+    final int? column = _hoverColumn;
+    if (column == null) {
+      return;
+    }
+    if (_editRow != null) {
+      _commitEditing();
+    }
+    widget.onColumnAlign?.call(widget.viewModel.nodeId, column, align);
   }
 
   /// 工具条执行结构操作：先把正在编辑的内容提交掉，避免两次整表重建
@@ -984,7 +1137,9 @@ class _TyporaTableState extends State<TyporaTable> {
     return SingleAxisTrackpadAndWheelScroller(
       axis: Axis.horizontal,
       controller: _scrollController,
-      child: Center(
+      child: Align(
+        // Typora 的表格按内容宽度靠左排，不居中、不强制铺满。
+        alignment: Alignment.centerLeft,
         child: Scrollbar(
           controller: _scrollController,
           scrollbarOrientation: ScrollbarOrientation.bottom,
@@ -1003,8 +1158,11 @@ class _TyporaTableState extends State<TyporaTable> {
     // onExit，工具条刚出现就消失。
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        _tableWidth = constraints.maxWidth;
-        final List<double>? widths = _effectiveWidths(constraints.maxWidth);
+        final double available = constraints.maxWidth;
+        _tableWidth = available;
+        // 拖过列宽就按拖的来，否则按内容自适应（Typora 的 auto 布局）。
+        final List<double> widths =
+            _effectiveWidths(available) ?? _contentWidths(available);
         return MouseRegion(
           cursor: SystemMouseCursors.basic,
           hitTestBehavior: HitTestBehavior.translucent,
@@ -1061,17 +1219,15 @@ class _TyporaTableState extends State<TyporaTable> {
     );
   }
 
-  Widget _buildTable(BuildContext context, List<double>? widths) {
+  Widget _buildTable(BuildContext context, List<double> widths) {
     final List<List<MarkdownTableCellViewModel>> cells = widget.viewModel.cells;
     return Table(
       border: widget.viewModel.border ?? TableBorder.all(),
       defaultColumnWidth: widget.viewModel.columnWidth,
-      columnWidths: widths == null
-          ? null
-          : <int, TableColumnWidth>{
-              for (var i = 0; i < widths.length; i++)
-                i: FixedColumnWidth(widths[i]),
-            },
+      columnWidths: <int, TableColumnWidth>{
+        for (var i = 0; i < widths.length; i++)
+          i: FixedColumnWidth(widths[i]),
+      },
       children: <TableRow>[
         for (int row = 0; row < cells.length; row++)
           TableRow(

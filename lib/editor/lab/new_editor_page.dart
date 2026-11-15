@@ -20,7 +20,6 @@ import '../../platform/platform_features.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
-import '../../ui/app_field.dart';
 import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
@@ -1177,6 +1176,11 @@ class _NewEditorPageState extends State<NewEditorPage>
       // 「先滑一下、后面再补一下」的两段式观感。这段过程一律不动。
       return;
     }
+    // 表格是块级选中，落位目标是「整块表格的上下边界」：每次重排都会
+    // 重新算一次舒适位置，表现就是表格上下抖动。表格内不做光标跟随。
+    if (_selectionNode() is TableBlockNode) {
+      return;
+    }
     final selection = _composer.selection;
     if (selection == null || !selection.isCollapsed) {
       return;
@@ -1337,6 +1341,12 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 「粘贴完一直滚到底部才停」；正常编辑器（Typora / 语雀）这里是
     // 一步到位。
     if ((target - position.pixels).abs() > position.viewportDimension) {
+      // 跨屏：交还框架原生的瞬时跳转。
+      return false;
+    }
+    // 表格内不进入逐帧平滑：表格重排会反复触发落位，平滑收敛表现为
+    // 上下抖动；一次性原生跳转更稳（移动端表格同样走这条）。
+    if (_selectionNode() is TableBlockNode) {
       return false;
     }
     _requestCaretScroll(target);
@@ -3413,70 +3423,63 @@ class _NewEditorPageState extends State<NewEditorPage>
       final int targetRow = cell?.row ?? 0;
       final int targetColumn = cell?.column ?? 0;
       final bool hasCell = cell != null;
-      final String currentAlign = hasCell
-          ? _tableColumnAlign(selectedNode, targetColumn)
-          : 'left';
+      // 菜单顺序与 Typora 的表格右键菜单完全一致（取自 Typora 的
+      // index.html #table-menu）：插入 → 移动 → 删除行列 → 复制 → 删除表格。
       final String? tableAction = await _showContextMenu(
         position: globalPosition,
         items: <PopupMenuEntry<String>>[
-          _menuItem('编辑表格', 'editTable'),
-          _menuItem('复制表格（Markdown）', 'copyTable'),
-          _menuItem('复制本行', 'copyRow', enabled: hasCell),
-          _menuItem('复制本列', 'copyColumn', enabled: hasCell),
-          const PopupMenuDivider(),
-          // 行列操作与 Notion / 语雀 的右键菜单一致：就地增删，不用改源码。
           _menuItem('上方插入行', 'insertRowAbove', enabled: hasCell),
           _menuItem('下方插入行', 'insertRowBelow', enabled: hasCell),
+          _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
+          _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
+          const PopupMenuDivider(),
           _menuItem(
-            '删除本行',
+            '上移该行',
+            'moveRowUp',
+            // 第 0 行是表头，数据行不能越到表头之上。
+            enabled: hasCell && targetRow > 1,
+          ),
+          _menuItem(
+            '下移该行',
+            'moveRowDown',
+            enabled: hasCell &&
+                targetRow >= 1 &&
+                targetRow < selectedNode.rowCount - 1,
+          ),
+          _menuItem(
+            '左移该列',
+            'moveColumnLeft',
+            enabled: hasCell && targetColumn > 0,
+          ),
+          _menuItem(
+            '右移该列',
+            'moveColumnRight',
+            enabled: hasCell && targetColumn < selectedNode.columnCount - 1,
+          ),
+          const PopupMenuDivider(),
+          _menuItem(
+            '删除行',
             'deleteRow',
             // 表头行不能删：删掉表格就没有语义基准了。
             enabled: hasCell && targetRow > 0,
           ),
-          const PopupMenuDivider(),
-          _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
-          _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
           _menuItem(
-            '删除本列',
+            '删除列',
             'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
           ),
           const PopupMenuDivider(),
-          _menuItem(
-            '列左对齐',
-            'alignLeft',
-            enabled: hasCell,
-            selected: currentAlign == 'left',
-          ),
-          _menuItem(
-            '列居中',
-            'alignCenter',
-            enabled: hasCell,
-            selected: currentAlign == 'center',
-          ),
-          _menuItem(
-            '列右对齐',
-            'alignRight',
-            enabled: hasCell,
-            selected: currentAlign == 'right',
-          ),
+          _menuItem('复制表格', 'copyTable'),
           const PopupMenuDivider(),
-          _menuItem('粘贴为新增行', 'pasteRow', enabled: hasCell),
-          _menuItem('粘贴', 'paste'),
+          _menuItem('删除表格', 'deleteTable'),
         ],
       );
       if (!mounted || tableAction == null) {
         return;
       }
       switch (tableAction) {
-        case 'editTable':
-          await _editTableAsMarkdown(selectedNode);
         case 'copyTable':
           await _copyTableAsMarkdown(selectedNode);
-        case 'copyRow':
-          await _copyTableRow(selectedNode, targetRow);
-        case 'copyColumn':
-          await _copyTableColumn(selectedNode, targetColumn);
         case 'insertRowAbove':
           _mutateTable(
             selectedNode.id,
@@ -3505,6 +3508,34 @@ class _NewEditorPageState extends State<NewEditorPage>
             targetRow,
             targetColumn,
           );
+        case 'moveRowUp':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.moveRowUp,
+            targetRow,
+            targetColumn,
+          );
+        case 'moveRowDown':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.moveRowDown,
+            targetRow,
+            targetColumn,
+          );
+        case 'moveColumnLeft':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.moveColumnLeft,
+            targetRow,
+            targetColumn,
+          );
+        case 'moveColumnRight':
+          _mutateTable(
+            selectedNode.id,
+            TableCellAction.moveColumnRight,
+            targetRow,
+            targetColumn,
+          );
         case 'deleteRow':
           _mutateTable(
             selectedNode.id,
@@ -3519,16 +3550,8 @@ class _NewEditorPageState extends State<NewEditorPage>
             targetRow,
             targetColumn,
           );
-        case 'alignLeft':
-          _alignTableColumn(selectedNode.id, targetColumn, 'left');
-        case 'alignCenter':
-          _alignTableColumn(selectedNode.id, targetColumn, 'center');
-        case 'alignRight':
-          _alignTableColumn(selectedNode.id, targetColumn, 'right');
-        case 'paste':
-          await _pasteFromClipboard();
-        case 'pasteRow':
-          await _pasteTableRow(selectedNode, targetRow);
+        case 'deleteTable':
+          _deleteTable(selectedNode);
       }
       if (mounted) {
         _editorFocus.requestFocus();
@@ -3695,133 +3718,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  /// 复制当前行：输出一行标准 Markdown 管道文本，可直接粘回表格或别处。
-  Future<void> _copyTableRow(TableBlockNode table, int row) async {
-    final String? text = tableRowMarkdown(table, row);
-    if (text == null) {
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) {
-      _showHint('本行已复制');
-    }
-  }
-
-  /// 复制当前列：每行一个单元格，粘回表格时按列贴。
-  Future<void> _copyTableColumn(TableBlockNode table, int column) async {
-    final String? text = tableColumnMarkdown(table, column);
-    if (text == null) {
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) {
-      _showHint('本列已复制');
-    }
-  }
-
-  /// 把剪贴板里的表格行粘贴成新行（插在当前行下方）。
-  ///
-  /// 兼容 Markdown 管道行与 Tab 分隔行；行内标记会转回样式，列数按表格
-  /// 补齐 / 截断，所以从语雀、Excel 或本应用复制来的行都能直接落表。
-  Future<void> _pasteTableRow(TableBlockNode table, int row) async {
-    final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
-    final List<String>? cells = parseMarkdownTableRow(data?.text ?? '');
-    final TableBlockNode? next =
-        cells == null ? null : insertTableRow(table, row, cells);
-    if (!mounted) {
-      return;
-    }
-    if (next == null) {
-      _showHint('剪贴板里没有可粘贴的表格行');
-      return;
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: table.id, newNode: next),
-    ]);
-    _selectTableBlock(next);
-    _showHint('已粘贴为新增行');
-  }
-
-  /// 表格编辑：以 Markdown 源码编辑整表。
-  ///
-  /// 内核的 Markdown 表格组件只支持整块选中，没有逐单元格光标；
-  /// 在小记里用「源码编辑 → 解析回表格」覆盖编辑需求，同时保留
-  /// 表格的复制能力（右键菜单）。
-  Future<void> _editTableAsMarkdown(TableBlockNode table) async {
-    final TextEditingController controller =
-        TextEditingController(text: _tableMarkdownOf(table));
-    final String? edited = await showXiaojiSheet<String>(
-      context: context,
-      builder: (BuildContext sheetContext) {
-        final AppColors colors = AppColors.of(sheetContext);
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(
-                  '编辑表格',
-                  style: AppText.sheetTitle.copyWith(color: colors.text),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: controller,
-                  minLines: 5,
-                  maxLines: 10,
-                  style: TextStyle(
-                    fontSize: AppFontSize.label,
-                    height: 1.5,
-                    color: colors.text,
-                  ),
-                  decoration: appFieldDecoration(
-                    sheetContext,
-                    hintText: '| 列 1 | 列 2 |',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: <Widget>[
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () =>
-                          Navigator.of(sheetContext).pop(controller.text),
-                      child: const Text('保存'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    controller.dispose();
-    if (!mounted || edited == null) {
-      return;
-    }
-    final MutableDocument parsed = deserializeXiaojiMarkdown(edited);
-    TableBlockNode? next;
-    for (final DocumentNode node in parsed) {
-      if (node is TableBlockNode) {
-        next = node;
-        break;
-      }
-    }
-    if (next == null) {
-      _showHint('表格格式无法识别');
-      return;
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: table.id, newNode: next),
-    ]);
-    _showHint('表格已更新');
+  /// 删除整张表格（Typora 的 Delete Table）。
+  void _deleteTable(TableBlockNode table) {
+    _lastTableCell = null;
+    _editor.execute(<EditRequest>[DeleteNodeRequest(nodeId: table.id)]);
   }
 
   /// 桌面：单元格就地编辑后回写。
@@ -4012,16 +3912,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
     ]);
     _selectTableBlock(next);
-  }
-
-  /// 列当前对齐方式（左 / 中 / 右），用于右键菜单的对勾。
-  String _tableColumnAlign(TableBlockNode table, int column) {
-    if (column < 0 || column >= table.columnCount) {
-      return 'left';
-    }
-    final TextNode cell = table.getCell(rowIndex: 0, columnIndex: column);
-    final Object? align = cell.metadata[TextNodeMetadata.textAlign];
-    return align is String ? align : 'left';
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -4358,8 +4248,6 @@ class _NewEditorPageState extends State<NewEditorPage>
               TyporaTableComponentBuilder(
                 availableWidth: contentWidth - AppSpace.page * 2,
                 columnMax: 320,
-                // 桌面表格铺满正文宽度、各列等分。
-                fillWidth: true,
                 selectionColor: Color.alphaBlend(
                   colors.accent.withValues(alpha: 0.25),
                   colors.page,
@@ -4368,6 +4256,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                 onCellCommitted: _replaceTableCell,
                 onCellStructure: _mutateTable,
                 onCellPointerDown: _rememberTableCellPointer,
+                onColumnAlign: _alignTableColumn,
                 onCellEditingChanged: (bool editing) {
                   _tableCellEditing = editing;
                 },

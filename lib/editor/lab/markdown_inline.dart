@@ -390,66 +390,6 @@ List<InlineMarkdownMatch> findAllInlineMarkdown(String text) {
   return matches;
 }
 
-/// 把带行内标记的纯文本一次性转成 [AttributedText]：标记字符删掉、样式落到区间。
-///
-/// 用于「粘贴为新增行」这类一次性插入：从别处复制来的 `**粗体**` 不该以
-/// 字面量留在单元格里。与 [allInlineMarkdownRequests] 的区别是不走编辑器
-/// 请求（还没有节点），直接构造带属性的文本。
-AttributedText attributedTextFromInlineMarkdown(String text) {
-  final List<InlineMarkdownMatch> matches = findAllInlineMarkdown(text)
-      .where((InlineMarkdownMatch match) => match.contentEnd > match.contentStart)
-      .toList(growable: false);
-  if (matches.isEmpty) {
-    return AttributedText(text);
-  }
-
-  // 记下所有标记字符的位置整体删除；同时建立「旧下标 → 新下标」映射，
-  // 用来把命中项的内容区间换算到新文本上。
-  final List<bool> removed = List<bool>.filled(text.length, false);
-  for (final InlineMarkdownMatch match in matches) {
-    for (var i = match.openStart; i < match.contentStart; i++) {
-      removed[i] = true;
-    }
-    final int closeEnd = match.contentEnd + match.closeLength;
-    for (var i = match.contentEnd; i < closeEnd && i < removed.length; i++) {
-      removed[i] = true;
-    }
-  }
-  final List<int> mapped = List<int>.filled(text.length + 1, 0);
-  final StringBuffer buffer = StringBuffer();
-  for (var i = 0; i < text.length; i++) {
-    mapped[i] = buffer.length;
-    if (!removed[i]) {
-      buffer.write(text[i]);
-    }
-  }
-  mapped[text.length] = buffer.length;
-
-  final AttributedText result = AttributedText(buffer.toString());
-  for (final InlineMarkdownMatch match in matches) {
-    final int start = mapped[match.contentStart];
-    // 内容最后一个字符一定被保留，取它的新下标作为闭区间终点。
-    final int end = mapped[match.contentEnd - 1];
-    if (start < 0 || end < start || start >= result.length) {
-      continue;
-    }
-    final int safeEnd = end < result.length ? end : result.length - 1;
-    if (match.kind == InlineMarkdownKind.link) {
-      result.addAttribution(
-        LinkAttribution(match.linkUrl!),
-        SpanRange(start, safeEnd),
-      );
-      continue;
-    }
-    final Attribution? attribution = match.attribution;
-    if (attribution == null) {
-      continue;
-    }
-    result.addAttribution(attribution, SpanRange(start, safeEnd));
-  }
-  return result;
-}
-
 /// 整段文本 → 一批编辑请求；没有可转换的标记返回 null。
 ///
 /// 请求按**从右到左**排列：同一 `execute` 内先删靠后的闭合标记，靠前的
