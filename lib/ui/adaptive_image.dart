@@ -5,6 +5,24 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
+/// 已解析过的原图像素尺寸（绝对路径 → 像素宽高）。
+///
+/// super_editor 会在组件离开视口后回收、回来时重建；没有缓存的话每张图
+/// 都会先按 4:3 占位、解码后再 setState 成真实比例 —— 长文里滚回去看
+/// 同一张图时，下方正文会突然跳一下。缓存命中后第一帧就是正确高度。
+final Map<String, Size> _pixelSizeCache = <String, Size>{};
+
+void _rememberPixelSize(String path, Size size) {
+  if (size.width <= 0 || size.height <= 0) {
+    return;
+  }
+  // 长文图片数量有限，给一个简单上限防止无限增长。
+  if (_pixelSizeCache.length >= 128 && !_pixelSizeCache.containsKey(path)) {
+    _pixelSizeCache.remove(_pixelSizeCache.keys.first);
+  }
+  _pixelSizeCache[path] = size;
+}
+
 /// 微信式图片框：先按原比例缩放，只有「极端长图」才裁切并打「长图」角标。
 ///
 /// 微信 / 主流 IM 的图片规则（这里按同一套实现）：
@@ -65,7 +83,18 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
   @override
   void initState() {
     super.initState();
+    _seedFromCache();
     _resolveImage();
+  }
+
+  /// 缓存命中时首帧就用真实比例，避免「占位 → 真实高度」的跳动。
+  void _seedFromCache() {
+    final Size? cached = _pixelSizeCache[widget.path];
+    if (cached == null) {
+      return;
+    }
+    _pendingPixelSize = cached;
+    _aspect = cached.width / math.max(1, cached.height);
   }
 
   @override
@@ -83,6 +112,10 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
   void didUpdateWidget(AdaptiveImageFrame oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path) {
+      _aspect = null;
+      _naturalWidth = null;
+      _pendingPixelSize = null;
+      _seedFromCache();
       _resolveImage();
     }
   }
@@ -144,6 +177,8 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
     if (!aspect.isFinite || aspect <= 0) {
       return;
     }
+    // 记下来：组件被回收后再次滚回视口时，首帧就能按真实比例布局。
+    _rememberPixelSize(widget.path, Size(pixelWidth, pixelHeight));
     final double dpr = _devicePixelRatio ?? 1;
     setState(() {
       _aspect = aspect;

@@ -423,14 +423,19 @@ abstract final class AppSpace {
 
 /// 组件高度刻度（HarmonyOS Design）。
 ///
-/// 导航栏 48、单行列表 48、双行列表 64、标准按钮 40、菜单行 56。
+/// 导航栏 48、单行列表 48、双行列表 64、标准按钮 40、菜单行 48。
 /// 官方最小可点热区 40vp，这里的行高都不低于 48。
 abstract final class AppSize {
   static const double navBar = 48;
   static const double row = 48;
   static const double rowLarge = 64;
   static const double button = 40;
-  static const double actionRow = 56;
+
+  /// 菜单/选项行高。
+  ///
+  /// 对齐 Material 单行列表与 iOS 动作表（44–48）的观感：56 会让
+  /// 「笔记长按菜单」「详情 ⋯ 菜单」整体偏高、一屏装不下几项。
+  static const double actionRow = 48;
 }
 
 /// 图标尺寸刻度（HarmonyOS 系统图标 24vp，活动区 22vp；行内 16vp）。

@@ -1126,6 +1126,12 @@ class _NewEditorPageState extends State<NewEditorPage>
       // 「先滑一下、后面再补一下」的两段式观感。这段过程一律不动。
       return;
     }
+    // 用户正在拖动或惯性滚动：自动落位会把页面从手势手里抢走，表现为
+    // 「读着读着突然往上跳一下」。等滚动停下来再谈光标可见性。
+    if (_userDraggingScroll ||
+        _editorScroll.position.isScrollingNotifier.value) {
+      return;
+    }
     // 表格是块级选中，落位目标是「整块表格的上下边界」：每次重排都会
     // 重新算一次舒适位置，表现就是表格上下抖动。表格内不做光标跟随。
     if (_selectionNode() is TableBlockNode) {
@@ -1277,6 +1283,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     // （_imeCollapsing）也吞掉：框架按变大后的视口重算出的目标更小，
     // 执行它会让正文往下移（用户反馈的「收起输入法后详情页下移」）。
     if (_panelTransitioning || _caretFollowing || _imeCollapsing) {
+      return true;
+    }
+    // 用户拖动 / 惯性滚动期间：框架的跳转同样吞掉，别把阅读中的页面拽走。
+    if (position.isScrollingNotifier.value || _userDraggingScroll) {
       return true;
     }
     // 浏览态保持框架原生行为（例如拖动手势的自动滚动）。
@@ -3732,17 +3742,30 @@ class _LabImageComponentBuilder implements ComponentBuilder {
     final Widget image = ImageComponent(
       componentKey: componentContext.componentKey,
       imageUrl: path,
-      imageBuilder: (BuildContext context, String _) => Image.file(
-        File(path),
-        // 由外层的 AdaptiveImageFrame 决定盒子尺寸：
-        //  - 普通图片盒子的宽高比 = 原图比例，cover 等价于等比缩放；
-        //  - 超长图盒子被限高后才裁切，并显示「长图」角标（微信逻辑）。
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-        width: double.infinity,
-        // 图挂了不能白屏：errorBuilder 退回占位框，alt 文字可读。
-        errorBuilder: (_, __, ___) => _placeholder(componentViewModel),
-      ),
+      imageBuilder: (BuildContext context, String _) {
+        // 按「显示宽度 × 屏幕像素比」解码，而不是原图全尺寸：手机照片
+        // 动辄 4000px 宽，全尺寸解码一张就是几十 MB，长文滚动时解码
+        // 会直接卡帧。上限 1440 物理像素，肉眼已看不出差别。
+        final double logicalWidth =
+            MediaQuery.sizeOf(context).width *
+                (size == ImageDisplaySize.small ? 0.4 : 1);
+        final int cacheWidth =
+            (logicalWidth * MediaQuery.devicePixelRatioOf(context))
+                .round()
+                .clamp(320, 1440);
+        return Image.file(
+          File(path),
+          // 由外层的 AdaptiveImageFrame 决定盒子尺寸：
+          //  - 普通图片盒子的宽高比 = 原图比例，cover 等价于等比缩放；
+          //  - 超长图盒子被限高后才裁切，并显示「长图」角标（微信逻辑）。
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+          width: double.infinity,
+          cacheWidth: cacheWidth,
+          // 图挂了不能白屏：errorBuilder 退回占位框，alt 文字可读。
+          errorBuilder: (_, __, ___) => _placeholder(componentViewModel),
+        );
+      },
     );
 
     // 点击/长按区域必须**包在图片盒子里面**：AdaptiveImageFrame 右对齐
