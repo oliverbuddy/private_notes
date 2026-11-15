@@ -167,6 +167,7 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
     required this.availableWidth,
     required this.selectionColor,
     required this.cursorColor,
+    this.editorFocusNode,
     this.columnMax = 240,
     this.fillWidth = false,
     this.onCellCommitted,
@@ -184,6 +185,10 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
 
   /// 单元格光标色。
   final Color cursorColor;
+
+  /// 正文编辑器的焦点节点：点表格时内核会顺手把焦点交给它，组件据此
+  /// 判断「焦点是被抢走的」并抢回单元格。
+  final FocusNode? editorFocusNode;
 
   /// 单列宽度上限：手机/平板 240，桌面放宽到 320。
   final double columnMax;
@@ -251,6 +256,7 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
       componentKey: componentContext.componentKey,
       viewModel: componentViewModel,
       cursorColor: cursorColor,
+      editorFocusNode: editorFocusNode,
       fillWidth: fillWidth,
       onCellCommitted: onCellCommitted,
       onCellStructure: onCellStructure,
@@ -276,6 +282,7 @@ class TyporaTable extends StatefulWidget {
     required this.componentKey,
     required this.viewModel,
     required this.cursorColor,
+    this.editorFocusNode,
     this.fillWidth = false,
     this.onCellCommitted,
     this.onCellStructure,
@@ -287,6 +294,9 @@ class TyporaTable extends StatefulWidget {
   final GlobalKey componentKey;
   final MarkdownTableViewModel viewModel;
   final Color cursorColor;
+
+  /// 正文编辑器的焦点节点（用来判断焦点是不是被内核抢走的）。
+  final FocusNode? editorFocusNode;
   final bool fillWidth;
 
   final void Function(
@@ -325,8 +335,8 @@ class _TyporaTableState extends State<TyporaTable> {
   _CellTextController? _controller;
   FocusNode? _focusNode;
 
-  /// 本次编辑开始的时间：用来区分「内核抢焦点」和「用户点走」。
-  DateTime _editStartedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  /// 最近一次指针落在单元格上的时间：用来区分「内核抢焦点」和「用户点走」。
+  DateTime _lastTablePointerAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 一次「按下即输入」的手势里，拖拽选字的起点（光标偏移）。
   int? _dragAnchorOffset;
@@ -335,14 +345,6 @@ class _TyporaTableState extends State<TyporaTable> {
   /// 当前悬停的单元格（浮动工具条用）。
   int? _hoverRow;
   int? _hoverColumn;
-
-  /// 拖过分隔线后的自定义列宽；null 表示各列等分。
-  ///
-  /// 列宽只作用于当前编辑会话：Markdown 表格没有列宽语法，重新打开回到
-  /// 等分（与 Typora 导出的 md 一致）。
-  List<double>? _columnWidths;
-
-  double _tableWidth = 0;
 
   bool get _editable => widget.onCellCommitted != null;
 
@@ -371,11 +373,6 @@ class _TyporaTableState extends State<TyporaTable> {
             (_hoverColumn ?? 0) >= widget.viewModel.cells[hoverRow].length)) {
       _hoverRow = null;
       _hoverColumn = null;
-    }
-    if (_columnWidths != null &&
-        (_columnWidths!.length != _columnCount ||
-            oldWidget.viewModel.nodeId != widget.viewModel.nodeId)) {
-      _columnWidths = null;
     }
   }
 
@@ -442,17 +439,23 @@ class _TyporaTableState extends State<TyporaTable> {
       if (_focusNode != focusNode || focusNode.hasFocus) {
         return;
       }
-      // 刚进入编辑的极短时间内失焦，是内核的点击处理在抢正文焦点；
-      // 窗口只留 150ms —— 再长会把「点开格子后马上点别处」也拽回来。
-      if (DateTime.now().difference(_editStartedAt) <
-          const Duration(milliseconds: 150)) {
+      // 只有「刚点了表格、焦点却被正文编辑器抢走」这一种情况才抢回来。
+      // 之前用的是时间窗口，既救不回晚到的抢焦点（要点两次才能落光标），
+      // 又会把「点开格子后点别处」硬拽回来。这里按焦点归属 + 是否刚点过
+      // 表格判断：用户点正文时事件更早，不会误抢。
+      final FocusNode? editorFocus = widget.editorFocusNode;
+      final FocusNode? primary = FocusManager.instance.primaryFocus;
+      final bool kernelStoleFocus =
+          editorFocus != null && identical(primary, editorFocus);
+      if (kernelStoleFocus &&
+          DateTime.now().difference(_lastTablePointerAt) <
+              const Duration(milliseconds: 300)) {
         focusNode.requestFocus();
         return;
       }
       _commitEditing();
     });
 
-    _editStartedAt = DateTime.now();
     setState(() {
       _editRow = row;
       _editColumn = column;
@@ -731,6 +734,7 @@ class _TyporaTableState extends State<TyporaTable> {
     }
     final (int, int)? cell = _cellAt(event.position);
     if (cell != null) {
+      _lastTablePointerAt = DateTime.now();
       widget.onCellPointerDown?.call(
         widget.viewModel.nodeId,
         cell.$1,
@@ -856,37 +860,6 @@ class _TyporaTableState extends State<TyporaTable> {
   int get _columnCount =>
       widget.viewModel.cells.isEmpty ? 0 : widget.viewModel.cells.first.length;
 
-  List<double>? _effectiveWidths(double available) {
-    final List<double>? widths = _columnWidths;
-    if (widths == null || widths.length != _columnCount || available <= 0) {
-      return null;
-    }
-    final double sum =
-        widths.fold<double>(0, (double total, double w) => total + w);
-    if (sum <= 0) {
-      return null;
-    }
-    if ((sum - available).abs() < 0.5) {
-      return widths;
-    }
-    final double scale = available / sum;
-    return <double>[for (final double w in widths) w * scale];
-  }
-
-  double _columnBoundary(int index, List<double>? widths) {
-    if (widths != null) {
-      double x = 0;
-      for (var i = 0; i < index && i < widths.length; i++) {
-        x += widths[i];
-      }
-      return x;
-    }
-    if (_columnCount == 0) {
-      return 0;
-    }
-    return _tableWidth / _columnCount * index;
-  }
-
   String? _contentWidthsKey;
   List<double>? _contentWidthsCache;
 
@@ -951,68 +924,22 @@ class _TyporaTableState extends State<TyporaTable> {
     return widths;
   }
 
-  Widget _buildResizeHandle(int index) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.resizeColumn,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: (_) => _startResizing(),
-        onHorizontalDragUpdate: (DragUpdateDetails details) =>
-            _resizeColumns(index, details.delta.dx),
-        // 双击分隔线恢复等分（Excel / Typora 的同一手势）。
-        onDoubleTap: () {
-          if (_columnWidths != null) {
-            setState(() => _columnWidths = null);
-          }
-        },
-        child: const SizedBox.expand(),
-      ),
-    );
-  }
-
-  /// 第一次拖拽时把「等分」固化成具体宽度表。
-  void _startResizing() {
-    if (_columnWidths != null && _columnWidths!.length == _columnCount) {
-      return;
-    }
-    final int columns = _columnCount;
-    if (columns == 0) {
-      return;
-    }
-    final double width = _tableWidth > 0 ? _tableWidth : 600;
-    setState(() {
-      _columnWidths = List<double>.filled(columns, width / columns);
-    });
-  }
-
-  /// 拖动第 [boundary] 条边界：左右两列此消彼长，并限制最小宽度。
-  void _resizeColumns(int boundary, double dx) {
-    final List<double>? widths = _columnWidths;
-    if (widths == null || boundary <= 0 || boundary >= widths.length) {
-      return;
-    }
-    const double minWidth = 56;
-    if (widths[boundary - 1] + dx < minWidth ||
-        widths[boundary] - dx < minWidth) {
-      return;
-    }
-    setState(() {
-      widths[boundary - 1] += dx;
-      widths[boundary] -= dx;
-    });
-  }
-
   void _handleHover(PointerHoverEvent event) {
     if (!_editable) {
       return;
     }
     final (int, int)? cell = _cellAt(event.position);
-    if (cell?.$1 == _hoverRow && cell?.$2 == _hoverColumn) {
+    // 指针进入右上角工具条 / 表格外的空白时不要清空：清空会让工具条
+    // 在鼠标移向按钮的半路上消失，点击就落空（「操作没作用在指定位置」）。
+    if (cell == null) {
+      return;
+    }
+    if (cell.$1 == _hoverRow && cell.$2 == _hoverColumn) {
       return;
     }
     setState(() {
-      _hoverRow = cell?.$1;
-      _hoverColumn = cell?.$2;
+      _hoverRow = cell.$1;
+      _hoverColumn = cell.$2;
     });
   }
 
@@ -1159,10 +1086,8 @@ class _TyporaTableState extends State<TyporaTable> {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double available = constraints.maxWidth;
-        _tableWidth = available;
-        // 拖过列宽就按拖的来，否则按内容自适应（Typora 的 auto 布局）。
-        final List<double> widths =
-            _effectiveWidths(available) ?? _contentWidths(available);
+        // 列宽始终按内容自适应（Typora 的 auto 布局），不支持拖动。
+        final List<double> widths = _contentWidths(available);
         return MouseRegion(
           cursor: SystemMouseCursors.basic,
           hitTestBehavior: HitTestBehavior.translucent,
@@ -1186,14 +1111,9 @@ class _TyporaTableState extends State<TyporaTable> {
                 onPointerCancel: _handlePointerUp,
                 child: IgnorePointer(
                   ignoring: _editRow == null,
-                  child: SelectableBox(
-                    selection: widget.viewModel.selection?.nodeSelection
-                            is UpstreamDownstreamNodeSelection
-                        ? widget.viewModel.selection?.nodeSelection
-                            as UpstreamDownstreamNodeSelection
-                        : null,
-                    selectionColor: widget.viewModel.selectionColor,
-                    child: BoxComponent(
+                  child: _withSelectionLayer(
+                    context,
+                    BoxComponent(
                       key: widget.componentKey,
                       opacity: widget.viewModel.opacity,
                       child: _buildTable(context, widths),
@@ -1201,21 +1121,32 @@ class _TyporaTableState extends State<TyporaTable> {
                   ),
                 ),
               ),
-              if (_editable && _hoverRow != null)
-                for (var i = 1; i < _columnCount; i++)
-                  Positioned(
-                    left: _columnBoundary(i, widths) - 3,
-                    top: 0,
-                    bottom: 0,
-                    width: 6,
-                    child: _buildResizeHandle(i),
-                  ),
+              // 工具条只在悬停/编辑时出现，盖在表格右上角。
               if (_editable && _hoverRow != null)
                 Positioned(top: 2, right: 2, child: _buildHoverBar(context)),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// 内核的选择层只在非编辑态挂上。
+  ///
+  /// 编辑单元格时，`SelectableBox` 会和单元格输入框一起抢拖拽手势：表现
+  /// 就是「选不了格子里的文字」「第一次点击只选中整表、第二次才进格子」。
+  /// 编辑态直接不挂，手势全部交给输入框。
+  Widget _withSelectionLayer(BuildContext context, Widget child) {
+    if (_editRow != null) {
+      return child;
+    }
+    final NodeSelection? nodeSelection = widget.viewModel.selection?.nodeSelection;
+    return SelectableBox(
+      selection: nodeSelection is UpstreamDownstreamNodeSelection
+          ? nodeSelection
+          : null,
+      selectionColor: widget.viewModel.selectionColor,
+      child: child,
     );
   }
 
@@ -1306,10 +1237,14 @@ class _TyporaTableState extends State<TyporaTable> {
   /// Typora 的表格是「文字里直接出现光标」，不是一个浮在上面的输入框；
   /// 所以这里只保留透明输入区，视觉差异只有光标和选区。
   Widget _buildCellEditor(MarkdownTableCellViewModel cell) {
+    final TextStyle style = cell.textStyleBuilder(const <Attribution>{});
     return TextField(
       controller: _controller,
       focusNode: _focusNode,
-      style: cell.textStyleBuilder(const <Attribution>{}),
+      style: style,
+      // 强制行盒与静态文本一致：否则进入编辑的一瞬间行高变化，整张表
+      // 会上下抖一下。
+      strutStyle: StrutStyle.fromTextStyle(style, forceStrutHeight: true),
       textAlign: cell.textAlign,
       cursorColor: widget.cursorColor,
       maxLines: null,

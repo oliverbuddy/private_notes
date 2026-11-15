@@ -1344,10 +1344,10 @@ class _NewEditorPageState extends State<NewEditorPage>
       // 跨屏：交还框架原生的瞬时跳转。
       return false;
     }
-    // 表格内不进入逐帧平滑：表格重排会反复触发落位，平滑收敛表现为
-    // 上下抖动；一次性原生跳转更稳（移动端表格同样走这条）。
+    // 表格内不做任何自动落位：表格每次重排都会让框架重算一次目标，
+    // 逐帧平滑或原生跳转都会把表格上下拽动（PC 上表现为抖动）。
     if (_selectionNode() is TableBlockNode) {
-      return false;
+      return true;
     }
     _requestCaretScroll(target);
     return true;
@@ -4253,6 +4253,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                   colors.page,
                 ),
                 cursorColor: colors.accent,
+                editorFocusNode: _editorFocus,
                 onCellCommitted: _replaceTableCell,
                 onCellStructure: _mutateTable,
                 onCellPointerDown: _rememberTableCellPointer,
