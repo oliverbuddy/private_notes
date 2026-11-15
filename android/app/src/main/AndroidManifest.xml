@@ -46,6 +46,69 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- 「用其他应用打开」Markdown 文件（微信 / 文件管理器 / 网盘）：
+                 点 .md 时让「小记」出现在应用选择列表，导入成一条笔记。
+
+                 MIME 组合要和各家 App 的实际行为对齐：
+                 - 知道 markdown 的应用直接给 text/markdown；
+                 - 微信等按扩展名查 MimeTypeMap，Android 不认 .md，
+                   往往回落成 application/octet-stream；
+                 - 部分文件管理器给 text/plain，但路径里带 .md。
+                 所以这里按「MIME + URI 路径后缀」组合声明。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/octet-stream"
+                    android:pathPattern=".*\\.md" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="text/plain"
+                    android:pathPattern=".*\\.md" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="*/*"
+                    android:pathPattern=".*\\.markdown" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="file"
+                    android:mimeType="*/*"
+                    android:pathPattern=".*\\.md" />
+            </intent-filter>
+            <!-- 少部分 App 用「分享」而不是「打开」传 .md 文件。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/octet-stream"
+                    android:pathPattern=".*\\.md" />
+            </intent-filter>
             <!-- 长按图标弹出的快捷方式 -->
             <meta-data
                 android:name="android.app.shortcuts"
@@ -66,8 +129,7 @@
         </receiver>
 
         <!-- 快捷设置磁贴「新建小记」：下拉通知栏/锁屏快捷面板一键记录。
-             iOS 对应的是 WidgetKit / Siri 快捷指令，桌面端对应全局快捷键，
-             都属于平台能力，业务层不直接依赖。 -->
+             属于 Android 平台能力，业务层不直接依赖。 -->
         <service
             android:name=".NewNoteTileService"
             android:exported="true"

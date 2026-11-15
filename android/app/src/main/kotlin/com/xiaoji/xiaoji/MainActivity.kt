@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -30,6 +31,9 @@ class MainActivity : FlutterActivity() {
     /** 其他 App 分享进来的内容，等 Dart 侧取走。 */
     private var pendingShare: Map<String, Any?>? = null
 
+    /** 其他 App「用其他应用打开」送进来的 Markdown：{name, text}，等 Dart 取走。 */
+    private var pendingOpenMarkdown: Map<String, Any?>? = null
+
     private lateinit var backupBridge: BackupBridge
     private lateinit var securityBridge: SecurityBridge
 
@@ -38,6 +42,7 @@ class MainActivity : FlutterActivity() {
         pendingAction = intent?.getStringExtra(EXTRA_ACTION)
         super.onCreate(savedInstanceState)
         handleShareIntent(intent)
+        handleOpenMarkdownIntent(intent)
         // 手势导航：页面已铺到系统栏后面，但导航栏底色默认是主题黑，
         // 底部会露出一条黑边。这里把导航栏背景设为透明，让页面底色透上来；
         // 同时关掉系统给导航栏加的对比度遮罩（否则仍是半透明灰条）。
@@ -96,6 +101,10 @@ class MainActivity : FlutterActivity() {
                     "consumeSharedContent" -> {
                         result.success(pendingShare)
                         pendingShare = null
+                    }
+                    "consumeOpenedMarkdown" -> {
+                        result.success(pendingOpenMarkdown)
+                        pendingOpenMarkdown = null
                     }
                     "zipTree" -> backupBridge.zipTree(
                         call.argument<String>("sourceRoot") ?: "",
@@ -349,6 +358,7 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleShareIntent(intent)
+        handleOpenMarkdownIntent(intent)
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return
         val target = channel
         if (target != null) {
@@ -367,6 +377,15 @@ class MainActivity : FlutterActivity() {
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) {
             return
+        }
+        // 少数 App 用 SEND + EXTRA_STREAM 传文件：命中 .md 就当「打开 Markdown」
+        // 处理（图片分享的 stream 不是 md，这里会返回 null 继续走原逻辑）。
+        val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        if (stream != null) {
+            readMarkdownUri(stream)?.let {
+                pendingOpenMarkdown = it
+                return
+            }
         }
         val type = intent.type ?: return
         if (type.startsWith("text/")) {
@@ -395,6 +414,80 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * 处理「用其他应用打开」：微信 / 文件管理器点 .md 时把内容读出来，
+     * 存到 [pendingOpenMarkdown]，等 Dart 侧启动或回到前台时取走。
+     *
+     * 优先按 URI 读成字符串而不是长期持有 content:// 授权：微信的授权
+     * 是一次性的临时读权限，进程重启后就失效了。
+     */
+    private fun handleOpenMarkdownIntent(intent: Intent?) {
+        val uri = when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            else -> null
+        } ?: return
+        readMarkdownUri(uri)?.let { pendingOpenMarkdown = it }
+    }
+
+    /** 读 Markdown 文件：扩展名必须是 .md/.markdown，返回 {name, text}。 */
+    private fun readMarkdownUri(uri: Uri): Map<String, Any?>? {
+        val name = displayNameOf(uri)
+        val lower = name.lowercase()
+        if (!lower.endsWith(".md") && !lower.endsWith(".markdown")) {
+            return null
+        }
+        return try {
+            val bytes: ByteArray? = if (uri.scheme == "file") {
+                uri.path?.let { path -> File(path).takeIf { it.exists() }?.readBytes() }
+            } else {
+                contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            }
+            if (bytes == null) {
+                null
+            } else if (bytes.size > MAX_MARKDOWN_BYTES) {
+                Log.w("XiaojiOpen", "Markdown 文件过大：$name")
+                null
+            } else {
+                // 去掉 UTF-8 BOM：编辑器里出现一个看不见的字符会像「多了一个方块」。
+                val text = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
+                if (text.isBlank()) null else mapOf("name" to name, "text" to text)
+            }
+        } catch (error: Exception) {
+            Log.w("XiaojiOpen", "读取 Markdown 失败", error)
+            null
+        }
+    }
+
+    /** 文件显示名：优先 content provider 的 DISPLAY_NAME，退回 URI 末段。 */
+    private fun displayNameOf(uri: Uri): String {
+        if (uri.scheme == "file") {
+            return uri.lastPathSegment?.substringAfterLast('/') ?: FALLBACK_MARKDOWN_NAME
+        }
+        try {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) {
+                        val value = cursor.getString(index)
+                        if (!value.isNullOrBlank()) {
+                            return value
+                        }
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            Log.w("XiaojiOpen", "读取文件名失败", error)
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: FALLBACK_MARKDOWN_NAME
+    }
+
     companion object {
         private const val CHANNEL = "xiaoji/shortcuts"
         private const val NATIVE_CHANNEL = "xiaoji/native"
@@ -409,5 +502,11 @@ class MainActivity : FlutterActivity() {
         /** 允许交给系统浏览器/拨号/SMS 的协议。 */
         private val ALLOWED_URL_SCHEMES =
             setOf("http", "https", "mailto", "tel", "sms", "smsto")
+
+        /** 单篇导入的 Markdown 体积上限：超过这个值多半是误分享的大文件。 */
+        private const val MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
+
+        /** 取不到文件名时的兜底名字。 */
+        private const val FALLBACK_MARKDOWN_NAME = "导入的笔记.md"
     }
 }

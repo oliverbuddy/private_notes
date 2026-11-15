@@ -79,13 +79,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 冷启动 / 回到前台时把「分享到小记」的内容落成一条笔记。
+  /// 冷启动 / 回到前台时把外部内容落成一条笔记。
+  ///
+  /// 两个来源：
+  ///  - 「用其他应用打开」的 `.md` 文件（微信 / 文件管理器）：正文原样导入；
+  ///  - 系统分享进来的文本 / 单张图片。
   Future<void> _consumeShared() async {
     if (_importingShare) {
       return;
     }
     _importingShare = true;
     try {
+      final OpenedMarkdown? opened = await consumeOpenedMarkdown();
+      if (opened != null) {
+        if (!mounted) {
+          return;
+        }
+        final DateTime now = DateTime.now();
+        final Note note = Note(
+          id: Note.generateId(now),
+          created: now,
+          updated: now,
+          body: opened.text,
+        );
+        await _repo.upsert(note);
+        if (!mounted) {
+          return;
+        }
+        await _openEditor(note);
+        if (mounted) {
+          showSnack(context, message: '已导入 ${opened.name}');
+        }
+        return;
+      }
       final SharedContent? content = await consumeSharedContent();
       if (content == null || !mounted) {
         return;
