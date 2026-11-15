@@ -203,12 +203,13 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
                 );
               }
               // macOS：标题栏透明、内容延伸到标题栏（见 MainFlutterWindow），
-              // 顶部给红黄绿三个窗口按钮留出 28 的安全区。
+              // 顶部给红黄绿三个窗口按钮留出安全区。28 时页面返回键/标题
+              // 与按钮只差几像素，看起来快贴上了；加到 34 留出呼吸。
               if (PlatformFeatures.isMacOS) {
                 final EdgeInsets padding = MediaQuery.of(context).padding;
                 content = MediaQuery(
                   data: MediaQuery.of(context).copyWith(
-                    padding: padding.copyWith(top: padding.top + 28),
+                    padding: padding.copyWith(top: padding.top + 34),
                   ),
                   child: content,
                 );

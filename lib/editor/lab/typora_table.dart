@@ -572,7 +572,7 @@ class _TyporaTableState extends State<TyporaTable> {
     widget.onMoveColumn?.call(widget.viewModel.nodeId, from, target);
   }
 
-  /// 指针是否落在左侧/顶部的拖拽把手带（10px）上。
+  /// 指针是否落在左侧/顶部的拖拽把手带（8px，正好是单元格内边距）上。
   bool _pointerOnHandle(Offset globalPosition) {
     final RenderObject? renderObject =
         widget.componentKey.currentContext?.findRenderObject();
@@ -586,7 +586,7 @@ class _TyporaTableState extends State<TyporaTable> {
         local.dy > renderObject.size.height) {
       return false;
     }
-    return local.dx <= 10 || local.dy <= 10;
+    return local.dx <= 8 || local.dy <= 8;
   }
 
   Widget _buildRowHandle(int row) {
@@ -599,7 +599,7 @@ class _TyporaTableState extends State<TyporaTable> {
     return Positioned(
       left: 0,
       top: _rowTop(row),
-      width: 10,
+      width: 8,
       height: height,
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
@@ -643,7 +643,7 @@ class _TyporaTableState extends State<TyporaTable> {
       left: _columnLeft(column),
       top: 0,
       width: _widths[column],
-      height: 10,
+      height: 8,
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
         onEnter: (_) => setState(() => _handleColumn = column),
