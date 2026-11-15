@@ -3432,7 +3432,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           _menuItem('下方插入行', 'insertRowBelow', enabled: hasCell),
           _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
           _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
-          const PopupMenuDivider(),
+          const PopupMenuDivider(height: 8),
           _menuItem(
             '上移该行',
             'moveRowUp',
@@ -3456,7 +3456,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             'moveColumnRight',
             enabled: hasCell && targetColumn < selectedNode.columnCount - 1,
           ),
-          const PopupMenuDivider(),
+          const PopupMenuDivider(height: 8),
           _menuItem(
             '删除行',
             'deleteRow',
@@ -3468,9 +3468,9 @@ class _NewEditorPageState extends State<NewEditorPage>
             'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
           ),
-          const PopupMenuDivider(),
+          const PopupMenuDivider(height: 8),
           _menuItem('复制表格', 'copyTable'),
-          const PopupMenuDivider(),
+          const PopupMenuDivider(height: 8),
           _menuItem('删除表格', 'deleteTable'),
         ],
       );
@@ -3564,7 +3564,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         _menuItem('复制', 'copy', enabled: hasSelection),
         _menuItem('剪切', 'cut', enabled: hasSelection),
         _menuItem('粘贴', 'paste'),
-        const PopupMenuDivider(),
+        const PopupMenuDivider(height: 8),
         _menuItem('全选', 'selectAll'),
       ],
     );
@@ -3636,7 +3636,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     return action;
   }
 
-  /// 右键菜单项：行高、字号与顶栏「⋯」一致（40 / 14）。
+  /// 右键菜单项：行高对齐 macOS 原生菜单（30 / 14），不像应用菜单那么高。
+  ///
+  /// 表格菜单有 14 项、旧的 40 高会撑到 600+ px，必须滚动才能看全；主流的
+  /// 右键菜单（Finder / 浏览器 / Typora）都是紧凑行高。所有桌面右键菜单
+  /// 共用这里，样式保持一致。
   PopupMenuItem<String> _menuItem(
     String label,
     String value, {
@@ -3648,7 +3652,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     return PopupMenuItem<String>(
       value: value,
       enabled: enabled,
-      height: 40,
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: <Widget>[
           Flexible(
@@ -3911,7 +3916,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     _editor.execute(<EditRequest>[
       ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
     ]);
-    _selectTableBlock(next);
+    // 对齐不改变选区：把整张表选中会让表格闪一片蓝底（用户反馈）。
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。

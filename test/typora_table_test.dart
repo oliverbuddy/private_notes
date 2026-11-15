@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -117,6 +118,78 @@ void main() {
         tester.widget<Table>(find.byType(Table).first).children.length;
     expect(after, before + 1, reason: 'Cmd+Enter 应在当前行下方插入一行');
 
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('单击一次即落光标、可拖选文字、工具条对齐作用在悬停的列', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final NoteRepository repository = await _createRepository(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: NewEditorPage(
+          repository: repository,
+          note: Note(
+            id: 'table2',
+            created: DateTime(2026, 11, 15),
+            updated: DateTime(2026, 11, 15),
+            body: _tableNote,
+          ),
+        ),
+      ),
+    );
+    await _pump(tester);
+
+    // 1) 单击一次就进入编辑，光标是折叠的（不是全选、也不需要点两次）。
+    await tester.tap(find.text('苹果'));
+    await _pump(tester);
+    expect(find.byType(TextField), findsOneWidget);
+    final TextField field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.selection.isCollapsed, isTrue);
+
+    // 2) 编辑态可以拖选格内文字（选择层不会把拖拽抢走）。
+    final Offset textTopLeft = tester.getTopLeft(find.byType(TextField));
+    final TestGesture drag = await tester.startGesture(
+      textTopLeft + const Offset(2, 8),
+    );
+    await drag.moveTo(textTopLeft + const Offset(40, 8));
+    await tester.pump();
+    await drag.up();
+    await _pump(tester);
+    final TextField dragged =
+        tester.widget<TextField>(find.byType(TextField));
+    expect(
+      dragged.controller!.selection.isCollapsed,
+      isFalse,
+      reason: '编辑态应该能拖选格内文字',
+    );
+
+    // 3) 悬停第二列 → 工具条出现 → 点「中」，只改这一列。
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await _pump(tester);
+    final TestGesture mouse =
+        await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.text('数量')));
+    await _pump(tester);
+    expect(find.text('中'), findsOneWidget);
+    await tester.tap(find.text('中'));
+    await _pump(tester);
+
+    final Text aligned = tester.widget<Text>(find.text('3'));
+    expect(
+      aligned.textAlign,
+      TextAlign.center,
+      reason: '对齐要作用在悬停的那一列，而不是最后一列或整表',
+    );
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });

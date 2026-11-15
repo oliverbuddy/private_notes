@@ -351,6 +351,24 @@ class _TyporaTableState extends State<TyporaTable> {
   /// 单元格锚点：把指针坐标换算成「第几行第几列」，也用来算光标偏移。
   final Map<int, GlobalKey> _cellKeys = <int, GlobalKey>{};
 
+  /// 工具条锚点：指针在工具条上时不能按几何位置重算单元格 —— 工具条
+  /// 浮在表格右上角，几何上会命中它下方的那一格，导致「对齐/插入」作用
+  /// 到最后一列（用户反馈的操作位置错乱）。
+  final GlobalKey _toolbarKey = GlobalKey();
+
+  bool _pointerOnToolbar(Offset globalPosition) {
+    final RenderObject? renderObject =
+        _toolbarKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) {
+      return false;
+    }
+    final Offset local = renderObject.globalToLocal(globalPosition);
+    return local.dx >= 0 &&
+        local.dy >= 0 &&
+        local.dx <= renderObject.size.width &&
+        local.dy <= renderObject.size.height;
+  }
+
   GlobalKey _cellKey(int row, int column) =>
       _cellKeys.putIfAbsent(row * 1000 + column, () => GlobalKey());
 
@@ -928,6 +946,9 @@ class _TyporaTableState extends State<TyporaTable> {
     if (!_editable) {
       return;
     }
+    if (_pointerOnToolbar(event.position)) {
+      return;
+    }
     final (int, int)? cell = _cellAt(event.position);
     // 指针进入右上角工具条 / 表格外的空白时不要清空：清空会让工具条
     // 在鼠标移向按钮的半路上消失，点击就落空（「操作没作用在指定位置」）。
@@ -1111,42 +1132,27 @@ class _TyporaTableState extends State<TyporaTable> {
                 onPointerCancel: _handlePointerUp,
                 child: IgnorePointer(
                   ignoring: _editRow == null,
-                  child: _withSelectionLayer(
-                    context,
-                    BoxComponent(
-                      key: widget.componentKey,
-                      opacity: widget.viewModel.opacity,
-                      child: _buildTable(context, widths),
-                    ),
+                  child: BoxComponent(
+                    key: widget.componentKey,
+                    opacity: widget.viewModel.opacity,
+                    child: _buildTable(context, widths),
                   ),
                 ),
               ),
               // 工具条只在悬停/编辑时出现，盖在表格右上角。
               if (_editable && _hoverRow != null)
-                Positioned(top: 2, right: 2, child: _buildHoverBar(context)),
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: KeyedSubtree(
+                    key: _toolbarKey,
+                    child: _buildHoverBar(context),
+                  ),
+                ),
             ],
           ),
         );
       },
-    );
-  }
-
-  /// 内核的选择层只在非编辑态挂上。
-  ///
-  /// 编辑单元格时，`SelectableBox` 会和单元格输入框一起抢拖拽手势：表现
-  /// 就是「选不了格子里的文字」「第一次点击只选中整表、第二次才进格子」。
-  /// 编辑态直接不挂，手势全部交给输入框。
-  Widget _withSelectionLayer(BuildContext context, Widget child) {
-    if (_editRow != null) {
-      return child;
-    }
-    final NodeSelection? nodeSelection = widget.viewModel.selection?.nodeSelection;
-    return SelectableBox(
-      selection: nodeSelection is UpstreamDownstreamNodeSelection
-          ? nodeSelection
-          : null,
-      selectionColor: widget.viewModel.selectionColor,
-      child: child,
     );
   }
 
