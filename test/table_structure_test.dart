@@ -117,6 +117,51 @@ void main() {
     );
   });
 
+  test('复制本行 / 本列：导出标准 Markdown 管道文本', () {
+    expect(tableRowMarkdown(sample, 0), '| 名称 | 数量 |');
+    expect(tableRowMarkdown(sample, 1), '| 苹果 | 3 |');
+    expect(tableRowMarkdown(sample, 9), isNull);
+    expect(tableColumnMarkdown(sample, 1), '| 数量 |\n| 3 |');
+    expect(tableColumnMarkdown(sample, 9), isNull);
+
+    final TableBlockNode tricky = table(<List<String>>[
+      <String>['a|b', '第一行\n第二行'],
+    ]);
+    expect(tableRowMarkdown(tricky, 0), r'| a\|b | 第一行<br>第二行 |');
+  });
+
+  test('解析表格行：管道 / 无首尾管道 / Tab / 转义 / 分隔行', () {
+    expect(parseMarkdownTableRow('| 苹果 | 3 |'), <String>['苹果', '3']);
+    expect(parseMarkdownTableRow('苹果 | 3'), <String>['苹果', '3']);
+    expect(parseMarkdownTableRow('苹果\t3'), <String>['苹果', '3']);
+    expect(parseMarkdownTableRow(r'| a\|b | c |'), <String>['a|b', 'c']);
+    expect(parseMarkdownTableRow('| a<br>b | c |'), <String>['a\nb', 'c']);
+    // 多行只取第一行；分隔行与普通文字都不算表格行。
+    expect(parseMarkdownTableRow('| a | b |\n| c | d |'), <String>['a', 'b']);
+    expect(parseMarkdownTableRow('| --- | :---: |'), isNull);
+    expect(parseMarkdownTableRow('普通文字'), isNull);
+    expect(parseMarkdownTableRow(''), isNull);
+  });
+
+  test('粘贴为新增行：补齐 / 截断列，行内标记转成样式', () {
+    final TableBlockNode? next =
+        insertTableRow(sample, 1, <String>['**梨**', '5', '多余']);
+    expect(texts(next!), <List<String>>[
+      <String>['名称', '数量'],
+      <String>['苹果', '3'],
+      <String>['梨', '5'],
+    ]);
+    // `**` 不能以字面量留在单元格里。
+    final TextNode cell = next.getCell(rowIndex: 2, columnIndex: 0);
+    expect(cell.text.toPlainText(), '梨');
+    expect(cell.text.spans.getAllAttributionsAt(0).contains(boldAttribution), isTrue);
+
+    // 列数不足补空；越界行返回 null。
+    final TableBlockNode? short = insertTableRow(sample, 0, <String>['只有一列']);
+    expect(texts(short!)[1], <String>['只有一列', '']);
+    expect(insertTableRow(sample, 5, <String>['x']), isNull);
+  });
+
   test('列对齐写回分隔行', () {
     final MutableDocument document = MutableDocument(
       nodes: <DocumentNode>[

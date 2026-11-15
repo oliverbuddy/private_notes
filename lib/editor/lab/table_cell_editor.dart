@@ -7,6 +7,7 @@ import 'package:super_editor/super_editor.dart';
 
 import '../../theme/app_theme.dart';
 import '../../ui/pressable.dart';
+import 'markdown_inline.dart';
 
 /// 表格结构操作（右键菜单 / Tab 加行共用）。
 enum TableCellAction {
@@ -39,13 +40,7 @@ TableBlockNode? rebuildTableNode(
     return null;
   }
 
-  List<List<TextNode>> snapshot() => <List<TextNode>>[
-        for (int r = 0; r < rowCount; r++)
-          <TextNode>[
-            for (int c = 0; c < columnCount; c++)
-              table.getCell(rowIndex: r, columnIndex: c),
-          ],
-      ];
+  List<List<TextNode>> snapshot() => _tableGrid(table);
   TextNode emptyCell() =>
       TextNode(id: Editor.createNodeId(), text: AttributedText());
 
@@ -93,6 +88,46 @@ TableBlockNode? rebuildTableNode(
     metadata: Map<String, dynamic>.from(table.metadata),
   );
 }
+
+/// 在 [belowRow] 下方插入一行，内容按 [cells] 填充：不足补空、超出截断。
+///
+/// 单元格文本里的行内标记（`**粗体**`、`[文字](url)`、`==高亮==`）会转成
+/// 样式，否则「复制本行 → 粘贴为新增行」会把标记以字面量带回来。
+TableBlockNode? insertTableRow(
+  TableBlockNode table,
+  int belowRow,
+  List<String> cells,
+) {
+  if (belowRow < 0 || belowRow >= table.rowCount || table.columnCount == 0) {
+    return null;
+  }
+  final List<List<TextNode>> grid = _tableGrid(table);
+  grid.insert(
+    belowRow + 1,
+    <TextNode>[
+      for (int c = 0; c < table.columnCount; c++)
+        TextNode(
+          id: Editor.createNodeId(),
+          text: c < cells.length
+              ? attributedTextFromInlineMarkdown(cells[c])
+              : AttributedText(),
+        ),
+    ],
+  );
+  return TableBlockNode(
+    id: table.id,
+    cells: grid,
+    metadata: Map<String, dynamic>.from(table.metadata),
+  );
+}
+
+List<List<TextNode>> _tableGrid(TableBlockNode table) => <List<TextNode>>[
+      for (int r = 0; r < table.rowCount; r++)
+        <TextNode>[
+          for (int c = 0; c < table.columnCount; c++)
+            table.getCell(rowIndex: r, columnIndex: c),
+        ],
+    ];
 
 /// 列宽 = 内容自适应，但每条列最多 [maxWidth]，超出的单元格内换行。
 ///
@@ -815,6 +850,12 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
         onHorizontalDragStart: (_) => _startResizing(),
         onHorizontalDragUpdate: (DragUpdateDetails details) =>
             _resizeColumns(index, details.delta.dx),
+        // 双击分隔线恢复等分（Excel / 语雀 的同一手势），不必手动拖回去。
+        onDoubleTap: () {
+          if (_columnWidths != null) {
+            setState(() => _columnWidths = null);
+          }
+        },
         child: const SizedBox.expand(),
       ),
     );
@@ -990,10 +1031,21 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
     final Widget padded = Padding(padding: cell.padding, child: content);
     final BoxDecoration decoration = cell.decoration ?? const BoxDecoration();
+    // 当前行（悬停或编辑中）加一层很淡的底色：宽表里一眼看出光标在哪一行，
+    // 与语雀 / Notion 的行高亮一致。
+    final int? activeRow = _editRow ?? _hoverRow;
+    final bool highlighted = _editable && activeRow == row;
     return DecoratedBox(
       decoration: decoration,
-      // 锚点仅用于把双击坐标换算成行列，不影响命中测试。
-      child: KeyedSubtree(key: _cellKey(row, column), child: padded),
+      child: DecoratedBox(
+        decoration: highlighted
+            ? BoxDecoration(
+                color: AppColors.of(context).accent.withValues(alpha: 0.06),
+              )
+            : const BoxDecoration(),
+        // 锚点仅用于把双击坐标换算成行列，不影响命中测试。
+        child: KeyedSubtree(key: _cellKey(row, column), child: padded),
+      ),
     );
   }
 

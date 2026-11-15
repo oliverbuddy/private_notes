@@ -1329,6 +1329,91 @@ String _tableCellMarkdown(TextNode cell) {
       .trim();
 }
 
+/// 表格某一行 → 一行 Markdown 管道文本（右键「复制本行」用）。
+String? tableRowMarkdown(TableBlockNode table, int row) {
+  if (row < 0 || row >= table.rowCount || table.columnCount == 0) {
+    return null;
+  }
+  final List<String> cells = <String>[
+    for (int c = 0; c < table.columnCount; c++)
+      _tableCellMarkdown(table.getCell(rowIndex: row, columnIndex: c)),
+  ];
+  return '| ${cells.join(' | ')} |';
+}
+
+/// 表格某一列 → 每行一个单元格的 Markdown（右键「复制本列」用）。
+String? tableColumnMarkdown(TableBlockNode table, int column) {
+  if (column < 0 || column >= table.columnCount || table.rowCount == 0) {
+    return null;
+  }
+  return <String>[
+    for (int r = 0; r < table.rowCount; r++)
+      '| ${_tableCellMarkdown(table.getCell(rowIndex: r, columnIndex: column))} |',
+  ].join('\n');
+}
+
+/// 把一段文本解析成表格行的单元格（右键「粘贴为新增行」用）。
+///
+/// 兼容 `| a | b |`、省略首尾管道的 `a | b`，以及 Excel / 语雀 复制出的
+/// Tab 分隔行；`\|` 还原成 `|`，`<br>` 还原成换行。只取第一行非空内容，
+/// 不像表格行（没有管道也没有 Tab）时返回 null。
+List<String>? parseMarkdownTableRow(String text) {
+  String? line;
+  for (final String candidate in text.split('\n')) {
+    if (candidate.trim().isNotEmpty) {
+      line = candidate.trim();
+      break;
+    }
+  }
+  if (line == null) {
+    return null;
+  }
+  // 分隔行（`| --- | :---: |`）只有对齐信息，粘贴它没有意义。
+  if (line.contains('-') && RegExp(r'^[|\s:-]+$').hasMatch(line)) {
+    return null;
+  }
+  final List<String> raw;
+  if (line.contains('|')) {
+    raw = _splitTableRow(line);
+  } else if (line.contains('\t')) {
+    raw = line.split('\t');
+  } else {
+    return null;
+  }
+  return <String>[
+    for (final String cell in raw) cell.trim().replaceAll('<br>', '\n'),
+  ];
+}
+
+/// 按**未转义**的管道切分，保留 `\|` 作为内容里的竖线。
+List<String> _splitTableRow(String line) {
+  var body = line;
+  if (body.startsWith('|')) {
+    body = body.substring(1);
+  }
+  if (body.endsWith('|') && !body.endsWith(r'\|')) {
+    body = body.substring(0, body.length - 1);
+  }
+  final List<String> cells = <String>[];
+  final StringBuffer cell = StringBuffer();
+  for (var i = 0; i < body.length; i++) {
+    final String char = body[i];
+    if (char == r'\' && i + 1 < body.length && body[i + 1] == '|') {
+      cell.write('|');
+      i++;
+      continue;
+    }
+    if (char == '|') {
+      cells.add(cell.toString());
+      cell.clear();
+      continue;
+    }
+    cell.write(char);
+  }
+  cells.add(cell.toString());
+  return cells;
+}
+
 /// 分隔行：`:---` 左对齐、`:---:` 居中、`---:` 右对齐、`---` 默认。
 String _tableSeparator(TextNode? firstDataCell) {
   final Object? align = firstDataCell?.metadata[TextNodeMetadata.textAlign];

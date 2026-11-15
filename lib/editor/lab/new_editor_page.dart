@@ -3414,6 +3414,8 @@ class _NewEditorPageState extends State<NewEditorPage>
         items: <PopupMenuEntry<String>>[
           _menuItem('编辑表格', 'editTable'),
           _menuItem('复制表格（Markdown）', 'copyTable'),
+          _menuItem('复制本行', 'copyRow', enabled: hasCell),
+          _menuItem('复制本列', 'copyColumn', enabled: hasCell),
           const PopupMenuDivider(),
           // 行列操作与 Notion / 语雀 的右键菜单一致：就地增删，不用改源码。
           _menuItem('上方插入行', 'insertRowAbove', enabled: hasCell),
@@ -3452,6 +3454,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             selected: currentAlign == 'right',
           ),
           const PopupMenuDivider(),
+          _menuItem('粘贴为新增行', 'pasteRow', enabled: hasCell),
           _menuItem('粘贴', 'paste'),
         ],
       );
@@ -3463,6 +3466,10 @@ class _NewEditorPageState extends State<NewEditorPage>
           await _editTableAsMarkdown(selectedNode);
         case 'copyTable':
           await _copyTableAsMarkdown(selectedNode);
+        case 'copyRow':
+          await _copyTableRow(selectedNode, targetRow);
+        case 'copyColumn':
+          await _copyTableColumn(selectedNode, targetColumn);
         case 'insertRowAbove':
           _mutateTable(
             selectedNode.id,
@@ -3513,6 +3520,8 @@ class _NewEditorPageState extends State<NewEditorPage>
           _alignTableColumn(selectedNode.id, targetColumn, 'right');
         case 'paste':
           await _pasteFromClipboard();
+        case 'pasteRow':
+          await _pasteTableRow(selectedNode, targetRow);
       }
       if (mounted) {
         _editorFocus.requestFocus();
@@ -3677,6 +3686,53 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (mounted) {
       _showHint('表格已复制');
     }
+  }
+
+  /// 复制当前行：输出一行标准 Markdown 管道文本，可直接粘回表格或别处。
+  Future<void> _copyTableRow(TableBlockNode table, int row) async {
+    final String? text = tableRowMarkdown(table, row);
+    if (text == null) {
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      _showHint('本行已复制');
+    }
+  }
+
+  /// 复制当前列：每行一个单元格，粘回表格时按列贴。
+  Future<void> _copyTableColumn(TableBlockNode table, int column) async {
+    final String? text = tableColumnMarkdown(table, column);
+    if (text == null) {
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      _showHint('本列已复制');
+    }
+  }
+
+  /// 把剪贴板里的表格行粘贴成新行（插在当前行下方）。
+  ///
+  /// 兼容 Markdown 管道行与 Tab 分隔行；行内标记会转回样式，列数按表格
+  /// 补齐 / 截断，所以从语雀、Excel 或本应用复制来的行都能直接落表。
+  Future<void> _pasteTableRow(TableBlockNode table, int row) async {
+    final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
+    final List<String>? cells = parseMarkdownTableRow(data?.text ?? '');
+    final TableBlockNode? next =
+        cells == null ? null : insertTableRow(table, row, cells);
+    if (!mounted) {
+      return;
+    }
+    if (next == null) {
+      _showHint('剪贴板里没有可粘贴的表格行');
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: table.id, newNode: next),
+    ]);
+    _selectTableBlock(next);
+    _showHint('已粘贴为新增行');
   }
 
   /// 表格编辑：以 Markdown 源码编辑整表。
