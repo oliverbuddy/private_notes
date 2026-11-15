@@ -4155,11 +4155,19 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
           // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
           // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
+          //
+          // 桌面端不挂触屏的「选择手柄」图层：整表被块级选中时，它会在
+          // 表格左右两端各画一条竖线（来回淡入淡出，看起来就是「表格边缘
+          // 有光标在闪」）。Mac 用鼠标选字，本来也不需要手柄；移动端保留。
           documentOverlayBuilders: <SuperEditorLayerBuilder>[
-            const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
-            const SuperEditorIosHandlesDocumentLayerBuilder(),
-            const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
-            const SuperEditorAndroidHandlesDocumentLayerBuilder(caretWidth: 0),
+            if (!PlatformFeatures.isDesktop) ...<SuperEditorLayerBuilder>[
+              const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+              const SuperEditorIosHandlesDocumentLayerBuilder(),
+              const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+              const SuperEditorAndroidHandlesDocumentLayerBuilder(
+                caretWidth: 0,
+              ),
+            ],
             const DefaultCaretOverlayBuilder(),
             XiaojiCaretLayerBuilder(_composer),
           ],
@@ -4241,12 +4249,14 @@ class _NewEditorPageState extends State<NewEditorPage>
                     WidgetsBinding.instance.addPostFrameCallback(
                       (_) => clearBodySelection(),
                     );
-                    // 内核是在鼠标抬起后才选中整表：再补一次，避免表格
-                    // 左右两侧留着选择手柄/光标闪动。
-                    Future<void>.delayed(
-                      const Duration(milliseconds: 120),
-                      clearBodySelection,
-                    );
+                    // 内核是在鼠标抬起后才选中整表：多补几次，覆盖按住
+                    // 鼠标较久的点击，避免表格边缘留着选择层/光标。
+                    for (final int delay in const <int>[80, 180, 320]) {
+                      Future<void>.delayed(
+                        Duration(milliseconds: delay),
+                        clearBodySelection,
+                      );
+                    }
                     return;
                   }
                   // 编辑结束：把焦点交还正文，⌘Z / ⌘C 等系统快捷键恢复
