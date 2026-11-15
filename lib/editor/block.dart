@@ -264,28 +264,55 @@ String plainSummary(String markdown) {
   return lines.join('\n');
 }
 
-/// 列出正文开头的表格，给列表卡片做「迷你表格」预览。
+/// 列表卡片的一段预览：普通正文（markdown 原文）或一张表格。
 ///
-/// 只在正文第一块是 GFM 表格时返回（用户要求：详情顶部是表格，列表里要
-/// 看得出是表格，而不是一串被压平的摘要文字）。最多 5 行 × 4 列，
-/// 分隔行自动跳过，单元格里的行内标记会被剥掉。
-List<List<String>>? tablePreviewOf(String markdown) {
-  if (markdown.trim().isEmpty) {
-    return null;
-  }
+/// 之前卡片只画「开头那一张表格」，后面的表格被整段丢掉，表现为「详情
+/// 有两个表格，列表里只看到一个、第二个直接变成后面的正文」。现在按正文
+/// 顺序切成段，表格与文字各自渲染，几张表格就显示几张。
+class NotePreviewSegment {
+  const NotePreviewSegment.text(this.text) : rows = null;
+  const NotePreviewSegment.table(this.rows) : text = null;
+
+  /// 普通正文（markdown 原文，保留标题/加粗等，交给卡片渲染）。
+  final String? text;
+
+  /// 表格数据（第一行是表头，最多 5 行 × 4 列）。
+  final List<List<String>>? rows;
+}
+
+/// 把正文切成「文字段 / 表格段」的序列，供列表卡片按顺序预览。
+List<NotePreviewSegment> previewSegmentsOf(String markdown) {
   final List<String> lines = markdown.split('\n');
-  var start = -1;
+  final List<NotePreviewSegment> segments = <NotePreviewSegment>[];
+  final List<String> pending = <String>[];
+
+  void flushText() {
+    final String text = pending.join('\n').trim();
+    pending.clear();
+    if (text.isNotEmpty) {
+      segments.add(NotePreviewSegment.text(text));
+    }
+  }
+
   for (var i = 0; i < lines.length; i++) {
-    if (lines[i].trim().isEmpty) {
+    final int end = _tableBlockEnd(lines, i);
+    if (end > i) {
+      flushText();
+      final List<List<String>> rows = _tableRows(lines, i, end);
+      if (rows.isNotEmpty) {
+        segments.add(NotePreviewSegment.table(rows));
+      }
+      i = end - 1;
       continue;
     }
-    start = i;
-    break;
+    pending.add(lines[i]);
   }
-  if (start < 0 || _tableBlockEnd(lines, start) <= start) {
-    return null;
-  }
-  final int end = _tableBlockEnd(lines, start);
+  flushText();
+  return segments;
+}
+
+/// 把一段表格行转成预览数据：最多 5 行 × 4 列，剥掉行内标记。
+List<List<String>> _tableRows(List<String> lines, int start, int end) {
   final List<List<String>> rows = <List<String>>[];
   for (var i = start; i < end && rows.length < 5; i++) {
     if (i == start + 1) {
@@ -293,7 +320,6 @@ List<List<String>>? tablePreviewOf(String markdown) {
       continue;
     }
     final List<String> rawCells = _splitTableCells(lines[i].trim());
-    // 首尾管道会产生空单元格，去掉它们；中间的空单元格保留（列要对齐）。
     while (rawCells.isNotEmpty && rawCells.first.trim().isEmpty) {
       rawCells.removeAt(0);
     }
@@ -309,7 +335,21 @@ List<List<String>>? tablePreviewOf(String markdown) {
     }
     rows.add(cells);
   }
-  return rows.isEmpty ? null : rows;
+  return rows;
+}
+
+/// 列出正文开头的表格，给列表卡片做「迷你表格」预览（单表格场景）。
+///
+/// 多表格场景请用 [previewSegmentsOf]：[tablePreviewOf] 只取第一张。
+List<List<String>>? tablePreviewOf(String markdown) {
+  for (final NotePreviewSegment segment in previewSegmentsOf(markdown)) {
+    if (segment.rows != null) {
+      return segment.rows;
+    }
+    // 第一段是文字：说明正文不是以表格开头。
+    break;
+  }
+  return null;
 }
 
 /// 去掉正文里的**所有** GFM 表格（列表文字摘要用）。

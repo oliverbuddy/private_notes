@@ -73,15 +73,14 @@ class NoteTileComfortable extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     // 锁定笔记：正文不在内存里，列表里只显示「已锁定」，不渲染摘要。
-    // 正文第一块是表格时，摘要换成迷你表格预览（用户要求：列表里要看得出
-    // 是表格），文字摘要则从表格之后的正文开始。
-    final List<List<String>>? tableRows =
-        note.locked ? null : tablePreviewOf(note.body);
-    // 文字摘要里不再出现任何表格：开头那张已经用表格预览画出来了，
-    // 其余表格按用户要求不显示（否则第二个表格会以文字形式冒出来）。
-    final String bodyForSummary =
-        note.locked ? '' : bodyWithoutTables(note.body);
-    final summary = note.locked ? '' : plainSummary(bodyForSummary);
+    // 正文按「文字段 / 表格段」切开后顺序渲染：有几张表格就画几张，
+    // 不会出现「第一张表格之后、第二张表格被跳过」的错乱。
+    final List<NotePreviewSegment> segments = note.locked
+        ? const <NotePreviewSegment>[]
+        : previewSegmentsOf(note.body);
+    // 搜索高亮退回纯文本摘要（表格不参与关键字高亮）。
+    final String plainText =
+        note.locked ? '' : plainSummary(bodyWithoutTables(note.body));
 
     // iOS 正文 17pt / 行高 1.5。
     final summaryStyle = TextStyle(
@@ -148,46 +147,37 @@ class NoteTileComfortable extends StatelessWidget {
                       ],
                     )
                   else ...<Widget>[
-                    if (tableRows != null) ...<Widget>[
-                      NoteTablePreview(rows: tableRows),
-                      if (summary.isNotEmpty) const SizedBox(height: 10),
-                    ],
-                    if (summary.isEmpty)
-                      // 只有图片的笔记不再写「（无正文）」：下面直接就是图片行，
-                      // 多一行提示会让它看起来像空笔记。
-                      thumbnailPaths.isEmpty && tableRows == null
-                          ? Text(
-                              '（无正文）',
-                              style: summaryStyle.copyWith(
-                                color: colors.tertiary,
-                              ),
-                            )
-                          : const SizedBox.shrink()
-                    // 摘要用和详情页同一套 markdown 渲染，标题、加粗、列表在列表里
-                    // 就已经是最终的样子 —— 否则点进去会像换了一篇东西。
-                    // 引用单独按块渲染：详情里引用是「整块浅底 + 左竖条」，
-                    // TextSpan 的逐行底色做不出这个形状，所以摘要也按行分组。
-                    // 只有搜索时退回纯文本，因为要按关键字高亮。
-                    else if (query.isEmpty)
-                      _SummaryMarkdown(
-                        source: excerptSource(
-                          bodyForSummary,
-                          maxLines: maxSummaryLines,
+                    if (query.isEmpty) ...<Widget>[
+                      for (var i = 0; i < segments.length; i++) ...<Widget>[
+                        if (i > 0) const SizedBox(height: 10),
+                        if (segments[i].rows != null)
+                          NoteTablePreview(rows: segments[i].rows!)
+                        else
+                          // 摘要用和详情页同一套 markdown 渲染，标题、加粗、
+                          // 列表在列表里就已经是最终的样子。
+                          _SummaryMarkdown(
+                            source: excerptSource(
+                              segments[i].text!,
+                              maxLines: maxSummaryLines,
+                            ),
+                            style: summaryStyle,
+                            colors: colors,
+                            headingBoost: 0.86,
+                            maxLines: maxSummaryLines,
+                          ),
+                      ],
+                      if (segments.isEmpty && thumbnailPaths.isEmpty)
+                        // 只有图片的笔记不再写「（无正文）」：下面直接就是
+                        // 图片行，多一行提示会让它看起来像空笔记。
+                        Text(
+                          '（无正文）',
+                          style: summaryStyle.copyWith(color: colors.tertiary),
                         ),
-                        style: summaryStyle,
-                        colors: colors,
-                        // 正文与详情完全同号（15.5/1.7/0.3），只有标题在预览里
-                        // 收敛到 0.86 倍，并保证不小于正文字号（见 markdownSpans）。
-                        // 不做整页等比缩小：主流列表（语雀/滴答/Apple Notes）
-                        // 都是「同字号预览 + 标题收敛 + 行数截断」。
-                        headingBoost: 0.86,
-                        maxLines: maxSummaryLines,
-                      )
-                    else
+                    ] else
                       Text.rich(
                         TextSpan(
                           children: highlightSpans(
-                            text: summary,
+                            text: plainText,
                             query: query,
                             style: summaryStyle,
                             highlightColor: colors.searchHit,

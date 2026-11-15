@@ -61,6 +61,18 @@ void main() {
     expect(tablePreviewOf(body)!.first.first, '名称');
   });
 
+  test('两个表格都出现在预览段里，顺序与正文一致', () {
+    const String body = '| a | b |\n| --- | --- |\n| 1 | 2 |\n\n'
+        '中间正文\n\n'
+        '| c | d |\n| --- | --- |\n| 3 | 4 |';
+    final List<NotePreviewSegment> segments = previewSegmentsOf(body);
+    expect(segments.length, 3);
+    expect(segments[0].rows, isNotNull);
+    expect(segments[1].text!.trim(), '中间正文');
+    expect(segments[2].rows, isNotNull);
+    expect(segments[2].rows!.first, <String>['c', 'd']);
+  });
+
   test('去掉所有表格后剩下的正文用于文字摘要（第二个表格不显示）', () {
     const String body = '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n'
         '中间的正文\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n结尾';
