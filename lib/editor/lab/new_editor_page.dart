@@ -1752,7 +1752,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(
           enabled: false,
-          height: 34,
+          height: 28,
           child: Text(
             '目录',
             style: TextStyle(
@@ -1764,18 +1764,20 @@ class _NewEditorPageState extends State<NewEditorPage>
         for (final _OutlineEntry entry in entries)
           PopupMenuItem<String>(
             value: entry.nodeId,
+            // 长文目录要能一屏扫完（参考 Typora / Notion 的 28–30 行高）。
             height: switch (entry.level) {
-              1 => 44,
-              2 => 40,
-              _ => 38,
+              1 => 30,
+              2 => 28,
+              _ => 26,
             },
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Padding(
-              // 层级差要看得出来：一级 0，二级 24，三级 44。
+              // 层级差要看得出来：一级 0，二级 16，三级 32。
               padding: EdgeInsets.only(
                 left: switch (entry.level) {
                   1 => 0,
-                  2 => 24,
-                  _ => 44,
+                  2 => 16,
+                  _ => 32,
                 },
               ),
               child: Text(
@@ -1841,10 +1843,10 @@ class _NewEditorPageState extends State<NewEditorPage>
                             // 层级用缩进表达，不额外画连线：小记的标题最多三级，
                             // 缩进已经足够，加线条会让弹层变重。
                             padding: EdgeInsets.fromLTRB(
-                              20 + (entries[i].level - 1) * 16.0,
-                              10,
+                              20 + (entries[i].level - 1) * 14.0,
+                              7,
                               20,
-                              10,
+                              7,
                             ),
                             child: Text(
                               entries[i].title,
@@ -3791,23 +3793,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     ]);
   }
 
-  /// 把选区收敛到整张表（块级选中，不画文本光标）。
-  void _selectTableBlock(TableBlockNode table) {
-    _composer.setSelectionWithReason(
-      DocumentSelection(
-        base: DocumentPosition(
-          nodeId: table.id,
-          nodePosition: table.beginningPosition,
-        ),
-        extent: DocumentPosition(
-          nodeId: table.id,
-          nodePosition: table.endPosition,
-        ),
-      ),
-      SelectionReason.userInteraction,
-    );
-  }
-
   /// 最近一次在表格单元格上按下指针的位置（右键菜单按它定位行列）。
   ({String tableId, int row, int column})? _lastTableCell;
 
@@ -3875,8 +3860,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     _editor.execute(<EditRequest>[
       ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
+      // 不选中整表：块级选中会在表格左右两侧画选择手柄/光标（用户反馈
+      // 「表格边缘还有光标闪动」）。
+      const ClearSelectionRequest(),
     ]);
-    _selectTableBlock(next);
   }
 
   /// 表格整列对齐（左 / 中 / 右）：写入单元格的 textAlign 元数据。
@@ -4273,7 +4260,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                   if (editing) {
                     // 单元格编辑时清掉正文选区：否则正文还画一个光标，
                     // 看起来就是「表格里一个、下面一个」（用户反馈）。
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                    void clearBodySelection() {
                       if (!mounted || !_tableCellEditing) {
                         return;
                       }
@@ -4282,7 +4269,17 @@ class _NewEditorPageState extends State<NewEditorPage>
                           <EditRequest>[const ClearSelectionRequest()],
                         );
                       }
-                    });
+                    }
+
+                    WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => clearBodySelection(),
+                    );
+                    // 内核是在鼠标抬起后才选中整表：再补一次，避免表格
+                    // 左右两侧留着选择手柄/光标闪动。
+                    Future<void>.delayed(
+                      const Duration(milliseconds: 120),
+                      clearBodySelection,
+                    );
                     return;
                   }
                   // 编辑结束：把焦点交还正文，⌘Z / ⌘C 等系统快捷键恢复
