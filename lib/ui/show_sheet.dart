@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import 'pressable.dart';
 
@@ -29,64 +28,7 @@ Future<T?> showXiaojiSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
 }) {
-  // 桌面端：按桌面规范用**居中对话框**，而不是从底部推上来的移动端
-  // bottom sheet（用户反馈「PC 弹窗还是移动端的逻辑」）。底部弹层的
-  // 手势暗示（下滑关闭）在鼠标场景里没有意义，还会把内容推到远离指针的
-  // 屏幕底部。移动端/平板保持原有底部弹层，观感与手势完全不变。
-  if (PlatformFeatures.isDesktop) {
-    return showDialog<T>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      builder: (BuildContext dialogContext) {
-        final AppColors colors = AppColors.of(dialogContext);
-        // 桌面观感（macOS 原生面板）：12 圆角 + 0.5 描边 + 柔和投影，
-        // 不再是「一块纯色方块浮在遮罩上」。
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 32,
-            vertical: 48,
-          ),
-          child: Container(
-            constraints: const BoxConstraints(
-              // 确认 / 重命名这类短内容也要有像样的宽度，不再缩成一小条。
-              minWidth: 380,
-              maxWidth: kXiaojiSheetMaxWidth,
-              maxHeight: 640,
-            ),
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: colors.page,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.divider, width: 0.5),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 28,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            // 内容可能带 TextField（重命名、改标签）或较长列表（历史版本）：
-            // 对话框高度受限，统一交给滚动区，不出现溢出条纹。
-            //
-            // 顶部统一补 12：移动端弹层内容自带的 4vp 顶距是为了贴住抓手，
-            // 桌面没有抓手，直接用 4 会让标题顶在边框上（用户反馈）。
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: SingleChildScrollView(
-                child: builder(dialogContext),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // 平板/桌面：弹层不再铺满整屏，按手机宽度收窄并居中。
+  // 平板：弹层不再铺满整屏，按手机宽度收窄并居中。
   // 弹层内容是「一列文字 + 两个按钮」，拉成 1000+ 宽后按钮会变成
   // 两条超长横条，阅读和点击都很别扭。
   final bool wide = !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
@@ -146,55 +88,12 @@ Future<T?> showXiaojiSheet<T>({
 
 /// 大面板入口：历史版本、版本预览这类「标题 + 长列表 + 底部按钮」的面板。
 ///
-/// 与 [showXiaojiSheet] 的差别只在尺寸：面板需要更大的高度，桌面用
-/// 居中对话框（可到 680×640），移动端仍是底部弹层（内容自己带圆角与
-/// 抓手，所以这里传透明底）。两端共用同一个 builder，避免出现
-/// 「PC 一套内容、手机另一套内容」。
+/// 与 [showXiaojiSheet] 的差别只在尺寸：面板需要更大的高度，移动端仍是
+/// 底部弹层（内容自己带圆角与抓手，所以这里传透明底）。
 Future<T?> showXiaojiPanel<T>({
   required BuildContext context,
   required WidgetBuilder builder,
-  double maxWidth = 680,
-  double maxHeight = 640,
 }) {
-  if (PlatformFeatures.isDesktop) {
-    return showDialog<T>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      builder: (BuildContext dialogContext) {
-        final AppColors colors = AppColors.of(dialogContext);
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 32,
-            vertical: 48,
-          ),
-          child: Container(
-            constraints: BoxConstraints(
-              minWidth: 380,
-              maxWidth: maxWidth,
-              maxHeight: maxHeight,
-            ),
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: colors.page,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: colors.divider, width: 0.5),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 28,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: builder(dialogContext),
-          ),
-        );
-      },
-    );
-  }
   return showModalBottomSheet<T>(
     context: context,
     // 面板内容自己画底色与圆角（底部弹层要露出手势条背景）。
@@ -215,64 +114,6 @@ Future<bool?> showXiaojiConfirmSheet({
   required String confirmLabel,
   bool destructive = false,
 }) {
-  // 桌面端：模仿 macOS 原生警告框 —— 标题、说明、右下角两个小按钮，
-  // 而不是移动端那种「两个等宽大按钮铺满一行」。
-  if (PlatformFeatures.isDesktop) {
-    return showXiaojiSheet<bool>(
-      context: context,
-      builder: (BuildContext sheetContext) {
-        final AppColors colors = AppColors.of(sheetContext);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.35,
-                  fontWeight: AppWeight.semibold,
-                  color: colors.text,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.55,
-                  color: colors.secondary,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: <Widget>[
-                  _ConfirmButton(
-                    label: '取消',
-                    background: colors.surface2,
-                    foreground: colors.text,
-                    onTap: () => Navigator.of(sheetContext).pop(false),
-                  ),
-                  const SizedBox(width: 8),
-                  _ConfirmButton(
-                    label: confirmLabel,
-                    background:
-                        destructive ? colors.danger : colors.accent,
-                    foreground: destructive ? colors.onDanger : Colors.white,
-                    onTap: () => Navigator.of(sheetContext).pop(true),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   return showXiaojiSheet<bool>(
     context: context,
     builder: (BuildContext sheetContext) {
@@ -326,47 +167,6 @@ Future<bool?> showXiaojiConfirmSheet({
       );
     },
   );
-}
-
-/// 桌面确认框里的小按钮：32 高、7 圆角、13 号字（macOS 警告框规格）。
-class _ConfirmButton extends StatelessWidget {
-  const _ConfirmButton({
-    required this.label,
-    required this.background,
-    required this.foreground,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppPressable(
-      onTap: onTap,
-      pressedScale: 0.98,
-      child: Container(
-        height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        alignment: Alignment.center,
-        decoration: ShapeDecoration(
-          color: background,
-          shape: AppShape.continuous(7),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            height: 1,
-            fontWeight: AppWeight.medium,
-            color: foreground,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// 弹层里的并排按钮：鸿蒙 40 高、20 连续圆角、16 Medium。

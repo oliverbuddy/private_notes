@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 
 /// 工具条能发出的命令。
@@ -99,8 +98,8 @@ class MarkdownToolbar extends StatefulWidget {
 
   /// 按钮行的最大宽度。
   ///
-  /// 桌面宽窗口下按钮行与正文列同宽居中，不把「＋ / Aa / 标签」甩到
-  /// 屏幕最左边、撤销/完成甩到最右边（那样手指/鼠标要横跨整屏）。
+  /// 宽窗口（平板）下按钮行与正文列同宽居中，不把「＋ / Aa / 标签」甩到
+  /// 屏幕最左边、撤销/完成甩到最右边。
   final double? contentMaxWidth;
 
   @override
@@ -132,87 +131,61 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
   ///  - 右侧收键盘：退出编辑的唯一出口，永远在最外侧。
   /// 每组内部 8dp 等距，组间用 0.5dp 竖线分隔，视觉上是三块而不是一排。
   Widget _controlledToolbarRow(BuildContext context, AppColors colors) {
-    // 桌面端图标按钮加 Tooltip：没有长按预览，图标语义必须靠悬停说明。
-    Widget tip(String message, Widget child) => PlatformFeatures.isDesktop
-        ? Tooltip(message: message, child: child)
-        : child;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: <Widget>[
-          tip(
-            '插入',
-            _ToolButton(
-              icon: _effectivePanel == MarkdownToolbarPanel.attach
-                  ? Icons.close_rounded
-                  : Icons.add_rounded,
-              selected: _effectivePanel == MarkdownToolbarPanel.attach,
-              onTap: () => _setPanel(
-                _effectivePanel == MarkdownToolbarPanel.attach
-                    ? MarkdownToolbarPanel.none
-                    : MarkdownToolbarPanel.attach,
-              ),
+          _ToolButton(
+            icon: _effectivePanel == MarkdownToolbarPanel.attach
+                ? Icons.close_rounded
+                : Icons.add_rounded,
+            selected: _effectivePanel == MarkdownToolbarPanel.attach,
+            onTap: () => _setPanel(
+              _effectivePanel == MarkdownToolbarPanel.attach
+                  ? MarkdownToolbarPanel.none
+                  : MarkdownToolbarPanel.attach,
             ),
           ),
           const SizedBox(width: 8),
-          tip(
-            '排版',
-            _TextToolButton(
-              selected: _isHeadingActive() ||
-                  _effectivePanel == MarkdownToolbarPanel.textStyle,
-              showClose: _effectivePanel == MarkdownToolbarPanel.textStyle,
-              onTap: () => _setPanel(
-                _effectivePanel == MarkdownToolbarPanel.textStyle
-                    ? MarkdownToolbarPanel.none
-                    : MarkdownToolbarPanel.textStyle,
-              ),
+          _TextToolButton(
+            selected: _isHeadingActive() ||
+                _effectivePanel == MarkdownToolbarPanel.textStyle,
+            showClose: _effectivePanel == MarkdownToolbarPanel.textStyle,
+            onTap: () => _setPanel(
+              _effectivePanel == MarkdownToolbarPanel.textStyle
+                  ? MarkdownToolbarPanel.none
+                  : MarkdownToolbarPanel.textStyle,
             ),
           ),
           const SizedBox(width: 8),
-          tip(
-            '标签',
-            _ToolButton(
-              icon: Icons.sell_outlined,
-              // 价签图标的字形几乎填满 em 框，用 24 会比相邻图标重一圈；
-              // 降到 22 与「加号 / Aa / 收键盘」的视觉重量对齐。
-              size: AppIcon.dense,
-              onTap: widget.onEditTags ?? () {},
-            ),
+          _ToolButton(
+            icon: Icons.sell_outlined,
+            // 价签图标的字形几乎填满 em 框，用 24 会比相邻图标重一圈；
+            // 降到 22 与「加号 / Aa / 收键盘」的视觉重量对齐。
+            size: AppIcon.dense,
+            onTap: widget.onEditTags ?? () {},
           ),
           // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
           // 两侧各占一块，不再把五个按钮均匀撒满整条。
           const Spacer(),
           // 撤销/还原用「掉头箭头」：方向感最直观，也不会和返回/前进混淆。
           // 掉头箭头同样比常规线性图标更满，统一降到 22 保持视觉一致。
-          tip(
-            '撤销',
-            _FixedButton(
-              icon: Icons.u_turn_left_rounded,
-              size: AppIcon.dense,
-              enabled: widget.canUndo,
-              onTap: widget.onUndo,
-            ),
+          _FixedButton(
+            icon: Icons.u_turn_left_rounded,
+            size: AppIcon.dense,
+            enabled: widget.canUndo,
+            onTap: widget.onUndo,
           ),
-          tip(
-            '还原',
-            _FixedButton(
-              icon: Icons.u_turn_right_rounded,
-              size: AppIcon.dense,
-              enabled: widget.canRedo,
-              onTap: widget.onRedo,
-            ),
+          _FixedButton(
+            icon: Icons.u_turn_right_rounded,
+            size: AppIcon.dense,
+            enabled: widget.canRedo,
+            onTap: widget.onRedo,
           ),
           _GroupDivider(color: colors.divider),
-          tip(
-            PlatformFeatures.isDesktop ? '完成' : '收起键盘',
-            _FixedButton(
-              // 桌面没有软键盘：这个按钮的语义是「退出编辑」，
-              // 换成对勾比「收键盘」直观。
-              icon: PlatformFeatures.isDesktop
-                  ? Icons.check_rounded
-                  : Icons.keyboard_hide_outlined,
-              onTap: widget.onHideKeyboard,
-            ),
+          _FixedButton(
+            icon: Icons.keyboard_hide_outlined,
+            onTap: widget.onHideKeyboard,
           ),
         ],
       ),
@@ -276,18 +249,14 @@ class MarkdownAttachPanel extends StatelessWidget {
   final bool showTopDivider;
 
   /// 插入面板的三个入口。
-  ///
-  /// 桌面没有摄像头，保留「拍照」只会点了报错，所以按平台过滤；
-  /// 「相册」在桌面走系统文件选择器（image_picker 的桌面实现），入口名称不变。
   static List<(MarkdownAttachAction, IconData, String)> get _mediaItems =>
       <(MarkdownAttachAction, IconData, String)>[
         (
           MarkdownAttachAction.gallery,
           Icons.photo_library_outlined,
-          PlatformFeatures.isDesktop ? '图片' : '相册'
+          '相册',
         ),
-        if (!PlatformFeatures.isDesktop)
-          (MarkdownAttachAction.camera, Icons.photo_camera_outlined, '拍照'),
+        (MarkdownAttachAction.camera, Icons.photo_camera_outlined, '拍照'),
         (MarkdownAttachAction.file, Icons.attach_file_rounded, '文件'),
       ];
 

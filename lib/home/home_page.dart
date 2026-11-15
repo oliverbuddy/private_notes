@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show HapticFeedback, KeyDownEvent, LogicalKeyboardKey;
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -15,7 +12,6 @@ import '../editor/tag_editor_sheet.dart';
 import '../security/unlock.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
-import '../platform/platform_features.dart';
 import '../settings/settings_page.dart';
 import '../settings/tags_page.dart';
 import '../theme/app_theme.dart';
@@ -26,7 +22,6 @@ import '../ui/note_actions.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
-import '../util/native_file_drag.dart';
 import '../util/share.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
@@ -61,32 +56,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 本次会话是否已经提示过备份失败（每个会话最多一次，不落盘）。
   bool _backupFailureNotified = false;
-
-  /// 桌面双栏：右侧当前打开的笔记（null = 显示空态）。
-  ///
-  /// 主流桌面笔记（Apple Notes / 语雀 / Bear）都是「列表常驻 + 正文
-  /// 并排」，而不是列表整页跳走再返回；这里只在桌面宽屏启用。
-  Note? _paneNote;
-
-  /// 右侧面板是否需要在首帧聚焦（新建笔记时）。
-  bool _paneAutoFocus = false;
-
-  /// 恢复历史版本后强制重建右侧面板（同一 id 也要换成新文档）。
-  int _paneRevision = 0;
-
-  /// 侧边栏列表焦点：桌面双栏下用 ↑ / ↓ 切换笔记。
-  final FocusNode _listFocus = FocusNode(debugLabel: 'xiaoji-list');
-
-  /// 当前选中项的位置锚点：键盘切换后把选中项滚进可视区。
-  final GlobalKey _selectedTileKey = GlobalKey();
-
-  /// 是否启用双栏（桌面与平板横屏共用）。
-  ///
-  /// 900×520 以上才并排：手机横屏（约 932×430）高度不够，仍走单栏。
-  bool get _splitEnabled {
-    final Size size = MediaQuery.sizeOf(context);
-    return AppBreakpoints.useSplitPane(size.width, size.height);
-  }
 
   NoteRepository get _repo => widget.repository;
 
@@ -162,7 +131,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     newNoteRequests.removeListener(_onShortcutNewNote);
     _searchController.dispose();
     _searchFocus.dispose();
-    _listFocus.dispose();
     super.dispose();
   }
 
@@ -182,13 +150,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _searchMode = false;
     });
-  }
-
-  /// Esc：只在搜索态退出搜索，浏览态不拦截（留给详情页退出编辑）。
-  void _exitSearchIfNeeded() {
-    if (_searchMode) {
-      _exitSearch();
-    }
   }
 
   Future<void> _openEditor(Note? note, {bool shareOnOpen = false}) async {
@@ -226,21 +187,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           created: DateTime.now(),
           updated: DateTime.now(),
         );
-    // 桌面宽屏：列表不动，正文在右侧打开（主流双栏）。窄屏/平板仍走路由。
-    if (_splitEnabled) {
-      setState(() {
-        if (_paneNote?.id != effective.id) {
-          _paneRevision++;
-        }
-        _paneNote = effective;
-        _paneAutoFocus = note == null;
-      });
-      // 从列表打开时把焦点留在列表：↑/↓ 可以继续切下一条（Apple Notes 习惯）。
-      if (!_searchMode) {
-        _listFocus.requestFocus();
-      }
-      return;
-    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => NewEditorPage(
@@ -263,7 +209,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _showNoteActions(Note note, {Offset? anchorPosition}) async {
+  Future<void> _showNoteActions(Note note) async {
     // 长按是「重」手势，给一次轻震反馈，用户能确认按到了（与系统列表一致）。
     HapticFeedback.mediumImpact();
     // 列表长按与详情「更多」共用同一份动作定义（图标、文案、顺序一致），
@@ -275,10 +221,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final action = await showXiaojiActionSheet<String>(
       context: context,
       title: menuTitle,
-      // 桌面右键：菜单贴着指针弹出（左侧列表的动作菜单不再从底部升起）。
-      anchor: anchorPosition == null
-          ? null
-          : Rect.fromLTWH(anchorPosition.dx, anchorPosition.dy, 0, 0),
       actions: buildNoteActions(note),
     );
     if (action == null || !mounted) {
@@ -398,65 +340,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 标签筛选按钮的位置锚点：桌面端弹出贴住按钮的小菜单。
-  final GlobalKey _tagMenuKey = GlobalKey();
-
-  /// 桌面拖出：按下起点、是否已发起拖拽、拖拽后短暂抑制点击。
-  Offset? _dragOrigin;
-  bool _dragStarted = false;
-  DateTime? _suppressTapUntil;
-
   /// 标题栏标签按钮 → 「按标签筛选」弹层。
   ///
   /// 点选即生效并收起弹层：筛选是个轻动作，不值得再多按一次「确定」。
   /// 标签的改名 / 合并 / 删除收在这层右上角的「管理」里 —— 在哪里用就在
   /// 哪里管，不必再绕到设置页。
   Future<void> _showTagFilterSheet() async {
-    // 桌面端：菜单贴着标签按钮弹出（macOS / Windows 原生菜单形态），
-    // 不再从屏幕底部升起一个全宽面板。
-    if (PlatformFeatures.isDesktop) {
-      final List<String> tags = _repo.tags;
-      final String? picked = await showXiaojiActionSheet<String>(
-        context: context,
-        title: '按标签筛选',
-        anchor: anchorRectOf(_tagMenuKey),
-        actions: <SheetAction<String>>[
-          SheetAction<String>(
-            value: '__all__',
-            label: '全部',
-            icon: Icons.inbox_outlined,
-            selected: _repo.activeTag == null,
-          ),
-          for (final String tag in tags)
-            SheetAction<String>(
-              value: tag,
-              label: '#$tag',
-              icon: Icons.sell_outlined,
-              selected: _repo.activeTag == tag,
-            ),
-          if (tags.isNotEmpty)
-            const SheetAction<String>(
-              value: '__manage__',
-              label: '管理标签',
-              icon: Icons.settings_outlined,
-            ),
-        ],
-      );
-      if (picked == null || !mounted) {
-        return;
-      }
-      if (picked == '__manage__') {
-        hideSnack(context);
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (BuildContext context) => TagsPage(repository: _repo),
-          ),
-        );
-        return;
-      }
-      _repo.setActiveTag(picked == '__all__' ? null : picked);
-      return;
-    }
     final bool? manage = await showXiaojiSheet<bool>(
       context: context,
       builder: (BuildContext sheetContext) {
@@ -576,10 +465,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) {
       return;
     }
-    // 删掉的正好是右侧打开的那条：面板回到空态，避免继续显示已删内容。
-    if (_paneNote?.id == note.id) {
-      setState(() => _paneNote = null);
-    }
     // 删除不再「不可逆」：正文和附件整体进了回收站，这里给一次即时撤销。
     showSnack(
       context,
@@ -632,105 +517,66 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           density == ListDensity.compact ? colors.page : comfortableBg,
       body: SafeArea(
         bottom: false,
-        child: CallbackShortcuts(
-          // 桌面习惯：⌘F / Ctrl+F 直接进搜索，Esc 退出。
-          bindings: PlatformFeatures.isDesktop
-              ? <ShortcutActivator, VoidCallback>{
-                  const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-                      _enterSearch,
-                  const SingleActivator(
-                    LogicalKeyboardKey.keyF,
-                    control: true,
-                  ): _enterSearch,
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      _exitSearchIfNeeded,
-                }
-              : const <ShortcutActivator, VoidCallback>{},
-          child: Focus(
-            autofocus: true,
-            child: ListenableBuilder(
-              listenable: _repo,
-              builder: (BuildContext context, Widget? child) {
-                final notes = _repo.visibleNotes;
-                _maybeNotifyBackupFailure(notes.isNotEmpty);
-
-                final bool split = _splitEnabled;
-                // 双栏时列表是 340 的窄栏，本身就是「内容列」，不再套 ContentFrame；
-                // 单栏宽屏仍保持原来的限宽居中。
-                Widget framed(Widget child) =>
-                    split ? child : ContentFrame(child: child);
-                final Widget listColumn = Column(
-                  children: <Widget>[
-                    // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
-                    // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
-                    framed(
-                      _searchMode
-                          ? _buildSearchBar(colors)
-                          : _buildTitleBar(colors),
-                    ),
-                    if (_repo.isSearching && !_repo.isLoading)
-                      framed(
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpace.page,
-                            AppSpace.xs,
-                            AppSpace.page,
-                            AppSpace.sm,
-                          ),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '共 ${notes.length} 条',
-                              style: TextStyle(
-                                fontSize: AppFontSize.caption,
-                                letterSpacing: 0.2,
-                                color: colors.tertiary,
-                              ),
-                            ),
+        child: ListenableBuilder(
+          listenable: _repo,
+          builder: (BuildContext context, Widget? child) {
+            final notes = _repo.visibleNotes;
+            _maybeNotifyBackupFailure(notes.isNotEmpty);
+            return Column(
+              children: <Widget>[
+                // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
+                // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
+                ContentFrame(
+                  child: _searchMode
+                      ? _buildSearchBar(colors)
+                      : _buildTitleBar(colors),
+                ),
+                if (_repo.isSearching && !_repo.isLoading)
+                  ContentFrame(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpace.page,
+                        AppSpace.xs,
+                        AppSpace.page,
+                        AppSpace.sm,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '共 ${notes.length} 条',
+                          style: TextStyle(
+                            fontSize: AppFontSize.caption,
+                            letterSpacing: 0.2,
+                            color: colors.tertiary,
                           ),
                         ),
                       ),
-                    Expanded(
-                      child: _repo.isLoading
-                          ? const Center(
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 1.6),
-                              ),
-                            )
-                          : (notes.isEmpty
-                              ? _EmptyState(searching: _repo.isSearching)
-                              // 平板/桌面：内容限宽居中，长列表不拉满整屏。
-                              : framed(_buildList(colors, notes, density))),
                     ),
-                  ],
-                );
-                if (!split) {
-                  return listColumn;
-                }
-                // 桌面双栏：左列表 + 右正文（Apple Notes / 语雀 / Bear 形态）。
-                return Row(
-                  children: <Widget>[
-                    Focus(
-                      focusNode: _listFocus,
-                      onKeyEvent: _handleListKey,
-                      child: SizedBox(width: 340, child: listColumn),
-                    ),
-                    Container(width: 0.5, color: colors.dividerStrong),
-                    Expanded(child: _buildDetailPane(colors)),
-                  ],
-                );
-              },
-            ),
-          ),
+                  ),
+                Expanded(
+                  child: _repo.isLoading
+                      ? const Center(
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 1.6),
+                          ),
+                        )
+                      : (notes.isEmpty
+                          ? _EmptyState(searching: _repo.isSearching)
+                          // 平板：内容限宽居中，长列表不拉满整屏。
+                          : ContentFrame(
+                              child: _buildList(colors, notes, density),
+                            )),
+                ),
+              ],
+            );
+          },
         ),
       ),
       // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
       // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
-      // 双栏模式改用列表栏顶部的「+」，不再让按钮压在右侧正文上。
-      floatingActionButton: (_searchMode || _splitEnabled)
+      floatingActionButton: _searchMode
           ? null
           // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
           : Tooltip(
@@ -761,107 +607,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// 桌面双栏：在列表上按 ↑ / ↓ 切换到上一条 / 下一条笔记。
-  ///
-  /// 走和点击同一条 [_openEditor]，所以锁定笔记的验证、未落盘内容的
-  /// 保存都复用既有逻辑，不额外维护一份「键盘专用」分支。
-  KeyEventResult _handleListKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) {
-      return KeyEventResult.ignored;
-    }
-    final LogicalKeyboardKey key = event.logicalKey;
-    final bool up = key == LogicalKeyboardKey.arrowUp;
-    final bool down = key == LogicalKeyboardKey.arrowDown;
-    if (!up && !down) {
-      return KeyEventResult.ignored;
-    }
-    final List<Note> notes = _repo.visibleNotes;
-    if (notes.isEmpty) {
-      return KeyEventResult.ignored;
-    }
-    int index = notes.indexWhere((Note n) => n.id == _paneNote?.id);
-    if (index < 0) {
-      index = down ? -1 : notes.length;
-    }
-    final int next = (down ? index + 1 : index - 1).clamp(0, notes.length - 1);
-    if (next == index) {
-      return KeyEventResult.handled;
-    }
-    _openEditor(notes[next]);
-    _revealSelectedTile();
-    return KeyEventResult.handled;
-  }
-
-  /// 键盘切换后把选中项滚进可视区（长列表下否则看不到当前选的是谁）。
-  void _revealSelectedTile() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final BuildContext? tileContext = _selectedTileKey.currentContext;
-      if (tileContext == null || !tileContext.mounted) {
-        return;
-      }
-      Scrollable.ensureVisible(
-        tileContext,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 120),
-      );
-    });
-  }
-
-  /// 桌面双栏的右侧面板：空态提示或嵌入的详情页。
-  ///
-  /// 用 [ValueKey] 绑定笔记 id + 版本号：切换笔记/恢复历史版本时强制重建
-  /// 编辑器，旧页面 dispose 时会把未落盘的改动写完。
-  Widget _buildDetailPane(AppColors colors) {
-    final Note? note = _paneNote;
-    if (note == null) {
-      return ColoredBox(
-        color: colors.page,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(Icons.menu_book_outlined, size: 36, color: colors.tertiary),
-              const SizedBox(height: 12),
-              Text(
-                '选择一条小记开始阅读',
-                style: TextStyle(
-                  fontSize: AppFontSize.label,
-                  color: colors.secondary,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: () => _openEditor(null),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('新建小记'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return NewEditorPage(
-      key: ValueKey<String>('pane-${note.id}-$_paneRevision'),
-      repository: _repo,
-      note: note,
-      autoFocus: _paneAutoFocus,
-      embedded: true,
-      onClose: () {
-        if (mounted) {
-          setState(() => _paneNote = null);
-        }
-      },
-      onReplaced: (Note restored) {
-        if (mounted) {
-          setState(() {
-            _paneNote = restored;
-            _paneRevision++;
-          });
-        }
-      },
-    );
-  }
-
   Widget _buildTitleBar(AppColors colors) {
     final activeTag = _repo.activeTag;
     return Padding(
@@ -879,26 +624,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             style: AppText.pageTitle.copyWith(color: colors.text),
           ),
           const Spacer(),
-          // 双栏时新建入口收到列表栏顶部（主流桌面形态），不再用悬浮球。
-          if (_splitEnabled)
-            _IconAction(
-              icon: Icons.add_rounded,
-              onTap: () => _openEditor(null),
-            ),
           // 标签入口（语雀式）：未选中时是描边图标；选中后整个入口变成
           // 「图标 + 标签名 + 清除」的胶囊，原位替换图标 —— 筛选状态
           // 一眼可见，也不再用一整行筛选条占掉列表高度。
           if (activeTag == null)
             _IconAction(
-              key: _tagMenuKey,
               icon: Icons.sell_outlined,
               onTap: _showTagFilterSheet,
             )
           else
-            KeyedSubtree(
-              key: _tagMenuKey,
-              child: _buildTagPill(colors, activeTag),
-            ),
+            _buildTagPill(colors, activeTag),
           _IconAction(
             icon: Icons.search_rounded,
             onTap: _enterSearch,
@@ -1162,76 +897,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// 拖拽刚结束的 400ms 内不再响应点击，避免「拖出后顺手打开笔记」。
-  bool get _tapSuppressed {
-    final DateTime? until = _suppressTapUntil;
-    return until != null && DateTime.now().isBefore(until);
-  }
-
-  /// 桌面：把笔记导出成临时 Markdown 并交给原生拖出会话。
-  Future<void> _startNoteDrag(Note note, Offset position) async {
-    _suppressTapUntil = DateTime.now().add(const Duration(milliseconds: 400));
-    try {
-      final String body =
-          note.locked ? '' : await _repo.store.readNoteBody(note);
-      final Directory dir =
-          Directory('${Directory.systemTemp.path}/xiaoji-drag');
-      await dir.create(recursive: true);
-      String name =
-          note.locked ? '已锁定笔记' : plainSummary(body).split('\n').first.trim();
-      if (name.isEmpty) {
-        name = '小记-${note.id}';
-      }
-      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      if (name.length > 40) {
-        name = name.substring(0, 40);
-      }
-      final File file = File('${dir.path}/$name.md');
-      await file.writeAsString(
-        body.isEmpty ? '# $name\n' : body,
-        flush: true,
-      );
-      await beginFileDrag(paths: <String>[file.path], position: position);
-    } catch (error) {
-      debugPrint('拖出笔记失败: $error');
-    }
-  }
-
-  /// 桌面拖出：指针移动超过 12dp 即视为拖拽（不抢滚动：只监听，不参与手势竞技场）。
-  Widget _withNoteDragOut(Widget tile, Note note) {
-    if (!PlatformFeatures.isDesktop) {
-      return tile;
-    }
-    return Listener(
-      onPointerDown: (PointerDownEvent event) {
-        if (event.buttons == kPrimaryMouseButton) {
-          _dragOrigin = event.position;
-          _dragStarted = false;
-        }
-      },
-      onPointerMove: (PointerMoveEvent event) {
-        final Offset? origin = _dragOrigin;
-        if (origin == null || _dragStarted) {
-          return;
-        }
-        if ((event.position - origin).distance < 12) {
-          return;
-        }
-        _dragStarted = true;
-        unawaited(_startNoteDrag(note, event.position));
-      },
-      onPointerUp: (_) {
-        _dragOrigin = null;
-        _dragStarted = false;
-      },
-      onPointerCancel: (_) {
-        _dragOrigin = null;
-        _dragStarted = false;
-      },
-      child: tile,
-    );
-  }
-
   Widget _buildList(AppColors colors, List<Note> notes, ListDensity density) {
     // 紧凑档铺在 page 底上，分隔线用 dividerStrong 才压得住；
     // 舒适档卡片之间的间隙不需要分隔线，保留淡档。
@@ -1289,54 +954,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             .toList(growable: false);
 
         Widget tile;
-        final bool selected = _paneNote?.id == note.id;
         if (density == ListDensity.compact) {
           tile = NoteTileCompact(
             note: note,
             query: query,
-            selected: selected,
             // 紧凑档同样带图：右侧 40dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
             hasAttachment: !note.locked && hasLocalAttachment(note.body),
-            onTap: () {
-              if (_tapSuppressed) {
-                return;
-              }
-              _openEditor(note);
-            },
+            onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
-            onSecondaryTapAt: (Offset pos) =>
-                _showNoteActions(note, anchorPosition: pos),
           );
         } else {
           tile = NoteTileComfortable(
             note: note,
             query: query,
-            selected: selected,
             // 纯文字给 5 行；有图时压到 3 行，把高度让给缩略图行，
             // 避免「5 行字 + 一排图」把一张卡撑得半屏高。
             maxSummaryLines: _repo.isSearching ? 2 : (paths.isEmpty ? 5 : 3),
             thumbnailPaths: paths,
             hiddenThumbnailCount: images.length > 3 ? images.length - 3 : 0,
-            onTap: () {
-              if (_tapSuppressed) {
-                return;
-              }
-              _openEditor(note);
-            },
+            onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
-            onSecondaryTapAt: (Offset pos) =>
-                _showNoteActions(note, anchorPosition: pos),
           );
-        }
-
-        // 桌面：按住卡片横向/纵向拖出即导出为 .md（拖到 Finder 即为一份副本）。
-        tile = _withNoteDragOut(tile, note);
-
-        // 选中项挂一个锚点：键盘 ↑/↓ 切换后据此把它滚进可视区。
-        if (selected) {
-          tile = KeyedSubtree(key: _selectedTileKey, child: tile);
         }
 
         // 舒适档卡片化：白卡浮在微灰底上（与设置页同语言），卡与卡留 10 间距。
@@ -1370,7 +1010,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
 class _IconAction extends StatelessWidget {
   const _IconAction({
-    super.key,
     required this.icon,
     required this.onTap,
     this.iconSize = AppIcon.action,
@@ -1521,26 +1160,25 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.md),
           Text(
-            PlatformFeatures.isDesktop ? '点右下角的笔，或按 ⌘N' : '点右下角的笔开始',
+            '点右下角的笔开始',
             style: TextStyle(
               fontSize: AppFontSize.labelLg,
               height: 1.75,
               color: colors.secondary,
             ),
           ),
-          if (!PlatformFeatures.isDesktop)
-            Text(
-              '或从桌面小组件直接记录',
-              style: TextStyle(
-                fontSize: AppFontSize.labelLg,
-                height: 1.75,
-                color: colors.secondary,
-              ),
+          Text(
+            '或从桌面小组件直接记录',
+            style: TextStyle(
+              fontSize: AppFontSize.labelLg,
+              height: 1.75,
+              color: colors.secondary,
             ),
+          ),
           // 空态是唯一不打扰的"教学位"：提前告诉用户长按能做什么，
           // 否则置顶/标签这些能力很难被自己发现。
           Text(
-            PlatformFeatures.isDesktop ? '写下后右键可置顶、加标签' : '写下后长按可置顶、加标签',
+            '写下后长按可置顶、加标签',
             style: TextStyle(
               fontSize: AppFontSize.labelLg,
               height: 1.75,

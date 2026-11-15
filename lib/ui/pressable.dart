@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 
 /// 鸿蒙式轻按压反馈。
@@ -20,8 +19,6 @@ class AppPressable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
-    this.onSecondaryTap,
-    this.onSecondaryTapDown,
     this.behavior = HitTestBehavior.opaque,
     this.pressedOpacity = 0.55,
     this.pressedScale = 0.98,
@@ -32,12 +29,6 @@ class AppPressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
-
-  /// 鼠标右键（桌面端）：主流桌面 App 用右键代替移动端的长按菜单。
-  final VoidCallback? onSecondaryTap;
-
-  /// 右键按下位置：桌面端动作菜单要锚定在指针处，而不是屏幕底部。
-  final void Function(TapDownDetails details)? onSecondaryTapDown;
 
   final HitTestBehavior behavior;
 
@@ -61,7 +52,6 @@ class AppPressable extends StatefulWidget {
 
 class _AppPressableState extends State<AppPressable> {
   bool _pressed = false;
-  bool _hovered = false;
 
   void _setPressed(bool value) {
     if (!mounted || _pressed == value) {
@@ -70,24 +60,10 @@ class _AppPressableState extends State<AppPressable> {
     setState(() => _pressed = value);
   }
 
-  void _setHovered(bool value) {
-    if (!mounted || _hovered == value) {
-      return;
-    }
-    setState(() => _hovered = value);
-  }
-
   @override
   Widget build(BuildContext context) {
     final bool active = _pressed && widget.enabled;
     final Color? overlay = widget.pressedColor;
-    final bool interactive = widget.onTap != null ||
-        widget.onLongPress != null ||
-        widget.onSecondaryTap != null;
-    // 桌面端：悬停时铺一层半强度的按压蒙层，指针换成手型。
-    // 移动端没有鼠标，MouseRegion 不会触发，行为与之前完全一致。
-    final bool desktop = PlatformFeatures.isDesktop;
-    final bool hovering = desktop && _hovered && widget.enabled && interactive;
     final Widget body = overlay == null
         ? widget.child
         // 蒙层必须画在内容上方：卡片变灰但正文/缩略图不被淡出，
@@ -98,7 +74,7 @@ class _AppPressableState extends State<AppPressable> {
               Positioned.fill(
                 child: IgnorePointer(
                   child: AnimatedOpacity(
-                    opacity: active ? 1 : (hovering ? 0.45 : 0),
+                    opacity: active ? 1 : 0,
                     duration: AppMotion.fast,
                     curve: AppMotion.decelerate,
                     child: ColoredBox(color: overlay),
@@ -107,32 +83,23 @@ class _AppPressableState extends State<AppPressable> {
               ),
             ],
           );
-    return MouseRegion(
-      cursor: desktop && interactive && widget.enabled
-          ? SystemMouseCursors.click
-          : MouseCursor.defer,
-      onEnter: (_) => _setHovered(true),
-      onExit: (_) => _setHovered(false),
-      child: Listener(
-        onPointerDown: widget.enabled ? (_) => _setPressed(true) : null,
-        onPointerUp: (_) => _setPressed(false),
-        onPointerCancel: (_) => _setPressed(false),
-        child: GestureDetector(
-          behavior: widget.behavior,
-          onTap: widget.enabled ? widget.onTap : null,
-          onLongPress: widget.enabled ? widget.onLongPress : null,
-          onSecondaryTap: widget.enabled ? widget.onSecondaryTap : null,
-          onSecondaryTapDown: widget.enabled ? widget.onSecondaryTapDown : null,
-          child: AnimatedOpacity(
-            opacity: active ? widget.pressedOpacity : 1,
+    return Listener(
+      onPointerDown: widget.enabled ? (_) => _setPressed(true) : null,
+      onPointerUp: (_) => _setPressed(false),
+      onPointerCancel: (_) => _setPressed(false),
+      child: GestureDetector(
+        behavior: widget.behavior,
+        onTap: widget.enabled ? widget.onTap : null,
+        onLongPress: widget.enabled ? widget.onLongPress : null,
+        child: AnimatedOpacity(
+          opacity: active ? widget.pressedOpacity : 1,
+          duration: AppMotion.fast,
+          curve: AppMotion.decelerate,
+          child: AnimatedScale(
+            scale: active ? widget.pressedScale : 1,
             duration: AppMotion.fast,
             curve: AppMotion.decelerate,
-            child: AnimatedScale(
-              scale: active ? widget.pressedScale : 1,
-              duration: AppMotion.fast,
-              curve: AppMotion.decelerate,
-              child: body,
-            ),
+            child: body,
           ),
         ),
       ),

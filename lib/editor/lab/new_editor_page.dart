@@ -3,10 +3,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:follow_the_leader/follow_the_leader.dart' show LeaderLink;
 import 'package:flutter/services.dart';
@@ -16,7 +14,6 @@ import 'package:super_editor/super_editor.dart';
 import '../../models/note.dart';
 import '../../data/note_repository.dart';
 import '../../data/note_store.dart';
-import '../../platform/platform_features.dart';
 import '../../security/unlock.dart';
 import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
@@ -29,17 +26,14 @@ import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
 import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
-import '../../util/native_image_window.dart';
 import '../markdown_toolbar.dart';
 import '../markdown_view.dart';
-import '../editor_zoom.dart';
 import '../note_image_share.dart';
 import '../link_editor_sheet.dart';
 import '../tag_editor_sheet.dart';
 import 'kernel_commands.dart';
 import '../../util/date_format.dart' show formatEditorTime, formatFileSize;
 import 'selection_toolbar.dart';
-import 'typora_table.dart';
 import '../widgets/image_block_view.dart';
 import 'attachment_component.dart';
 import 'caret_overlay.dart';
@@ -49,7 +43,6 @@ import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'markdown_paste.dart';
 import 'markdown_inline.dart';
-import 'markdown_shortcut.dart';
 import 'paste_ime_decorator.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
@@ -127,9 +120,6 @@ class NewEditorPage extends StatefulWidget {
     required this.note,
     this.autoFocus = false,
     this.shareOnOpen = false,
-    this.embedded = false,
-    this.onClose,
-    this.onReplaced,
   });
 
   final NoteRepository repository;
@@ -142,18 +132,6 @@ class NewEditorPage extends StatefulWidget {
   /// 从列表长按「分享为图片」进入时置为 true：等首帧渲染完成后自动分享，
   /// 保证分享图取到的是详情页真实的文档布局。
   final bool shareOnOpen;
-
-  /// 桌面双栏模式：嵌在首页右侧作为常驻面板，而不是独立路由。
-  ///
-  /// 影响三处：不显示返回按钮、删除后不 pop 路由、恢复历史版本时
-  /// 通过 [onReplaced] 通知外层换内容（内嵌时没有可替换的路由）。
-  final bool embedded;
-
-  /// 内嵌模式下需要关闭右侧面板（例如删除当前笔记）。
-  final VoidCallback? onClose;
-
-  /// 内嵌模式下文档被整体替换（恢复历史版本）。
-  final ValueChanged<Note>? onReplaced;
 
   @override
   State<NewEditorPage> createState() => _NewEditorPageState();
@@ -226,17 +204,8 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// （主流编辑器 Word / Notion 同语义）。
   String? _typingStyleNodeId;
 
-  /// Markdown 快捷输入兜底是否已排队（每帧最多检查一次）。
-  bool _shortcutScheduled = false;
-
   /// 行内 Markdown（`**粗**` / `` `码` `` / 链接）识别是否已排队。
   bool _inlineScheduled = false;
-
-  /// 桌面端是否正有文件悬停在编辑区上方（用于显示「松开插入」提示）。
-  bool _draggingFiles = false;
-
-  /// 桌面硬件键处理器。必须持有同一个引用，dispose 时才能正确移除。
-  late final bool Function(KeyEvent) _desktopKeyHandler = _handleDesktopKey;
 
   /// SuperEditor 自己的焦点节点。面板关闭后（选区可能被清空）用
   /// requestFocus 把 IME 和光标一起接回来，避免「键盘在、光标没了」。
@@ -309,14 +278,6 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   bool get _panelExpanded => _panel != MarkdownToolbarPanel.none;
 
-  /// 各面板的固定高度（桌面端在工具条上方展开时要预留）。
-  static double _panelHeight(MarkdownToolbarPanel panel) => switch (panel) {
-        MarkdownToolbarPanel.textStyle => MarkdownTextStylePanel.height,
-        MarkdownToolbarPanel.insert => MarkdownInsertPanel.height,
-        MarkdownToolbarPanel.attach => MarkdownAttachPanel.height,
-        MarkdownToolbarPanel.none => 0,
-      };
-
   /// 是否处在「面板 ↔ 键盘」的交替过程中。
   ///
   /// 这段时间视口在变，但光标位置不该被纠正（否则切面板/回键盘就会
@@ -387,11 +348,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       onPaste: _handleImePaste,
     );
     _editorFocus.addListener(_onEditorFocusChanged);
-    editorZoom.addListener(_onZoomChanged);
-    // 桌面硬件键：粘贴走 Markdown 解析、空列表回车显式退出列表。
-    if (PlatformFeatures.isDesktop) {
-      HardwareKeyboard.instance.addHandler(_desktopKeyHandler);
-    }
     _refreshClipboardSnapshot();
     _commands = KernelCommands(
       editor: _editor,
@@ -408,13 +364,11 @@ class _NewEditorPageState extends State<NewEditorPage>
         _refreshActiveCommands();
         _syncHistoryButtons();
         _syncDocumentEmpty();
-        _scheduleMarkdownShortcut();
         _scheduleInlineMarkdown();
       }),
     );
     // 选区变化：块级激活态跟着光标所在行走，只需要监听 composer。
     _composer.addListener(_refreshActiveCommands);
-    _composer.addListener(_rememberSelection);
     _syncDocumentEmpty();
     // 输入法弹出/收起会改变可用视口：等布局结算后再校正一次光标可见性。
     WidgetsBinding.instance.addObserver(this);
@@ -599,10 +553,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     _canRedo.dispose();
     _documentEmpty.dispose();
     _editorFocus.removeListener(_onEditorFocusChanged);
-    editorZoom.removeListener(_onZoomChanged);
-    if (PlatformFeatures.isDesktop) {
-      HardwareKeyboard.instance.removeHandler(_desktopKeyHandler);
-    }
     _editorFocus.dispose();
     _editorScroll.dispose();
     _editor.dispose();
@@ -1181,11 +1131,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_selectionNode() is TableBlockNode) {
       return;
     }
-    // 桌面端不做「舒适落位」：用户明确要求 PC 上不要为了输入把页面
-    // 上下挪动（只在移动端保留，避开软键盘遮挡）。
-    if (PlatformFeatures.isDesktop) {
-      return;
-    }
     final selection = _composer.selection;
     if (selection == null || !selection.isCollapsed) {
       return;
@@ -1350,14 +1295,9 @@ class _NewEditorPageState extends State<NewEditorPage>
       return false;
     }
     // 表格内不做任何自动落位：表格每次重排都会让框架重算一次目标，
-    // 逐帧平滑或原生跳转都会把表格上下拽动（PC 上表现为抖动）。
+    // 逐帧平滑或原生跳转都会把表格上下拽动。
     if (_selectionNode() is TableBlockNode) {
       return true;
-    }
-    // 桌面端不接管框架跳转：没有软键盘，光标本来就在视口里；接管只会
-    // 在光标接近底/顶时把页面平滑挪动（用户要求 PC 去掉这套逻辑）。
-    if (PlatformFeatures.isDesktop) {
-      return false;
     }
     _requestCaretScroll(target);
     return true;
@@ -1387,19 +1327,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_panelExpanded) {
       // 已经是「面板占位」的稳定态（键盘早已收起）：直接换面板。
       setState(() => _panel = next);
-      return;
-    }
-    if (PlatformFeatures.isDesktop) {
-      // 桌面没有软键盘：面板直接在工具条上方展开，不需要锚点，
-      // 也不需要先收起输入法。之前的实现要求 ime > 0，PC 上面板
-      // 永远打不开（Aa 排版整块不可用）。
-      _lastSelection = _composer.selection;
-      setState(() {
-        _panel = next;
-        _toolbarAnchorIme = null;
-        _panelClosing = false;
-        _panelOpeningUntilHidden = false;
-      });
       return;
     }
     final double ime = MediaQuery.viewInsetsOf(context).bottom;
@@ -1436,14 +1363,14 @@ class _NewEditorPageState extends State<NewEditorPage>
       _panel = MarkdownToolbarPanel.none;
       _panelOpeningUntilHidden = false;
       // 锚点保留到键盘真正回来（_reconcilePanelWithKeyboard 里清理），
-      // 否则工具条会先掉到屏幕底部再被顶上来。桌面没有键盘，不需要。
-      _panelClosing = showKeyboard && !PlatformFeatures.isDesktop;
+      // 否则工具条会先掉到屏幕底部再被顶上来。
+      _panelClosing = showKeyboard;
     });
     // 兜底释放：系统键盘高度可能和展开前不同（候选栏/输入法切换），
     // 到不了锚点高度时锚点会一直留着，正文底部就会多出一片空白
     // （用户反馈「反复调起几次后偶现底部空白」）。超时后无条件释放。
     _scheduleAnchorRelease();
-    if (showKeyboard && !PlatformFeatures.isDesktop) {
+    if (showKeyboard) {
       // 键盘高度与展开前一致，工具条位置不会跳动。
       SystemChannels.textInput.invokeMethod<void>('TextInput.show');
     }
@@ -1698,21 +1625,12 @@ class _NewEditorPageState extends State<NewEditorPage>
   ///
   /// 只在标题数 ≥ 2 时出现（见 [_buildHeader]）：两行以内的小记不需要导航，
   /// 多出来的图标只会增加「这块是干什么的」的困惑。
-  ///
-  /// 桌面端用与「⋯」同一套锚定菜单（贴住按钮、右侧对齐、同样式），
-  /// 移动端仍是底部弹层。
   Future<void> _showOutline() async {
     if (_outline.isEmpty) {
       return;
     }
     final List<_OutlineEntry> entries = List<_OutlineEntry>.of(_outline);
-    String? picked;
-    if (PlatformFeatures.isDesktop) {
-      FocusScope.of(context).unfocus();
-      picked = await _showOutlineMenu(entries);
-    } else {
-      picked = await _showOutlineSheet(entries);
-    }
+    final String? picked = await _showOutlineSheet(entries);
     if (picked == null || !mounted) {
       return;
     }
@@ -1723,90 +1641,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     _jumpToDocumentNode(node);
   }
 
-  /// 桌面端目录：与顶栏「⋯」用同一套 PopupMenu（同样的圆角、描边与动画）。
-  ///
-  /// 标题按层级分级：一级更大更重、主色；二级 / 三级缩进并用次级色。
-  Future<String?> _showOutlineMenu(List<_OutlineEntry> entries) {
-    final RenderObject? overlayObject =
-        Overlay.of(context).context.findRenderObject();
-    if (overlayObject is! RenderBox) {
-      return Future<String?>.value();
-    }
-    final AppColors colors = AppColors.of(context);
-    final Rect anchor =
-        anchorRectOf(_outlineKey) ?? const Rect.fromLTWH(0, 0, 0, 44);
-    return showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        anchor.left,
-        anchor.bottom + 2,
-        overlayObject.size.width - anchor.right,
-        overlayObject.size.height - anchor.bottom,
-      ),
-      color: colors.page,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.block),
-        side: BorderSide(color: colors.chipBorder, width: 0.5),
-      ),
-      items: <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          enabled: false,
-          height: 28,
-          child: Text(
-            '目录',
-            style: TextStyle(
-              fontSize: AppFontSize.caption,
-              color: colors.tertiary,
-            ),
-          ),
-        ),
-        for (final _OutlineEntry entry in entries)
-          PopupMenuItem<String>(
-            value: entry.nodeId,
-            // 长文目录要能一屏扫完（参考 Typora / Notion 的 28–30 行高）。
-            height: switch (entry.level) {
-              1 => 30,
-              2 => 28,
-              _ => 26,
-            },
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Padding(
-              // 层级差要看得出来：一级 0，二级 16，三级 32。
-              padding: EdgeInsets.only(
-                left: switch (entry.level) {
-                  1 => 0,
-                  2 => 16,
-                  _ => 32,
-                },
-              ),
-              child: Text(
-                entry.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: switch (entry.level) {
-                    1 => AppFontSize.body,
-                    2 => AppFontSize.labelLg,
-                    _ => 13,
-                  },
-                  fontWeight: entry.level == 1
-                      ? AppWeight.medium
-                      : AppWeight.regular,
-                  color: switch (entry.level) {
-                    1 => colors.text,
-                    2 => colors.secondary,
-                    _ => colors.tertiary,
-                  },
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// 移动端目录：底部弹层（桌面端见 [_showOutline]）。
+  /// 目录：底部弹层。
   Future<String?> _showOutlineSheet(List<_OutlineEntry> entries) {
     return showXiaojiSheet<String>(
       context: context,
@@ -1927,20 +1762,12 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  /// 「⋯」按钮的位置锚点：桌面端动作菜单贴在它下方弹出。
-  final GlobalKey _moreMenuKey = GlobalKey();
-
-  /// 「目录」按钮的位置锚点：桌面端目录菜单与「⋯」用同一套锚定样式。
-  final GlobalKey _outlineKey = GlobalKey();
-
   Future<void> _showEditorMenu() async {
     // 与主页长按共用同一个动作菜单组件和同一份动作定义：标题、行高、
     // 图标、顺序、分隔线全部一致，不再各页面手写一套。
     final String? action = await showXiaojiActionSheet<String>(
       context: context,
       title: '',
-      // 桌面端锚定在「⋯」按钮下方（主流桌面菜单形态），移动端仍走底部菜单。
-      anchor: anchorRectOf(_moreMenuKey),
       actions: buildNoteActions(_currentNote, detail: true),
     );
     if (action == null || !mounted) {
@@ -1998,7 +1825,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       builder: (BuildContext sheetContext) => _VersionHistorySheet(
         versions: versions,
         locked: _currentNote.locked,
-        dialog: PlatformFeatures.isDesktop,
       ),
     );
     if (picked == null || !mounted) {
@@ -2015,7 +1841,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         note: preview,
         time: picked.time,
         locked: _currentNote.locked,
-        dialog: PlatformFeatures.isDesktop,
       ),
     );
     if (confirmed != true || !mounted) {
@@ -2031,11 +1856,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       return;
     }
     // 整页重建：文档/选区/撤销栈全部按恢复后的内容重新初始化。
-    if (widget.embedded) {
-      // 内嵌在双栏右侧时没有路由可替换：交给外层用新内容重建面板。
-      widget.onReplaced?.call(restored);
-      return;
-    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => NewEditorPage(
@@ -2227,13 +2047,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  /// 正文缩放变化：重建样式表。
-  void _onZoomChanged() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
   /// 缓存剪贴板内容（纯文本 + HTML），供 IME 粘贴识别使用。
   ///
   /// Android 10+ 只有持有窗口焦点的应用才能读剪贴板：`resumed` 回调触发时
@@ -2355,23 +2168,6 @@ class _NewEditorPageState extends State<NewEditorPage>
 
   /// 输入法完成粘贴的时间：⌘V 若晚到，不再重复插入。
   DateTime? _lastImePasteAt;
-
-  /// 右键前的选区（内核会把右键也当成「落光标」，选中会被清掉）。
-  DocumentSelection? _rememberedSelection;
-
-  /// 记住最近一次「同块内的非折叠选区」。
-  ///
-  /// 内核的鼠标交互把右键按下也当成「落光标」，会先把选区收成光标；
-  /// 右键菜单里的「复制 / 剪切」因此没有对象（用户反馈「选中没有了」）。
-  /// 这里持续记住选区，右键时按节点判断能否恢复。
-  void _rememberSelection() {
-    final DocumentSelection? selection = _composer.selection;
-    if (selection != null &&
-        !selection.isCollapsed &&
-        selection.base.nodeId == selection.extent.nodeId) {
-      _rememberedSelection = selection;
-    }
-  }
 
   /// 长按菜单「粘贴」：优先按 Markdown / HTML 解析成块，失败退回默认粘贴。
   Future<bool> _pasteFromClipboard() async {
@@ -2546,29 +2342,8 @@ class _NewEditorPageState extends State<NewEditorPage>
     await widget.repository.remove(_currentNote);
     _discarded = true;
     if (mounted) {
-      if (widget.embedded) {
-        // 双栏：清空右侧面板，左侧列表仍在。
-        widget.onClose?.call();
-      } else {
-        Navigator.of(context).pop();
-      }
+      Navigator.of(context).pop();
     }
-  }
-
-  /// 桌面端 Markdown 快捷输入兜底（规则见 [matchMarkdownShortcut]）。
-  ///
-  /// 内核已经处理了 ASCII 的 `# ` / `- ` / `1. ` / `> `；这里只补桌面端
-  /// 容易踩到的差异（全角空格/记号、`[] ` 待办），并且**只在桌面启用**，
-  /// 移动端保持内核原有行为，不叠加第二套转换逻辑。
-  void _scheduleMarkdownShortcut() {
-    if (!PlatformFeatures.isDesktop || _shortcutScheduled || _disposed) {
-      return;
-    }
-    _shortcutScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _shortcutScheduled = false;
-      _applyMarkdownShortcut();
-    });
   }
 
   /// 手动输入的 Markdown 行内标记识别是否已排队。
@@ -2714,169 +2489,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  void _applyMarkdownShortcut() {
-    if (_disposed || !mounted) {
-      return;
-    }
-    // 组词期间不碰文档：下一次输入法提交会把改写覆盖回去。
-    if (_composer.composingRegion.value != null) {
-      return;
-    }
-    final DocumentSelection? selection = _composer.selection;
-    if (selection == null || !selection.isCollapsed) {
-      return;
-    }
-    if (selection.base.nodeId != selection.extent.nodeId) {
-      return;
-    }
-    final DocumentNode? node = _document.getNodeById(selection.extent.nodeId);
-    if (node is! ParagraphNode) {
-      return;
-    }
-    // 已经是标题/列表/引用/待办：内核已转换，不重复处理。
-    if (node.getMetadataValue(NodeMetadata.blockType) != null) {
-      return;
-    }
-    final NodePosition position = selection.extent.nodePosition;
-    if (position is! TextNodePosition) {
-      return;
-    }
-    final String text = node.text.toPlainText();
-    if (position.offset != text.length) {
-      return;
-    }
-    final MarkdownShortcutMatch? match = matchMarkdownShortcut(text);
-    if (match == null) {
-      return;
-    }
-    final MarkdownCommand command = switch (match.shortcut) {
-      MarkdownShortcut.h1 => MarkdownCommand.h1,
-      MarkdownShortcut.h2 => MarkdownCommand.h2,
-      MarkdownShortcut.h3 => MarkdownCommand.h3,
-      MarkdownShortcut.bullet => MarkdownCommand.bullet,
-      MarkdownShortcut.ordered => MarkdownCommand.ordered,
-      MarkdownShortcut.quote => MarkdownCommand.quote,
-      MarkdownShortcut.todo => MarkdownCommand.todo,
-    };
-    final DocumentPosition start = DocumentPosition(
-      nodeId: node.id,
-      nodePosition: const TextNodePosition(offset: 0),
-    );
-    _editor.execute(<EditRequest>[
-      DeleteContentRequest(
-        documentRange: DocumentRange(
-          start: start,
-          end: DocumentPosition(
-            nodeId: node.id,
-            nodePosition: TextNodePosition(offset: match.length),
-          ),
-        ),
-      ),
-      ChangeSelectionRequest(
-        DocumentSelection.collapsed(position: start),
-        SelectionChangeType.placeCaret,
-        SelectionReason.userInteraction,
-      ),
-    ]);
-    _commands.handleCommand(command);
-    _refreshActiveCommands();
-  }
-
-  /// 桌面硬件键：粘贴与空列表回车。
-  ///
-  /// 桌面 Cmd/Ctrl+V 走内核的 `editorOps.paste()`，会绕过小记的 Markdown
-  /// 解析；这里在按键分发到焦点树之前截住，改走 [MarkdownPaster]。
-  ///
-  /// 空列表项回车在桌面 IME 路径下不稳定（新行只会落成文本），这里显式
-  /// 发 [InsertNewlineAtCaretRequest]，与移动端内核语义一致。
-  bool _handleDesktopKey(KeyEvent event) {
-    if (event is! KeyDownEvent) {
-      return false;
-    }
-    if (!PlatformFeatures.isDesktop) {
-      return false;
-    }
-    final HardwareKeyboard keyboard = HardwareKeyboard.instance;
-    final bool command = keyboard.isMetaPressed || keyboard.isControlPressed;
-    // 正文重新拿到焦点说明单元格编辑已结束（表格被替换 / 失焦提交），
-    // 这里顺手复位，避免标志卡住导致 ⌘V 一直不生效。
-    if (_editorFocus.hasFocus) {
-      _tableCellEditing = false;
-    }
-
-    // 粘贴不要求编辑器焦点：点过工具条/弹层后焦点可能短暂不在正文上，
-    // 这时若放给内核，它会绕过 Markdown 解析、把 `**粗体**` 原样插进正文
-    // （用户反馈「粘贴的 md 标签没识别」）。只要有选区就按小记的解析走。
-    //
-    // 例外：正在编辑表格单元格时，⌘V 属于单元格输入框。
-    if (command &&
-        !keyboard.isShiftPressed &&
-        !keyboard.isAltPressed &&
-        !_tableCellEditing &&
-        event.logicalKey == LogicalKeyboardKey.keyV &&
-        _composer.selection != null) {
-      unawaited(_pasteFromClipboard());
-      return true;
-    }
-
-    // ⌘S / Ctrl+S：小记是自动保存，但用户按保存就想「立刻落盘」。
-    if (command &&
-        !keyboard.isShiftPressed &&
-        !keyboard.isAltPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyS) {
-      _saveDebounce?.cancel();
-      unawaited(_flushSave());
-      _showHint('已保存');
-      return true;
-    }
-
-    if (!_editorFocus.hasFocus) {
-      return false;
-    }
-    if ((event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
-        !keyboard.isShiftPressed &&
-        !keyboard.isMetaPressed &&
-        !keyboard.isControlPressed &&
-        !keyboard.isAltPressed) {
-      return _tryExitEmptyListItem();
-    }
-    if (command &&
-        !keyboard.isShiftPressed &&
-        !keyboard.isAltPressed &&
-        !_tableCellEditing &&
-        event.logicalKey == LogicalKeyboardKey.keyC) {
-      // 表格整块选中时，⌘C 直接复制表格的 Markdown。
-      final DocumentNode? node = _selectionNode();
-      if (node is TableBlockNode) {
-        unawaited(_copyTableAsMarkdown(node));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// 光标所在的列表/待办为空时，回车退出列表回到正文。
-  bool _tryExitEmptyListItem() {
-    final DocumentSelection? selection = _composer.selection;
-    if (selection == null || !selection.isCollapsed) {
-      return false;
-    }
-    if (selection.base.nodeId != selection.extent.nodeId) {
-      return false;
-    }
-    final DocumentNode? node = _document.getNodeById(selection.extent.nodeId);
-    final bool isList = node is ListItemNode || node is TaskNode;
-    if (!isList || node is! TextNode) {
-      return false;
-    }
-    if (node.text.toPlainText().isNotEmpty) {
-      return false;
-    }
-    _editor.execute(<EditRequest>[InsertNewlineAtCaretRequest()]);
-    return true;
-  }
-
   void _hideKeyboard() {
     // 子菜单必须先收起：工具栏马上要滑走，挂着面板会看起来像没收干净。
     _closePanel(showKeyboard: false);
@@ -2891,10 +2503,7 @@ class _NewEditorPageState extends State<NewEditorPage>
   Future<void> _handleAttachAction(MarkdownAttachAction action) async {
     switch (action) {
       case MarkdownAttachAction.camera:
-        // 桌面没有摄像头：万一入口被别处调用，退回文件选择而不是报错。
-        await _pickImage(PlatformFeatures.isDesktop
-            ? ImageSource.gallery
-            : ImageSource.camera);
+        await _pickImage(ImageSource.camera);
         break;
       case MarkdownAttachAction.gallery:
         await _pickImage(ImageSource.gallery);
@@ -2928,8 +2537,6 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   /// 把指定路径的图片拷进附件目录并插入图片块。
-  ///
-  /// 选图与桌面拖拽共用这一条路径，避免两套插入逻辑出现行为差异。
   Future<void> _insertImageFromPath(String sourcePath) async {
     try {
       final relative = await widget.repository.store.importAttachment(
@@ -2977,69 +2584,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  /// 桌面拖拽文件：图片插入图片块，其余作为附件。
-  Future<void> _handleDroppedFiles(DropDoneDetails details) async {
-    if (mounted) {
-      setState(() => _draggingFiles = false);
-    }
-    if (!mounted || details.files.isEmpty) {
-      return;
-    }
-    _editorFocus.requestFocus();
-    const Set<String> imageExts = <String>{
-      '.png',
-      '.jpg',
-      '.jpeg',
-      '.gif',
-      '.webp',
-      '.heic',
-      '.bmp',
-    };
-    for (final XFile file in details.files) {
-      final String path = file.path;
-      final int dot = path.lastIndexOf('.');
-      final String ext = dot >= 0 ? path.substring(dot).toLowerCase() : '';
-      if (imageExts.contains(ext)) {
-        await _insertImageFromPath(path);
-      } else {
-        await _insertAttachmentFromPath(path, file.name);
-      }
-    }
-  }
-
-  /// 拖拽悬停提示：盖在编辑区中央，不拦截任何指针事件。
-  Widget _buildDropHint(AppColors colors) {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            decoration: BoxDecoration(
-              color: colors.page.withValues(alpha: 0.94),
-              borderRadius: BorderRadius.circular(AppRadius.card),
-              border: Border.all(color: colors.accent, width: 1),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(Icons.file_download_outlined,
-                    size: AppIcon.action, color: colors.accent),
-                const SizedBox(width: 10),
-                Text(
-                  '松开以插入到笔记',
-                  style: TextStyle(
-                    fontSize: AppFontSize.label,
-                    color: colors.text,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 文件附件：拷进附件目录 → 插入 `[文件名](相对路径)` 链接行。
   ///
   /// md 方言里文件附件与链接同语法（旧渲染器按整行解析成附件块，
@@ -3085,10 +2629,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     _syncImeState(imeInset);
     // 面板/键盘交替时按当前 ime 结算锚点（工具条保持同一屏幕 Y）。
     _reconcilePanelWithKeyboard(imeInset);
-    final bool desktop = PlatformFeatures.isDesktop;
-    // 详情页与首页/设置共用同一套断点：手机全宽、平板 680、桌面 760。
-    // 之前这里写死 640，桌面宽窗口下正文两侧空一大片、顶栏与标签栏却
-    // 通栏，视觉上完全对不上（PC 用户反馈的「排版不像桌面软件」）。
+    // 详情页与首页/设置共用同一套断点：手机全宽、平板 680、宽屏 760。
     final double contentWidth = AppBreakpoints.contentMaxWidth(
       MediaQuery.sizeOf(context).width,
     );
@@ -3098,22 +2639,12 @@ class _NewEditorPageState extends State<NewEditorPage>
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         bottom: false,
-        child: CallbackShortcuts(
-          // 桌面习惯：Esc 退出编辑态（工具栏随之收起）。
-          bindings: desktop
-              ? <ShortcutActivator, VoidCallback>{
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      _hideKeyboard,
-                }
-              : const <ShortcutActivator, VoidCallback>{},
-          child: Stack(
-            children: <Widget>[
-              Column(
-                children: <Widget>[
-                  _buildHeader(colors, contentWidth),
-                  // 桌面端不画分割线：顶栏与正文同底色，连成一体。
-                  if (!PlatformFeatures.isDesktop)
-                    Container(height: 0.5, color: colors.dividerStrong),
+        child: Stack(
+          children: <Widget>[
+            Column(
+              children: <Widget>[
+                _buildHeader(colors, contentWidth),
+                Container(height: 0.5, color: colors.dividerStrong),
                   Expanded(
                     // 工具条是浮层，会盖住正文底部。工具条可见时给视口
                     // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
@@ -3140,25 +2671,15 @@ class _NewEditorPageState extends State<NewEditorPage>
                         // 不能只看 `_editing`：用输入法自带的收起键把键盘收起后，
                         // 选区还在、工具条已经滑走，多预留的一条就会变成页面
                         // 底部一片「工具栏白底」的遮挡（用户反馈）。
-                        //
-                        // 桌面端没有输入法 inset，工具条在编辑态常显，
-                        // 所以只要有选区就要预留；面板再额外预留它自己的高度。
-                        final bool reserve = desktop
-                            ? _editing.value
-                            : (imeInset > 0 ||
-                                _panelTransitioning ||
-                                _panelOpen);
+                        final bool reserve = imeInset > 0 ||
+                            _panelTransitioning ||
+                            _panelOpen;
                         // 预留量在编辑态是**常量**（工具条高度 + 面板补偿），
                         // 不含 safe area、也不随键盘高度变化：
                         //  - 键盘升降时 body 与视口同步伸缩，不会产生额外空白；
                         //  - 面板展开/收起时「锚点 - ime」把键盘占的高度补回来，
                         //    视口高度全程不变 → 滚动位置不会被 clamp、内容不跳。
-                        final double desktopPanelReserve =
-                            desktop && _panelExpanded
-                                ? _panelHeight(_panel)
-                                : 0;
-                        final double reserveHeight =
-                            _toolbarHeight + panelReserve + desktopPanelReserve;
+                        final double reserveHeight = _toolbarHeight + panelReserve;
                         return Padding(
                           padding: EdgeInsets.only(
                             bottom: reserve ? reserveHeight : 0,
@@ -3227,8 +2748,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                                             'editor-placeholder',
                                           ),
                                           style: TextStyle(
-                                            fontSize: AppFontSize.summary *
-                                                editorZoom.value,
+                                            fontSize: AppFontSize.summary,
                                             height: 1.7,
                                             letterSpacing: 0.3,
                                             leadingDistribution:
@@ -3240,28 +2760,9 @@ class _NewEditorPageState extends State<NewEditorPage>
                                     ),
                                   ),
                                 ),
-                                // 桌面拖拽：有文件悬停时给一个明确的落点提示。
-                                if (_draggingFiles) _buildDropHint(colors),
                               ],
                             );
-                            if (!PlatformFeatures.isDesktop) {
-                              return editorStack;
-                            }
-                            // 桌面端接住文件拖拽：图片进正文，其余作为附件。
-                            return DropTarget(
-                              onDragEntered: (_) {
-                                if (mounted) {
-                                  setState(() => _draggingFiles = true);
-                                }
-                              },
-                              onDragExited: (_) {
-                                if (mounted) {
-                                  setState(() => _draggingFiles = false);
-                                }
-                              },
-                              onDragDone: _handleDroppedFiles,
-                              child: editorStack,
-                            );
+                            return editorStack;
                           },
                         ),
                       ),
@@ -3279,7 +2780,6 @@ class _NewEditorPageState extends State<NewEditorPage>
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -3294,35 +2794,6 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 面板永远从工具栏下沿开始展开；内容按最终高度（锚点）布局后再裁剪，
   /// 所以内容本身不随动画上下漂移。
   Widget _buildPanelSheet(AppColors colors, double imeInset) {
-    // 桌面：面板直接浮在工具条上方，宽度与正文列对齐。
-    // 没有键盘区域可铺，也不需要锚点补偿。
-    if (PlatformFeatures.isDesktop) {
-      if (_panel == MarkdownToolbarPanel.none) {
-        return const SizedBox.shrink();
-      }
-      final double contentWidth = AppBreakpoints.contentMaxWidth(
-        MediaQuery.sizeOf(context).width,
-      );
-      return Positioned(
-        left: 0,
-        right: 0,
-        bottom: _toolbarHeight,
-        child: Container(
-          decoration: BoxDecoration(
-            color: colors.page,
-            border: Border(
-              top: BorderSide(color: colors.divider, width: 0.5),
-            ),
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: contentWidth),
-              child: _buildPanelContent(),
-            ),
-          ),
-        ),
-      );
-    }
     final double full = _toolbarAnchorIme ?? 0;
     final double visible = math.max(full - imeInset, 0);
     if (full <= 0 || visible <= 0) {
@@ -3351,7 +2822,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  /// 面板内容（Aa / 插入 / 附件），桌面与移动共用同一份。
+  /// 面板内容（Aa / 插入 / 附件）。
   Widget _buildPanelContent() {
     return ValueListenableBuilder<Set<MarkdownCommand>>(
       valueListenable: _activeCommands,
@@ -3392,307 +2863,6 @@ class _NewEditorPageState extends State<NewEditorPage>
     );
   }
 
-  /// 右键把选区收成光标时，若点击仍在原选中的块内，恢复原选区。
-  ///
-  /// 菜单路由拿焦点后内核可能把选区收成光标甚至直接清空，两种情况都要能
-  /// 恢复 —— 否则用户看到的就是「右键后蓝色选中底没了」。
-  void _restoreSelectionBeforeContextMenu() {
-    final DocumentSelection? remembered = _rememberedSelection;
-    if (remembered == null) {
-      return;
-    }
-    final DocumentSelection? current = _composer.selection;
-    if (current != null && !current.isCollapsed) {
-      return;
-    }
-    if (current != null && current.extent.nodeId != remembered.extent.nodeId) {
-      // 右键点在别的块上：按桌面惯例把光标落到点击处。
-      _rememberedSelection = null;
-      return;
-    }
-    _composer.setSelectionWithReason(
-      remembered,
-      SelectionReason.userInteraction,
-    );
-  }
-
-  /// 桌面右键菜单：复制 / 剪切 / 粘贴 / 全选。
-  ///
-  /// 主流桌面笔记都能在正文里右键；手机端没有右键，不会触发。
-  /// 粘贴走与工具条一致的 Markdown 智能粘贴，而不是系统默认粘贴。
-  Future<void> _showDesktopContextMenu(Offset globalPosition) async {
-    // 内核先处理了右键（把选区收成光标），这里按原选区恢复。
-    _restoreSelectionBeforeContextMenu();
-    final DocumentSelection? selection = _composer.selection;
-    final bool hasSelection = selection != null && !selection.isCollapsed;
-    // 表格是整块选中、没有逐单元格光标：右键给它单独的「编辑 / 复制」入口。
-    final DocumentNode? selectedNode = _selectionNode();
-    if (selectedNode is TableBlockNode) {
-      // 右键落在哪个单元格：结构操作要按目标行列执行。单元格由表格组件
-      // 在指针按下时上报；拿不到（例如整块选中后从空白处右键）就置灰。
-      final ({String tableId, int row, int column})? cell =
-          _lastTableCell?.tableId == selectedNode.id ? _lastTableCell : null;
-      final int targetRow = cell?.row ?? 0;
-      final int targetColumn = cell?.column ?? 0;
-      final bool hasCell = cell != null;
-      // 菜单顺序与 Typora 的表格右键菜单完全一致（取自 Typora 的
-      // index.html #table-menu）：插入 → 移动 → 删除行列 → 复制 → 删除表格。
-      final String? tableAction = await _showContextMenu(
-        position: globalPosition,
-        items: <PopupMenuEntry<String>>[
-          _menuItem('上方插入行', 'insertRowAbove', enabled: hasCell),
-          _menuItem('下方插入行', 'insertRowBelow', enabled: hasCell),
-          _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
-          _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
-          _menuItem(
-            '上移该行',
-            'moveRowUp',
-            // 第 0 行是表头，数据行不能越到表头之上。
-            enabled: hasCell && targetRow > 1,
-          ),
-          _menuItem(
-            '下移该行',
-            'moveRowDown',
-            enabled: hasCell &&
-                targetRow >= 1 &&
-                targetRow < selectedNode.rowCount - 1,
-          ),
-          _menuItem(
-            '左移该列',
-            'moveColumnLeft',
-            enabled: hasCell && targetColumn > 0,
-          ),
-          _menuItem(
-            '右移该列',
-            'moveColumnRight',
-            enabled: hasCell && targetColumn < selectedNode.columnCount - 1,
-          ),
-          _menuItem(
-            '删除行',
-            'deleteRow',
-            // 表头行不能删：删掉表格就没有语义基准了。
-            enabled: hasCell && targetRow > 0,
-          ),
-          _menuItem(
-            '删除列',
-            'deleteColumn',
-            enabled: hasCell && selectedNode.columnCount > 1,
-          ),
-          _menuItem('复制表格', 'copyTable'),
-          _menuItem('删除表格', 'deleteTable'),
-        ],
-      );
-      if (!mounted || tableAction == null) {
-        return;
-      }
-      switch (tableAction) {
-        case 'copyTable':
-          await _copyTableAsMarkdown(selectedNode);
-        case 'insertRowAbove':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.insertRowAbove,
-            targetRow,
-            targetColumn,
-          );
-        case 'insertRowBelow':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.insertRowBelow,
-            targetRow,
-            targetColumn,
-          );
-        case 'insertColumnLeft':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.insertColumnLeft,
-            targetRow,
-            targetColumn,
-          );
-        case 'insertColumnRight':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.insertColumnRight,
-            targetRow,
-            targetColumn,
-          );
-        case 'moveRowUp':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.moveRowUp,
-            targetRow,
-            targetColumn,
-          );
-        case 'moveRowDown':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.moveRowDown,
-            targetRow,
-            targetColumn,
-          );
-        case 'moveColumnLeft':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.moveColumnLeft,
-            targetRow,
-            targetColumn,
-          );
-        case 'moveColumnRight':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.moveColumnRight,
-            targetRow,
-            targetColumn,
-          );
-        case 'deleteRow':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.deleteRow,
-            targetRow,
-            targetColumn,
-          );
-        case 'deleteColumn':
-          _mutateTable(
-            selectedNode.id,
-            TableCellAction.deleteColumn,
-            targetRow,
-            targetColumn,
-          );
-        case 'deleteTable':
-          _deleteTable(selectedNode);
-      }
-      if (mounted) {
-        _editorFocus.requestFocus();
-      }
-      return;
-    }
-    final String? action = await _showContextMenu(
-      position: globalPosition,
-      items: <PopupMenuEntry<String>>[
-        _menuItem('复制', 'copy', enabled: hasSelection),
-        _menuItem('剪切', 'cut', enabled: hasSelection),
-        _menuItem('粘贴', 'paste'),
-        _menuItem('全选', 'selectAll'),
-      ],
-    );
-    if (!mounted || action == null) {
-      return;
-    }
-    switch (action) {
-      case 'copy':
-        _ops.copy();
-      case 'cut':
-        _ops.cut();
-      case 'paste':
-        await _pasteFromClipboard();
-      case 'selectAll':
-        _ops.selectAll();
-    }
-    if (!mounted) {
-      return;
-    }
-    // 菜单路由会拿走焦点：关闭后交还编辑器，否则「菜单关了却打不了字」。
-    _editorFocus.requestFocus();
-  }
-
-  /// 弹右键菜单。
-  ///
-  /// 用 `showMenu`：PopupMenu 自带弹出动画，与顶栏「⋯」是同一套观感。
-  /// 菜单打开会短暂拿走焦点，这里在弹出后与关闭后各恢复一次原选区，
-  /// 菜单开着时蓝色选中底仍然可见。
-  Future<String?> _showContextMenu({
-    required Offset position,
-    required List<PopupMenuEntry<String>> items,
-  }) async {
-    final RenderBox? overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (overlay == null) {
-      return null;
-    }
-    _restoreSelectionBeforeContextMenu();
-    final Future<String?> menu = showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        overlay.size.width - position.dx,
-        overlay.size.height - position.dy,
-      ),
-      items: items,
-    );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      // 菜单路由拿走了焦点，SuperEditor 会因此收起选区。把焦点还给编辑器：
-      // 菜单仍然开着（PopupMenu 不监听焦点），但蓝色选中底会恢复显示。
-      _editorFocus.requestFocus();
-      _restoreSelectionBeforeContextMenu();
-    });
-    for (final int delay in const <int>[120, 400]) {
-      Future<void>.delayed(Duration(milliseconds: delay), () {
-        if (mounted) {
-          _restoreSelectionBeforeContextMenu();
-        }
-      });
-    }
-    final String? action = await menu;
-    if (mounted) {
-      _restoreSelectionBeforeContextMenu();
-    }
-    return action;
-  }
-
-  /// 右键菜单项：行高对齐 macOS 原生菜单（30 / 14），不像应用菜单那么高。
-  ///
-  /// 表格菜单有 14 项、旧的 40 高会撑到 600+ px，必须滚动才能看全；主流的
-  /// 右键菜单（Finder / 浏览器 / Typora）都是紧凑行高。所有桌面右键菜单
-  /// 共用这里，样式保持一致。
-  PopupMenuItem<String> _menuItem(
-    String label,
-    String value, {
-    bool enabled = true,
-    bool destructive = false,
-    bool selected = false,
-  }) {
-    final AppColors colors = AppColors.of(context);
-    return PopupMenuItem<String>(
-      value: value,
-      enabled: enabled,
-      height: 30,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: <Widget>[
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppFontSize.labelLg,
-                color: !enabled
-                    ? colors.tertiary
-                    : destructive
-                        ? colors.danger
-                        : selected
-                            ? colors.accent
-                            : colors.text,
-              ),
-            ),
-          ),
-          if (selected) ...<Widget>[
-            const SizedBox(width: 10),
-            Icon(
-              Icons.check_rounded,
-              size: AppIcon.chevron,
-              color: colors.accent,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   /// 当前选区所在的块（表格右键菜单用）。
   DocumentNode? _selectionNode() {
     final DocumentSelection? selection = _composer.selection;
@@ -3700,212 +2870,6 @@ class _NewEditorPageState extends State<NewEditorPage>
       return null;
     }
     return _document.getNodeById(selection.extent.nodeId);
-  }
-
-  /// 把表格节点写回 Markdown（复制/编辑弹层共用）。
-  String _tableMarkdownOf(TableBlockNode table) {
-    String row(List<TextNode> cells) {
-      final String joined = cells
-          .map(
-              (TextNode cell) => cell.text.toPlainText().replaceAll('|', r'\|'))
-          .join(' | ');
-      return '| $joined |';
-    }
-
-    final StringBuffer buffer = StringBuffer();
-    buffer.writeln(row(table.getRow(0)));
-    buffer.writeln(
-      '| ${List<String>.filled(table.columnCount, '---').join(' | ')} |',
-    );
-    for (int i = 1; i < table.rowCount; i++) {
-      buffer.writeln(row(table.getRow(i)));
-    }
-    return buffer.toString().trimRight();
-  }
-
-  Future<void> _copyTableAsMarkdown(TableBlockNode table) async {
-    await Clipboard.setData(ClipboardData(text: _tableMarkdownOf(table)));
-    if (mounted) {
-      _showHint('表格已复制');
-    }
-  }
-
-  /// 删除整张表格（Typora 的 Delete Table）。
-  void _deleteTable(TableBlockNode table) {
-    _lastTableCell = null;
-    _editor.execute(<EditRequest>[DeleteNodeRequest(nodeId: table.id)]);
-  }
-
-  /// 桌面：单元格就地编辑后回写。
-  ///
-  /// 内核的表格节点不可变，这里重建整个 [TableBlockNode]：单元格 id 与
-  /// 其它单元格原样保留，只替换被编辑那一格的文本。走
-  /// [ReplaceNodeRequest] 是为了让这次修改进入撤销栈（⌘Z 可回退）。
-  ///
-  /// [text] 是带行内属性的富文本：编辑时保留的粗体 / 行内码会原样写回，
-  /// 不会因为「点进去又点出来」把样式洗掉。
-  void _replaceTableCell(
-    String tableId,
-    int row,
-    int column,
-    AttributedText text,
-  ) {
-    final DocumentNode? node = _document.getNodeById(tableId);
-    if (node is! TableBlockNode) {
-      return;
-    }
-    if (row < 0 ||
-        row >= node.rowCount ||
-        column < 0 ||
-        column >= node.columnCount) {
-      return;
-    }
-    final List<List<TextNode>> cells = <List<TextNode>>[];
-    for (int r = 0; r < node.rowCount; r++) {
-      final List<TextNode> nextRow = <TextNode>[];
-      for (int c = 0; c < node.columnCount; c++) {
-        final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
-        nextRow.add(
-          r == row && c == column
-              ? TextNode(
-                  id: cell.id,
-                  text: text,
-                  metadata: Map<String, dynamic>.from(cell.metadata),
-                )
-              : cell,
-        );
-      }
-      cells.add(nextRow);
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(
-        existingNodeId: node.id,
-        newNode: TableBlockNode(
-          id: node.id,
-          cells: cells,
-          metadata: Map<String, dynamic>.from(node.metadata),
-        ),
-      ),
-      // 重建后内核会按旧布局重算一次光标，可能停在错位的位置；整表选中
-      // 又会在每次提交时闪一片蓝底。直接清空选区：编辑焦点在单元格
-      // 输入框上，正文不需要光标。
-      const ClearSelectionRequest(),
-    ]);
-  }
-
-  /// 最近一次在表格单元格上按下指针的位置（右键菜单按它定位行列）。
-  ({String tableId, int row, int column})? _lastTableCell;
-
-  void _rememberTableCellPointer(String tableId, int row, int column) {
-    // 只记录行列（右键菜单定位用）。点击表格的滚动位置不再「补还原」：
-    // 表格选区已经不会触发框架自动滚动，之前 0/60/160ms 的三次 jumpTo
-    // 反而让光标落进单元格时正文抖一下（用户反馈）。
-    _lastTableCell = (tableId: tableId, row: row, column: column);
-  }
-
-  /// 是否正在编辑表格单元格：此时焦点在单元格输入框上，⌘C / ⌘V 必须交给
-  /// 输入框自己处理（否则会被页面拦去复制整张表 / 往正文粘贴）。
-  bool _tableCellEditing = false;
-
-  /// 表格结构操作：插入 / 删除行列。
-  ///
-  /// 重建逻辑抽在 [rebuildTableNode]（纯函数、可单测），这里只负责落库：
-  /// 走 [ReplaceNodeRequest] 保证 ⌘Z 能撤销，并把选区收回表格块。
-  void _mutateTable(
-    String tableId,
-    TableCellAction action,
-    int row,
-    int column,
-  ) {
-    final DocumentNode? node = _document.getNodeById(tableId);
-    if (node is! TableBlockNode) {
-      return;
-    }
-    final TableBlockNode? next = rebuildTableNode(node, action, row, column);
-    if (next == null) {
-      return;
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
-      // 不选中整表：块级选中会在表格左右两侧画选择手柄/光标（用户反馈
-      // 「表格边缘还有光标闪动」）。
-      const ClearSelectionRequest(),
-    ]);
-  }
-
-  /// 表格整列对齐（左 / 中 / 右）：写入单元格的 textAlign 元数据。
-  void _alignTableColumn(String tableId, int column, String align) {
-    final DocumentNode? node = _document.getNodeById(tableId);
-    if (node is! TableBlockNode) {
-      return;
-    }
-    if (column < 0 || column >= node.columnCount) {
-      return;
-    }
-    final List<List<TextNode>> rows = <List<TextNode>>[];
-    for (int r = 0; r < node.rowCount; r++) {
-      final List<TextNode> row = <TextNode>[];
-      for (int c = 0; c < node.columnCount; c++) {
-        final TextNode cell = node.getCell(rowIndex: r, columnIndex: c);
-        if (c != column) {
-          row.add(cell);
-          continue;
-        }
-        row.add(
-          TextNode(
-            id: cell.id,
-            text: cell.text,
-            metadata: <String, dynamic>{
-              ...cell.metadata,
-              TextNodeMetadata.textAlign: align,
-            },
-          ),
-        );
-      }
-      rows.add(row);
-    }
-    final TableBlockNode next = TableBlockNode(
-      id: node.id,
-      cells: rows,
-      metadata: Map<String, dynamic>.from(node.metadata),
-    );
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
-    ]);
-    // 对齐不改变选区：把整张表选中会让表格闪一片蓝底（用户反馈）。
-  }
-
-  /// 鼠标拖拽整行换位（Typora 的 drag & move）。
-  void _moveTableRow(String tableId, int fromRow, int toRow) {
-    final DocumentNode? node = _document.getNodeById(tableId);
-    if (node is! TableBlockNode) {
-      return;
-    }
-    final TableBlockNode? next = moveTableRow(node, fromRow, toRow);
-    if (next == null) {
-      return;
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
-      const ClearSelectionRequest(),
-    ]);
-  }
-
-  /// 鼠标拖拽整列换位。
-  void _moveTableColumn(String tableId, int fromColumn, int toColumn) {
-    final DocumentNode? node = _document.getNodeById(tableId);
-    if (node is! TableBlockNode) {
-      return;
-    }
-    final TableBlockNode? next =
-        moveTableColumn(node, fromColumn, toColumn);
-    if (next == null) {
-      return;
-    }
-    _editor.execute(<EditRequest>[
-      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
-      const ClearSelectionRequest(),
-    ]);
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -3941,10 +2905,7 @@ class _NewEditorPageState extends State<NewEditorPage>
         // 工具条/面板，再挂一条标签栏会把正文挤掉。交替期间也必须隐藏，
         // 否则正文视口会多出标签栏那一截，滚动位置被 clamp → 内容跟着动。
         //
-        // 桌面端没有软键盘，但编辑态工具条常显且底部预留了它的高度，
-        // 标签栏留着会与工具条重叠，同样隐藏（标签入口就在工具条上）。
-        if (_panelTransitioning ||
-            (editing && (imeInset > 0 || PlatformFeatures.isDesktop))) {
+        if (_panelTransitioning || (editing && imeInset > 0)) {
           return const SizedBox.shrink();
         }
         final List<String> tags = _currentNote.tags;
@@ -3994,17 +2955,8 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Widget _buildHeader(AppColors colors, double contentWidth) {
-    // 桌面端：不再是一条独立「状态栏」，而是与正文同列宽的文档头部——
-    // 左侧返回 + 更新时间，右侧目录 / 更多，没有分割线（用户反馈原来的
-    // 顶栏像「多出的一块」，主流桌面笔记都没有这条横条）。
-    if (PlatformFeatures.isDesktop) {
-      return ContentFrame(
-        maxWidth: contentWidth,
-        child: SizedBox(height: 44, child: _buildDesktopHeader(colors)),
-      );
-    }
     // 顶栏与正文同一列宽：宽屏下返回键/更多按钮贴着正文边缘，
-    // 而不是甩到窗口最左/最右（桌面竞品的通用做法）。
+    // 而不是甩到窗口最左/最右（主流笔记的通用做法）。
     return ContentFrame(
       maxWidth: contentWidth,
       child: SizedBox(
@@ -4018,28 +2970,26 @@ class _NewEditorPageState extends State<NewEditorPage>
                 style: AppText.meta.copyWith(color: colors.secondary),
               ),
             ),
-            // 双栏模式下没有「返回」：右侧面板常驻，左侧列表一直在。
-            if (!widget.embedded)
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                // 铺满整条顶栏：箭头、居中标题与空白都能点返回（用户反馈
-                // 「标题点不动」）。右侧图标按钮是 Stack 里更靠后的子项，
-                // 命中测试先于本层，因此不会被这块热区抢走点击。
-                right: 0,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).maybePop(),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: AppBackButton(
-                      hitSize: 56,
-                      onTap: () => Navigator.of(context).maybePop(),
-                    ),
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              // 铺满整条顶栏：箭头、居中标题与空白都能点返回（用户反馈
+              // 「标题点不动」）。右侧图标按钮是 Stack 里更靠后的子项，
+              // 命中测试先于本层，因此不会被这块热区抢走点击。
+              right: 0,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AppBackButton(
+                    hitSize: 56,
+                    onTap: () => Navigator.of(context).maybePop(),
                   ),
                 ),
               ),
+            ),
             Positioned(
               right: 0,
               top: 0,
@@ -4052,9 +3002,7 @@ class _NewEditorPageState extends State<NewEditorPage>
                   if (_outline.length >= 2)
                     AppIconButton(
                       // 「文档 + 列表」：比旧版的 toc 更见名知义 —— 一眼能看出
-                      // 是「按标题列出的全文导航」，与语雀/Notion 的目录图标
-                      // 同一语义。
-                      key: _outlineKey,
+                      // 是「按标题列出的全文导航」。
                       icon: Icons.list_alt_rounded,
                       onTap: _showOutline,
                       tooltip: '目录',
@@ -4062,7 +3010,6 @@ class _NewEditorPageState extends State<NewEditorPage>
                   // 撤销 / 还原已移到下方工具条（用户要求工具栏统一承载
                   // 高频动作），顶栏只留笔记级操作「⋯」。
                   AppIconButton(
-                    key: _moreMenuKey,
                     icon: Icons.more_horiz_rounded,
                     onTap: _showEditorMenu,
                     tooltip: '更多',
@@ -4073,54 +3020,6 @@ class _NewEditorPageState extends State<NewEditorPage>
           ],
         ),
       ),
-    );
-  }
-
-  /// 桌面端顶栏：一行元信息，与正文共享左右边距和底色。
-  Widget _buildDesktopHeader(AppColors colors) {
-    return Row(
-      children: <Widget>[
-        if (!widget.embedded)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                AppBackButton(
-                  hitSize: 40,
-                  onTap: () => Navigator.of(context).maybePop(),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  formatEditorTime(_updated),
-                  style: AppText.meta.copyWith(color: colors.secondary),
-                ),
-              ],
-            ),
-          )
-        else
-          Text(
-            formatEditorTime(_updated),
-            style: AppText.meta.copyWith(color: colors.secondary),
-          ),
-        const Spacer(),
-        if (_outline.length >= 2)
-          AppIconButton(
-            key: _outlineKey,
-            icon: Icons.list_alt_rounded,
-            hitSize: 40,
-            onTap: _showOutline,
-            tooltip: '目录',
-          ),
-        AppIconButton(
-          key: _moreMenuKey,
-          icon: Icons.more_horiz_rounded,
-          hitSize: 40,
-          onTap: _showEditorMenu,
-          tooltip: '更多',
-        ),
-      ],
     );
   }
 
@@ -4143,16 +3042,8 @@ class _NewEditorPageState extends State<NewEditorPage>
         }
         return false;
       },
-      child: Listener(
-        // 桌面右键：弹出复制/剪切/粘贴/全选；手机没有右键，不会触发。
-        onPointerDown: (PointerDownEvent event) {
-          if (PlatformFeatures.isDesktop &&
-              event.buttons == kSecondaryMouseButton) {
-            unawaited(_showDesktopContextMenu(event.position));
-          }
-        },
-        child: SuperEditor(
-          editor: _editor,
+      child: SuperEditor(
+        editor: _editor,
           // 组词（语音/输入法候选）下划线统一成主题色细线，见插件说明。
           plugins: <SuperEditorPlugin>{_composingUnderlinePlugin},
           // 自己持有焦点节点：底部面板关闭后要把焦点/IME 交还编辑器。
@@ -4185,19 +3076,13 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 图层链：官方 Android 光标（宽度 0，只保留选择手柄/工具条锚点）
           // 之外，再挂一层自绘光标 —— 官方光标按整行行盒画，比字高 70%
           // 且 2dp 粗（用户反馈），自绘版按字号比例重画。
-          //
-          // 桌面端不挂触屏的「选择手柄」图层：整表被块级选中时，它会在
-          // 表格左右两端各画一条竖线（来回淡入淡出，看起来就是「表格边缘
-          // 有光标在闪」）。Mac 用鼠标选字，本来也不需要手柄；移动端保留。
           documentOverlayBuilders: <SuperEditorLayerBuilder>[
-            if (!PlatformFeatures.isDesktop) ...<SuperEditorLayerBuilder>[
-              const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
-              const SuperEditorIosHandlesDocumentLayerBuilder(),
-              const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
-              const SuperEditorAndroidHandlesDocumentLayerBuilder(
-                caretWidth: 0,
-              ),
-            ],
+            const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+            const SuperEditorIosHandlesDocumentLayerBuilder(),
+            const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+            const SuperEditorAndroidHandlesDocumentLayerBuilder(
+              caretWidth: 0,
+            ),
             const DefaultCaretOverlayBuilder(),
             XiaojiCaretLayerBuilder(_composer),
           ],
@@ -4237,99 +3122,28 @@ class _NewEditorPageState extends State<NewEditorPage>
             // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
             // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
             // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
-            // 才保留横向滚动兜底。断点差异只体现在这里，结构不动。
-            //
-            // 桌面端按真正的正文列宽（而不是窗口宽度）计算，并把单列上限
-            // 放宽到 320：桌面表格再按手机的 240 封顶会显得又窄又挤，
-            // 两三列表格不该出现横向滚动条。
-            //
-            // 桌面用自建表格组件（Typora 式：点进格子就是光标，Tab 切格、
-            // Enter 格内换行、⌘↩ 插行）；移动端继续用内核的只读表格组件，
-            // 交互与观感都不变。
-            if (PlatformFeatures.isDesktop)
-              TyporaTableComponentBuilder(
-                availableWidth: contentWidth - AppSpace.page * 2,
-                columnMax: 320,
-                selectionColor: Color.alphaBlend(
-                  colors.accent.withValues(alpha: 0.25),
-                  colors.page,
-                ),
-                cursorColor: colors.accent,
-                editorFocusNode: _editorFocus,
-                onCellCommitted: _replaceTableCell,
-                onCellStructure: _mutateTable,
-                onCellPointerDown: _rememberTableCellPointer,
-                onColumnAlign: _alignTableColumn,
-                onMoveRow: _moveTableRow,
-                onMoveColumn: _moveTableColumn,
-                onCellEditingChanged: (bool editing) {
-                  _tableCellEditing = editing;
-                  if (editing) {
-                    // 单元格编辑时清掉正文选区：否则正文还画一个光标，
-                    // 看起来就是「表格里一个、下面一个」（用户反馈）。
-                    void clearBodySelection() {
-                      if (!mounted || !_tableCellEditing) {
-                        return;
-                      }
-                      if (_composer.selection != null) {
-                        _editor.execute(
-                          <EditRequest>[const ClearSelectionRequest()],
-                        );
-                      }
-                    }
-
-                    WidgetsBinding.instance.addPostFrameCallback(
-                      (_) => clearBodySelection(),
-                    );
-                    // 内核是在鼠标抬起后才选中整表：多补几次，覆盖按住
-                    // 鼠标较久的点击，避免表格边缘留着选择层/光标。
-                    for (final int delay in const <int>[80, 180, 320]) {
-                      Future<void>.delayed(
-                        Duration(milliseconds: delay),
-                        clearBodySelection,
-                      );
-                    }
-                    return;
-                  }
-                  // 编辑结束：把焦点交还正文，⌘Z / ⌘C 等系统快捷键恢复
-                  // 工作（单元格输入框销毁后焦点会落到空处）。
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted || _tableCellEditing) {
-                      return;
-                    }
-                    _editorFocus.requestFocus();
-                  });
-                },
-              )
-            else
-              _AdaptiveTableComponentBuilder(
-                availableWidth: contentWidth - AppSpace.page * 2,
-                columnMax: 240,
-                selectionColor: Color.alphaBlend(
-                  colors.accent.withValues(alpha: 0.25),
-                  colors.page,
-                ),
+            // 才保留横向滚动兜底。
+            _AdaptiveTableComponentBuilder(
+              availableWidth: contentWidth - AppSpace.page * 2,
+              columnMax: 240,
+              selectionColor: Color.alphaBlend(
+                colors.accent.withValues(alpha: 0.25),
+                colors.page,
               ),
+            ),
             ...defaultComponentBuilders,
             const UnknownComponentBuilder(),
           ],
         ),
-      ),
     );
   }
 
   Stylesheet _buildStylesheet(AppColors colors, double contentWidth) {
-    // 桌面阅读尺度：正文同号但行距更松，标题拉大一档。
-    // 移动端沿用精读字阶（24/20/16），不因桌面改动而变化。
-    final bool desktop = PlatformFeatures.isDesktop;
-    // 桌面详情页的字阶与留白（参考 Typora 的标题比例 + 语雀的克制留白）：
-    // 标题再放大一档、章节前留白更明显，长文看起来才有「一章一章」的
-    // 结构感；移动端保持原值不动。
-    final double h1Size = desktop ? 30 : AppFontSize.titleLg;
-    final double h2Size = desktop ? 24 : AppFontSize.heading;
-    final double h3Size = desktop ? 20 : AppFontSize.bodyLg;
-    final double paragraphHeight = desktop ? 1.75 : 1.6;
-    final double zoom = editorZoom.value;
+    // 手机端沿用精读字阶（24/20/16）。
+    const double h1Size = AppFontSize.titleLg;
+    const double h2Size = AppFontSize.heading;
+    const double h3Size = AppFontSize.bodyLg;
+    const double paragraphHeight = 1.6;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -4340,14 +3154,14 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 上下留白对称（默认的 leading 会偏下），整页竖向节奏更稳。
     // 必须用 addRulesAfter：super_editor 的样式表按「先命中先生效、
     // 后命中的值覆盖前面」合并，addRulesBefore 会被 defaultStylesheet
-    // 里 PC 端的默认值（正文 18、H1 38、段落/列表间距 24）盖掉 ——
+    // 的默认值（正文 18、H1 38、段落/列表间距 24）盖掉 ——
     // 之前写在这一层里的手机端字阶其实从未生效，真机上看到的一直是
-    // 桌面排版（用户反馈的「整体偏大、Typora 感」就是这个根因）。
+    // 内核默认排版（用户反馈的「整体偏大、Typora 感」就是这个根因）。
     return defaultStylesheet.copyWith(
       // maxWidth 必须作为「第一条规则」写进 rules：super_editor 的
       // _mergeStyles 对非 TextStyle / 非 CascadingPadding 的值只保留旧值，
-      // 写在 addRulesAfter 里会被默认的 640 静默吃掉（桌面端一直按 640
-      // 排版、光标与占位提示因此错位 60dp）。
+      // 写在 addRulesAfter 里会被默认的 640 静默吃掉（光标与占位提示
+      // 因此错位 60dp）。
       rules: <StyleRule>[
         StyleRule(
           BlockSelector.all,
@@ -4380,8 +3194,8 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) {
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
-                fontSize: AppFontSize.summary * zoom,
-                height: desktop ? 1.75 : 1.7,
+                fontSize: AppFontSize.summary,
+                height: 1.7,
                 letterSpacing: 0.3,
                 leadingDistribution: TextLeadingDistribution.even,
                 color: colors.text,
@@ -4430,10 +3244,9 @@ class _NewEditorPageState extends State<NewEditorPage>
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.textStyle: TextStyle(height: paragraphHeight),
-            // 桌面段落间距 14：比移动端 12 稍松，长文更透气。
-            Styles.padding: CascadingPadding.only(
-              top: desktop ? 14 : 12,
+            Styles.textStyle: const TextStyle(height: paragraphHeight),
+            Styles.padding: const CascadingPadding.only(
+              top: 12,
             ),
           },
         ),
@@ -4489,7 +3302,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header1'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h1Size * zoom,
+              fontSize: h1Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               // 中文标题加字距会显得松散：收紧到 0.1，标题更「整」。
@@ -4497,9 +3310,9 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: desktop ? 36 : 24,
-              bottom: desktop ? 10 : 8,
+            Styles.padding: const CascadingPadding.only(
+              top: 24,
+              bottom: 8,
             ),
           },
         ),
@@ -4507,16 +3320,16 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header2'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h2Size * zoom,
+              fontSize: h2Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: desktop ? 26 : 18,
-              bottom: desktop ? 8 : 6,
+            Styles.padding: const CascadingPadding.only(
+              top: 18,
+              bottom: 6,
             ),
           },
         ),
@@ -4524,16 +3337,16 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header3'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: h3Size * zoom,
+              fontSize: h3Size,
               fontWeight: AppWeight.semibold,
               height: 1.3,
               letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: desktop ? 20 : 14,
-              bottom: desktop ? 6 : 4,
+            Styles.padding: const CascadingPadding.only(
+              top: 14,
+              bottom: 4,
             ),
           },
         ),
@@ -4544,7 +3357,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header4'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary * editorZoom.value,
+              fontSize: AppFontSize.summary,
               fontWeight: AppWeight.semibold,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -4557,7 +3370,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header5'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary * editorZoom.value,
+              fontSize: AppFontSize.summary,
               fontWeight: AppWeight.medium,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -4570,7 +3383,7 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('header6'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary * editorZoom.value,
+              fontSize: AppFontSize.summary,
               fontWeight: AppWeight.regular,
               height: 1.35,
               leadingDistribution: TextLeadingDistribution.even,
@@ -4589,7 +3402,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             final bool continuesBelow = _quoteContinuesBelow(doc, node);
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
-                fontSize: AppQuote.fontSize * zoom,
+                fontSize: AppQuote.fontSize,
                 height: AppQuote.height,
                 letterSpacing: AppQuote.letterSpacing,
                 leadingDistribution: TextLeadingDistribution.even,
@@ -4636,8 +3449,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.textStyle: TextStyle(
               fontFamily: 'monospace',
               fontSize: AppFontSize.summary *
-                  CodeBlockCardStyle.fontSizeFactor *
-                  zoom,
+                  CodeBlockCardStyle.fontSizeFactor,
               height: CodeBlockCardStyle.lineHeight,
               letterSpacing: 0,
               leadingDistribution: TextLeadingDistribution.even,
@@ -4707,13 +3519,8 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 工具栏也必须跟着收起；否则底部会一直挂着一条按钮条。
           // 子菜单展开、或正在「面板 → 键盘」回弹时，键盘高度可能短暂为
           // 0，但工具栏必须留下（否则会先滑下去再被顶上来，用户反馈）。
-          //
-          // 桌面端没有软键盘，`imeInset` 恒为 0；这里以前直接沿用
-          // 「必须有键盘」的条件，导致 PC 上点进正文后工具栏永远不出现，
-          // 排版/标签/撤销入口全部不可达。桌面改为「有选区即常显」。
-          final bool show = PlatformFeatures.isDesktop
-              ? editing
-              : (editing && (imeInset > 0 || _panelTransitioning));
+          final bool show =
+              editing && (imeInset > 0 || _panelTransitioning);
           return IgnorePointer(
             // 不可见时也别让它接住点击（否则会点和渲染态完全无关的东西）。
             ignoring: !show,
@@ -4979,22 +3786,11 @@ class _LabImageComponentBuilder implements ComponentBuilder {
   }
 
   /// 捕获图片块当前的全局矩形，打开大图查看器。
-  ///
-  /// 桌面端优先交给原生窗口（系统预览式独立窗口）；原生不可用或移动端
-  /// 才走应用内的飞行转场查看器。
   void _openViewer(
     SingleColumnDocumentComponentContext componentContext,
     String absolutePath,
     String alt,
   ) {
-    if (PlatformFeatures.isDesktop) {
-      unawaited(_openViewerInNativeWindow(
-        componentContext,
-        absolutePath,
-        alt,
-      ));
-      return;
-    }
     Rect sourceRect = Rect.zero;
     final renderObject =
         componentContext.componentKey.currentContext?.findRenderObject();
@@ -5002,39 +3798,6 @@ class _LabImageComponentBuilder implements ComponentBuilder {
         renderObject.attached &&
         renderObject.hasSize) {
       sourceRect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
-    }
-    Navigator.of(componentContext.context).push(
-      buildImageViewerRoute(
-        sourceRect: sourceRect,
-        absolutePath: absolutePath,
-        alt: alt,
-      ),
-    );
-  }
-
-  /// 桌面端独立图片窗口；原生打不开时回退到应用内查看器。
-  Future<void> _openViewerInNativeWindow(
-    SingleColumnDocumentComponentContext componentContext,
-    String absolutePath,
-    String alt,
-  ) async {
-    final bool opened = await openImageInNativeWindow(
-      path: absolutePath,
-      title: alt,
-    );
-    if (opened) {
-      return;
-    }
-    Rect sourceRect = Rect.zero;
-    final renderObject =
-        componentContext.componentKey.currentContext?.findRenderObject();
-    if (renderObject is RenderBox &&
-        renderObject.attached &&
-        renderObject.hasSize) {
-      sourceRect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
-    }
-    if (!componentContext.context.mounted) {
-      return;
     }
     Navigator.of(componentContext.context).push(
       buildImageViewerRoute(
@@ -5632,6 +4395,26 @@ double tableColumnCap({
   return (availableWidth / columns).clamp(min, max).toDouble();
 }
 
+/// 列宽按内容取「固有宽度」，但不超过 [maxWidth]。
+///
+/// 表格内核默认用 [IntrinsicColumnWidth]：长文本会把整张表撑到几千 dp，
+/// 手机窄屏必须横向滑很久才能看完。封顶后长内容在单元格内换行。
+class CappedIntrinsicColumnWidth extends TableColumnWidth {
+  const CappedIntrinsicColumnWidth(this.maxWidth);
+
+  final double maxWidth;
+
+  static const TableColumnWidth _intrinsic = IntrinsicColumnWidth();
+
+  @override
+  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
+      math.min(_intrinsic.minIntrinsicWidth(cells, containerWidth), maxWidth);
+
+  @override
+  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
+      math.min(_intrinsic.maxIntrinsicWidth(cells, containerWidth), maxWidth);
+}
+
 /// 表格组件：按「正文可用宽度 / 列数」给每列分配上限。
 ///
 /// 手机窄屏下，长文本单元格以前会把列撑到内容宽度（整表几千 dp），
@@ -5650,7 +4433,7 @@ class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
   /// 已经选中，也就不会想到可以复制。
   final Color selectionColor;
 
-  /// 单列宽度上限：手机/平板 240，桌面放宽到 320。
+  /// 单列宽度上限：窄屏 240，宽屏（平板）可略宽。
   final double columnMax;
 
   @override
@@ -5755,27 +4538,21 @@ class _VersionHistorySheet extends StatelessWidget {
   const _VersionHistorySheet({
     required this.versions,
     required this.locked,
-    this.dialog = false,
   });
 
   final List<NoteVersion> versions;
   final bool locked;
 
-  /// 桌面端以居中对话框呈现：不带顶部留白、四角都收圆。
-  final bool dialog;
-
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     return Container(
-      margin: dialog ? EdgeInsets.zero : const EdgeInsets.only(top: 90),
+      margin: const EdgeInsets.only(top: 90),
       decoration: BoxDecoration(
         color: colors.page,
-        borderRadius: dialog
-            ? BorderRadius.circular(AppRadius.block)
-            : const BorderRadius.vertical(
-                top: Radius.circular(AppRadius.sheet),
-              ),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.sheet),
+        ),
       ),
       // SafeArea 放在卡片内部：底色一直铺到屏幕最底部（含手势指示器
       // 区域），内容再按底部 insets 避开手势条。之前 SafeArea 包在
@@ -5880,35 +4657,28 @@ class _VersionPreviewSheet extends StatelessWidget {
     required this.note,
     required this.time,
     required this.locked,
-    this.dialog = false,
   });
 
   final Note? note;
   final DateTime time;
   final bool locked;
 
-  /// 桌面端以居中对话框呈现：不带顶部留白、四角都收圆。
-  final bool dialog;
-
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final double maxHeight =
-        dialog ? double.infinity : MediaQuery.sizeOf(context).height * 0.75;
+    final double maxHeight = MediaQuery.sizeOf(context).height * 0.75;
     final List<String> blocks = (locked || note == null)
         ? const <String>[]
         : note!.body.split(RegExp(r'\n{2,}'));
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Container(
-        margin: dialog ? EdgeInsets.zero : const EdgeInsets.only(top: 70),
+        margin: const EdgeInsets.only(top: 70),
         decoration: BoxDecoration(
           color: colors.page,
-          borderRadius: dialog
-              ? BorderRadius.circular(AppRadius.block)
-              : const BorderRadius.vertical(
-                  top: Radius.circular(AppRadius.sheet),
-                ),
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(AppRadius.sheet),
+          ),
         ),
         // 与历史版本列表同一处理：SafeArea 放进卡片里，底色铺到屏幕底部。
         child: SafeArea(

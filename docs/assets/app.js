@@ -48,15 +48,6 @@
     });
   }
 
-  function findAsset(assets, pattern) {
-    for (var i = 0; i < assets.length; i++) {
-      if (pattern.test(assets[i].name)) {
-        return assets[i];
-      }
-    }
-    return null;
-  }
-
   // 访问设备识别：主下载按钮按平台直接给对应安装包（主流官网做法）。
   //
   // 顺序很重要：Android UA 里含 Linux；iPadOS 13+ 的 Safari 会伪装成
@@ -104,36 +95,17 @@
       var apks = assets.filter(function (asset) {
         return /\.apk$/i.test(asset.name);
       });
-      // 按 ABI 拆包后优先指向 arm64（绝大多数设备），老设备在 Release 页
-      // 里手动选 armeabi-v7a。
+      // 只发布 Android：其它平台没有对应安装包，按钮改为「查看全部版本」。
       var apk = apks.filter(function (asset) {
         return /arm64-v8a\.apk$/i.test(asset.name);
       })[0] || apks[0];
 
-      // 桌面端：macOS 通用 DMG、Windows x64 安装器。缺失时保持指向 Releases 页。
-      var mac = findAsset(assets, /-macos-universal\.dmg$/i);
-      var win = findAsset(assets, /-windows-x64-setup\.exe$/i);
-
-      // 主按钮按访问平台给对应安装包，文案同步成「下载 macOS 版」等。
-      // iOS / Linux 没有对应包：按钮改为「查看全部版本」，避免误下 APK。
       var platform = detectPlatform();
-      var primary = null;
-      var label = '下载最新版';
-      if (platform === 'android') {
-        primary = apk;
-        label = '下载 Android APK';
-      } else if (platform === 'macos') {
-        primary = mac;
-        label = '下载 macOS 版';
-      } else if (platform === 'windows') {
-        primary = win;
-        label = '下载 Windows 版';
-      } else if (platform === 'ios' || platform === 'linux') {
+      var primary = apk;
+      var label = '下载 Android APK';
+      if (platform === 'ios' || platform === 'linux' || platform === 'macos' || platform === 'windows') {
+        primary = null;
         label = '查看全部版本';
-      } else if (apk) {
-        // 无法识别的系统：保留原来的 APK 兜底。
-        primary = apk;
-        label = '下载 Android APK';
       }
 
       fill('[data-latest-version]', release.tag_name || release.name);
@@ -141,16 +113,13 @@
       if (primary) {
         fill('[data-latest-size]', formatSize(primary.size));
         link('[data-download-link]', primary.browser_download_url);
-      } else if (platform === 'ios' || platform === 'linux') {
+      } else {
         link(
           '[data-download-link]',
           'https://github.com/' + REPO + '/releases/latest'
         );
       }
       fill('[data-download-label]', label);
-
-      link('[data-macos-download]', mac && mac.browser_download_url);
-      link('[data-windows-download]', win && win.browser_download_url);
     })
     .catch(function () {
       // 保持静态兜底：链接仍指向 releases/latest 页面。

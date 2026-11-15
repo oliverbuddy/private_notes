@@ -1,9 +1,8 @@
 import 'package:super_editor/super_editor.dart';
 
-import '../../platform/platform_features.dart';
 import '../../util/external_link.dart';
 
-/// 小记的内容点击策略：链接跳转 + 双击选词（仅桌面）。
+/// 小记的内容点击策略：链接跳转 + 双击不选词。
 ///
 /// 链接：super_editor 自带的 [SuperEditorLaunchLinkTapHandler] 只在
 /// `composer.isInInteractionMode == true` 时打开链接 —— 小记是常驻编辑态，
@@ -60,16 +59,13 @@ class XiaojiLinkTapHandler extends ContentTapDelegate {
     return TapHandlingInstruction.continueHandling;
   }
 
-  /// 双击：手机端不选词（选词统一走长按）；桌面端保留系统习惯，交给内核选词。
+  /// 双击：不选中、也不弹工具条，等价于一次普通点击。
   ///
-  /// 桌面用户双击一个词就是「选中它」，再配合 ⌘C / Ctrl+C 复制。
-  /// 这里如果没有平台判断，双击在 PC 上会完全无反应（用户反馈的
-  /// 「PC 端选不中词」就是这个原因）。
+  /// super_editor 默认双击会选中一个词并弹出「复制/剪切/粘贴/全选」工具条；
+  /// 小记是「打开即可写」的常驻编辑页，双击多数只是快速落光标，弹工具条
+  /// 会打断阅读（用户反馈）。移动端选词统一走长按。
   @override
   TapHandlingInstruction onDoubleTap(DocumentTapDetails details) {
-    if (PlatformFeatures.isDesktop) {
-      return TapHandlingInstruction.continueHandling;
-    }
     return TapHandlingInstruction.halt;
   }
 }

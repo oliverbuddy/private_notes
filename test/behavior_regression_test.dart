@@ -181,6 +181,40 @@ void main() {
     expect(tileHeight, lessThan(300));
   });
 
+  testWidgets('两张表格的预览行数共用同一份预算', (WidgetTester tester) async {
+    const String table = '| 名称 | 数量 |\n| --- | --- |\n| 甲 | 1 |\n| 乙 | 2 |';
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: NoteTileComfortable(
+              note: Note(
+                id: 'two-tables',
+                created: DateTime(2026, 11, 12, 8, 0),
+                updated: DateTime(2026, 11, 12, 8, 0),
+                body: '$table\n\n$table\n\n表格后面的正文不应该出现',
+              ),
+              thumbnailPaths: const <String>[],
+              onTap: () {},
+              onLongPress: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpFrames(tester, frames: 4);
+
+    // 每张表 3 行（表头 + 2 行数据），两张合计 6 行，超出 5 行预算：
+    // 第一张完整显示，第二张只留 2 行，后面的正文不再出现。
+    final List<Table> tables =
+        tester.widgetList<Table>(find.byType(Table)).toList();
+    expect(tables.length, 2);
+    expect(tables[0].children.length, 3);
+    expect(tables[1].children.length, 2);
+    expect(find.text('表格后面的正文不应该出现'), findsNothing);
+  });
+
   testWidgets('摘要含标签/待办/引用时不抛异常且高度有限', (WidgetTester tester) async {
     await tester.pumpWidget(
       MaterialApp(

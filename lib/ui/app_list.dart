@@ -213,8 +213,8 @@ class AppListRow extends StatelessWidget {
     if (onTap == null) {
       return content;
     }
-    // 桌面端统一交互反馈：悬停/按下时铺一层淡蒙层（与首页卡片、弹窗
-    // 选项一致），否则设置项在 Mac 上「点上去没有反应」。
+    // 统一交互反馈：按下时铺一层淡蒙层（与首页卡片、弹窗选项一致），
+    // 设置项点上去有明确回应。
     return AppPressable(
       onTap: onTap,
       pressedScale: 1,

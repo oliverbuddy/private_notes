@@ -7,13 +7,10 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'app/shortcuts.dart';
 import 'data/note_repository.dart';
 import 'data/note_store.dart';
-import 'editor/editor_zoom.dart';
 import 'home/home_page.dart';
 import 'models/note_settings.dart';
-import 'platform/platform_features.dart';
 import 'security/app_lock_gate.dart';
 import 'theme/app_theme.dart';
-import 'util/desktop_window.dart';
 
 /// 启动时的逻辑宽度。取不到视图时按「窄屏」处理，保持旧行为。
 double _startupWidth() {
@@ -29,9 +26,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 窄屏手机锁竖屏：随手记在竖屏下键盘避让/列宽最稳，国内同类也一律竖屏。
-  // 平板（宽度 ≥ 600）与桌面不锁：平板横屏才有空间，桌面窗口本来就能拉伸。
+  // 平板（宽度 ≥ 600）不锁：横屏才有空间。
   // Android 侧 manifest 已改成 fullUser，这里只在启动时再兜一层。
-  if (!PlatformFeatures.isDesktop && _startupWidth() < AppBreakpoints.compact) {
+  if (_startupWidth() < AppBreakpoints.compact) {
     await SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
       DeviceOrientation.portraitUp,
     ]);
@@ -95,9 +92,6 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   ThemeData? _lightTheme;
   ThemeData? _darkTheme;
 
-  /// 上一次同步给窗口顶栏的明暗；只在切换时调原生，避免每帧过桥。
-  bool? _chromeDark;
-
   @override
   void initState() {
     super.initState();
@@ -108,18 +102,6 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  /// 把当前主题的页面底色同步给 macOS 标题栏（Windows 暂不处理）。
-  void _syncWindowChrome(bool dark) {
-    if (!PlatformFeatures.isMacOS || _chromeDark == dark) {
-      return;
-    }
-    _chromeDark = dark;
-    final Color page = dark ? AppColors.dark.page : AppColors.light.page;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(syncDesktopWindowChrome(page));
-    });
   }
 
   @override
@@ -154,7 +136,6 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
           ThemeMode.system =>
             PlatformDispatcher.instance.platformBrightness == Brightness.dark,
         };
-        _syncWindowChrome(darkNow);
 
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: SystemUiOverlayStyle(
@@ -191,32 +172,10 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
             // 退后台自动锁定后回来，用户仍能看到当前页面的内容。
             // builder 包住整个 Navigator，锁屏才能盖住所有路由。
             builder: (BuildContext context, Widget? child) {
-              Widget content = child ?? const SizedBox.shrink();
-              // 桌面端字阶收紧一档（见 kDesktopTextScale）：只缩放文字，
-              // 图标与热区不变；移动端拿不到这个分支，观感与之前一致。
-              if (PlatformFeatures.isDesktop) {
-                content = MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    textScaler: const TextScaler.linear(kDesktopTextScale),
-                  ),
-                  child: content,
-                );
-              }
-              // macOS：标题栏透明、内容延伸到标题栏（见 MainFlutterWindow），
-              // 顶部给红黄绿三个窗口按钮留出安全区。28 时页面返回键/标题
-              // 与按钮只差几像素，看起来快贴上了；加到 34 留出呼吸。
-              if (PlatformFeatures.isMacOS) {
-                final EdgeInsets padding = MediaQuery.of(context).padding;
-                content = MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    padding: padding.copyWith(top: padding.top + 34),
-                  ),
-                  child: content,
-                );
-              }
+              final Widget content = child ?? const SizedBox.shrink();
               return AppLockGate(
                 repository: widget.repository,
-                child: _DesktopShortcuts(child: content),
+                child: content,
               );
             },
             home: HomePage(
@@ -230,67 +189,7 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
   }
 }
 
-/// 桌面端全局快捷键。
-///
-/// - ⌘N / Ctrl+N：新建小记（手机上没有的日常动作）；
-/// - F11、⌃⌘F：切换全屏（Windows 习惯 / macOS 系统全屏快捷键）；
-/// - ⌘= / ⌘- / ⌘0：缩放正文，由 [EditorZoomShortcuts] 提供。
-/// 其余（⌘W 关窗、⌘Q 退出、⌘Z 撤销）由系统与 Flutter 默认行为提供，
-/// 不再重复实现 —— 快捷键和系统习惯打架比没有更难用。
-class _DesktopShortcuts extends StatelessWidget {
-  const _DesktopShortcuts({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!PlatformFeatures.isDesktop) {
-      return child;
-    }
-    return EditorZoomShortcuts(
-      child: Shortcuts(
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.keyN, meta: true):
-              _NewNoteIntent(),
-          SingleActivator(LogicalKeyboardKey.keyN, control: true):
-              _NewNoteIntent(),
-          SingleActivator(LogicalKeyboardKey.f11): _ToggleFullscreenIntent(),
-          SingleActivator(
-            LogicalKeyboardKey.keyF,
-            meta: true,
-            control: true,
-          ): _ToggleFullscreenIntent(),
-        },
-        child: Actions(
-          actions: <Type, Action<Intent>>{
-            _NewNoteIntent: CallbackAction<_NewNoteIntent>(
-              onInvoke: (_) {
-                newNoteRequests.value++;
-                return null;
-              },
-            ),
-            _ToggleFullscreenIntent: CallbackAction<_ToggleFullscreenIntent>(
-              onInvoke: (_) {
-                toggleDesktopFullscreen();
-                return null;
-              },
-            ),
-          },
-          child: child,
-        ),
-      ),
-    );
-  }
-}
-
-class _NewNoteIntent extends Intent {
-  const _NewNoteIntent();
-}
-
-class _ToggleFullscreenIntent extends Intent {
-  const _ToggleFullscreenIntent();
-}
-
+/// 启动失败时的兜底页面。
 class _StartupFailureApp extends StatelessWidget {
   const _StartupFailureApp({required this.message});
 

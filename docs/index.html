@@ -36,7 +36,6 @@
       <nav class="nav" aria-label="主导航">
         <a href="#features">功能</a>
         <a href="#security">安全</a>
-        <a href="#desktop">桌面端</a>
         <a href="#screens">截图</a>
         <a href="#download">下载</a>
         <a class="nav-github" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">
@@ -51,7 +50,7 @@
     <section class="hero">
       <div class="container hero-inner">
         <div class="hero-copy">
-          <p class="eyebrow">本地优先 · Android / macOS / Windows · 非商业授权</p>
+          <p class="eyebrow">本地优先 · Android · 非商业授权</p>
           <h1>你的笔记，<br>只属于你。</h1>
           <p class="lede">无账号、无网络、无同步。像便签一样快，像文件夹一样透明 —— 所有内容都是设备上的一群 <code>.md</code> 文件。</p>
           <div class="hero-actions">
@@ -62,9 +61,9 @@
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes" target="_blank" rel="noopener">查看源码</a>
           </div>
           <p class="hero-meta">
-            <span data-latest-version>v1.10.12</span>
-            <span data-latest-size>21.3 MB</span>
-            <span>Android APK · macOS DMG · Windows 安装器</span>
+            <span data-latest-version>v1.11.0</span>
+            <span data-latest-size>22.7 MB</span>
+            <span>Android APK</span>
           </p>
         </div>
 
@@ -132,34 +131,6 @@
       </div>
     </section>
 
-    <section id="desktop" class="section section-alt">
-      <div class="container">
-        <div class="section-head">
-          <p class="eyebrow">桌面端</p>
-          <h2>按桌面的方式用</h2>
-          <p class="section-sub">不是把手机界面拉宽。双栏、键鼠、拖拽、全屏，macOS 与 Windows 都按系统习惯来。</p>
-        </div>
-
-        <div class="grid grid-3">
-          <article class="card">
-            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="7" height="15" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="12.5" y="4.5" width="8.5" height="15" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span>
-            <h3>列表 + 正文双栏</h3>
-            <p>宽屏左侧列表常驻、右侧阅读，切笔记不打断；窗口拖窄自动回到单栏，平板横屏同样双栏。</p>
-          </article>
-          <article class="card">
-            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7 20h10M12 17v3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
-            <h3>键盘与鼠标</h3>
-            <p>双击选词、右键复制粘贴，<code>↑</code> / <code>↓</code> 切上一条 / 下一条，<code>⌘=</code> / <code>⌘-</code> / <code>⌘0</code> 缩放正文；<code>⌘N</code> 新建、<code>F11</code> / <code>⌃⌘F</code> 全屏，<code>Esc</code> 退出编辑。表格双击单元格直接改，<code>Tab</code> 连续切格。</p>
-          </article>
-          <article class="card">
-            <span class="card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8m0 0 3-3m-3 3L9 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
-            <h3>拖拽即插入</h3>
-            <p>图片拖进正文直接插入，其他文件作为附件；桌面排版独立调校，应用图标与移动端同一份。</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
     <section id="security" class="section section-dark">
       <div class="container security-inner">
         <div class="security-copy">
@@ -168,8 +139,8 @@
           <p class="section-sub">手机丢了、借给别人、被 screenshot —— 笔记应该在设计上就防住，而不是寄希望于「记得加锁」。</p>
           <ul class="check-list">
             <li><strong>应用锁</strong>：系统 PIN / 图案 / 密码或指纹；退后台按「立即 / 1 分钟 / 5 分钟」自动锁定，锁屏覆盖所有页面。</li>
-            <li><strong>单篇锁定</strong>：正文 AES-256-GCM 加密，密钥存在 Android Keystore / macOS Keychain / Windows DPAPI，不出设备；打开、取消锁定、删除都要重新验证。</li>
-            <li><strong>截屏保护</strong>：锁定内容禁止截屏与多任务预览，普通页面不受影响；桌面端同样在窗口层屏蔽截屏（macOS <code>sharingType</code> / Windows <code>WDA_EXCLUDEFROMCAPTURE</code>）。</li>
+            <li><strong>单篇锁定</strong>：正文 AES-256-GCM 加密，密钥存在 Android Keystore，不出设备；打开、取消锁定、删除都要重新验证。</li>
+            <li><strong>截屏保护</strong>：锁定内容禁止截屏与多任务预览，普通页面不受影响。</li>
             <li><strong>不留后路</strong>：Release 包不申请联网权限，系统备份关闭（<code>allowBackup=false</code>）。</li>
           </ul>
         </div>
@@ -256,10 +227,10 @@ pinned: true
             <div>
               <h2>下载小记</h2>
               <p class="download-meta">
-                <span data-latest-version>v1.10.12</span>
-                <span data-latest-date>2026-11-14</span>
-                <span data-latest-size>21.3 MB</span>
-                <span>Android 7.0+ · macOS 12+ · Windows 10+</span>
+                <span data-latest-version>v1.11.0</span>
+                <span data-latest-date>2026-11-15</span>
+                <span data-latest-size>22.7 MB</span>
+                <span>Android 7.0+</span>
               </p>
             </div>
           </div>
@@ -267,22 +238,16 @@ pinned: true
             <a class="btn btn-primary" data-download-link href="https://github.com/oliverbuddy/private_notes/releases/latest">
               <span data-download-label>下载 APK</span>
             </a>
-            <a class="btn btn-ghost" data-macos-download href="https://github.com/oliverbuddy/private_notes/releases/latest">
-              macOS
-            </a>
-            <a class="btn btn-ghost" data-windows-download href="https://github.com/oliverbuddy/private_notes/releases/latest">
-              Windows
-            </a>
             <a class="btn btn-ghost" href="https://github.com/oliverbuddy/private_notes/releases" target="_blank" rel="noopener">全部版本 / 校验和</a>
           </div>
-          <p class="download-note">三个平台都在 GitHub Actions 上构建：APK 用项目签名密钥；macOS 提供 <code>.dmg</code>（ad-hoc 签名、未公证），Windows 提供 <code>.exe</code> 安装器（未签名）。每个 Release 附带 SHA-256 校验文件。</p>
+          <p class="download-note">APK 在 GitHub Actions 上用项目签名密钥构建，每个 Release 附带 SHA-256 校验文件。</p>
         </div>
 
         <div class="grid grid-3 download-steps">
           <article class="step">
             <span class="step-no">01</span>
             <h3>下载并安装</h3>
-            <p>Android：安装包按 CPU 架构拆开，绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>，首次可能需要允许「安装未知来源应用」。macOS：打开 <code>.dmg</code>，把 <code>xiaoji.app</code> 拖进「应用程序」。Windows：运行 <code>.exe</code> 安装器，按提示完成（默认装到当前用户目录，不需要管理员权限）。</p>
+            <p>安装包按 CPU 架构拆开，绝大多数手机下载 <code>arm64-v8a</code>，老设备选 <code>armeabi-v7a</code>，首次可能需要允许「安装未知来源应用」。</p>
           </article>
           <article class="step">
             <span class="step-no">02</span>
@@ -326,15 +291,7 @@ pinned: true
         </details>
         <details>
           <summary>有 iOS 版本吗？</summary>
-          <p>暂时没有。当前提供 Android、macOS、Windows 三个平台；iOS 需要 Apple 开发者账号做签名，工程尚未生成。</p>
-        </details>
-        <details>
-          <summary>macOS / Windows 打不开怎么办？</summary>
-          <p>桌面包没有购买代码签名证书，所以系统会提示「未签名 / 无法验证开发者」，这是预期行为，包本身没有损坏。macOS 14 及更早：右键 <code>xiaoji</code> →「打开」；macOS 15 及更新：双击后到「系统设置 → 隐私与安全性」点「仍要打开」。仍提示「已损坏」时在终端执行 <code>xattr -dr com.apple.quarantine /Applications/xiaoji.app</code>。Windows 的 SmartScreen 提示点「更多信息 → 仍要运行」。桌面端数据同样是本地 <code>.md</code> 文件，不联网、不同步。</p>
-        </details>
-        <details>
-          <summary>桌面端的备份和手机通用吗？</summary>
-          <p>通用。导出的 zip / 加密 <code>.xiaoji</code> 包在三个平台之间可以直接恢复。但锁定笔记的密钥绑定本机（Android Keystore / macOS Keychain / Windows DPAPI），跨设备迁移请用「导出（含锁定笔记，明文）」后重新锁定。</p>
+          <p>暂时没有。当前提供 Android 版本；iOS 需要 Apple 开发者账号做签名，工程尚未生成。</p>
         </details>
         <details>
           <summary>可以商用吗？</summary>

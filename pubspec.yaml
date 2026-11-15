@@ -1,7 +1,7 @@
 name: xiaoji
 description: 本地优先的 Markdown 小记应用
 publish_to: 'none'
-version: 1.10.31+69
+version: 1.11.0+70
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -19,7 +19,6 @@ dependencies:
   follow_the_leader: 0.5.3
   super_editor: ^0.3.0-dev.39
   sqlite3: ^3.9.0
-  desktop_drop: ^0.8.4
 dependency_overrides:
   follow_the_leader: 0.5.3
   super_editor: ^0.3.0-dev.52

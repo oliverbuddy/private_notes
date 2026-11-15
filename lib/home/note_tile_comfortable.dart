@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../editor/block.dart';
 import '../editor/markdown_view.dart';
 import '../models/note.dart';
-import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import '../ui/pressable.dart';
 import '../ui/note_table_preview.dart';
@@ -41,10 +40,8 @@ class NoteTileComfortable extends StatelessWidget {
     this.hiddenThumbnailCount = 0,
     this.query = '',
     this.maxSummaryLines = 5,
-    this.selected = false,
     required this.onTap,
     required this.onLongPress,
-    this.onSecondaryTapAt,
   });
 
   final Note note;
@@ -60,14 +57,8 @@ class NoteTileComfortable extends StatelessWidget {
   /// 浏览时 5 行，搜索时压到 2 行 —— 结果多时更需要一屏看到更多条目。
   final int maxSummaryLines;
 
-  /// 桌面双栏当前打开的笔记：主流桌面笔记都会在列表里高亮。
-  final bool selected;
-
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-
-  /// 桌面端右键位置：动作菜单锚定在指针处（主流桌面菜单形态）。
-  final void Function(Offset globalPosition)? onSecondaryTapAt;
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +87,7 @@ class NoteTileComfortable extends StatelessWidget {
       // 外层间距由列表负责（含卡间 12），这里只做卡片本体。
       child: DecoratedBox(
         decoration: ShapeDecoration(
-          color: selected ? colors.accentBg : colors.page,
+          color: colors.page,
           shape: AppShape.continuous(AppRadius.card),
           shadows: AppShadow.card,
         ),
@@ -106,14 +97,7 @@ class NoteTileComfortable extends StatelessWidget {
           ),
           child: AppPressable(
             onTap: onTap,
-            // 桌面端只用右键菜单（主流桌面列表的约定）：长按不再弹任何东西，
-            // 避免「按住不放」误触菜单；移动端仍是长按。
-            onLongPress: PlatformFeatures.isDesktop ? null : onLongPress,
-            // 右键只在这里处理一次：同时挂 onSecondaryTap 会在按下与抬起时
-            // 各弹一次菜单（用户反馈「右键出两个弹窗」）。
-            onSecondaryTapDown: PlatformFeatures.isDesktop
-                ? (TapDownDetails d) => onSecondaryTapAt?.call(d.globalPosition)
-                : null,
+            onLongPress: onLongPress,
             // 卡片不缩放，整块轻微压暗/提亮（鸿蒙卡片的按压手感）；
             // 用蒙层而不是整体降透明度：正文和缩略图不会跟着闪。
             pressedScale: 1,
@@ -148,24 +132,23 @@ class NoteTileComfortable extends StatelessWidget {
                     )
                   else ...<Widget>[
                     if (query.isEmpty) ...<Widget>[
-                      for (var i = 0; i < segments.length; i++) ...<Widget>[
-                        if (i > 0) const SizedBox(height: 10),
-                        if (segments[i].rows != null)
-                          NoteTablePreview(rows: segments[i].rows!)
-                        else
-                          // 摘要用和详情页同一套 markdown 渲染，标题、加粗、
-                          // 列表在列表里就已经是最终的样子。
-                          _SummaryMarkdown(
-                            source: excerptSource(
-                              segments[i].text!,
-                              maxLines: maxSummaryLines,
+                      // 整卡预览严格限制在 maxSummaryLines 行以内：表格的
+                      // 每一行和正文的每一行共用同一份预算，用完即止。
+                      LayoutBuilder(
+                        builder: (BuildContext context, BoxConstraints c) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: _previewWidgets(
+                              context,
+                              segments,
+                              summaryStyle,
+                              colors,
+                              c.maxWidth,
                             ),
-                            style: summaryStyle,
-                            colors: colors,
-                            headingBoost: 0.86,
-                            maxLines: maxSummaryLines,
-                          ),
-                      ],
+                          );
+                        },
+                      ),
                       if (segments.isEmpty && thumbnailPaths.isEmpty)
                         // 只有图片的笔记不再写「（无正文）」：下面直接就是
                         // 图片行，多一行提示会让它看起来像空笔记。
@@ -220,6 +203,95 @@ class NoteTileComfortable extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 按正文顺序渲染预览，整卡共用 [maxSummaryLines] 行预算。
+  ///
+  /// 表格的每一行和正文的每一行都从同一份预算里扣，用完即止。之前每张
+  /// 表格各自占满 5 行，两张表格就撑到 10 行（用户反馈「显示内容太多」）。
+  List<Widget> _previewWidgets(
+    BuildContext context,
+    List<NotePreviewSegment> segments,
+    TextStyle style,
+    AppColors colors,
+    double maxWidth,
+  ) {
+    final List<Widget> widgets = <Widget>[];
+    var remaining = math.max(0, maxSummaryLines);
+    for (final NotePreviewSegment segment in segments) {
+      if (remaining <= 0) {
+        break;
+      }
+      final List<List<String>>? rows = segment.rows;
+      Widget? widget;
+      if (rows != null) {
+        if (rows.isEmpty) {
+          continue;
+        }
+        final List<List<String>> shown = rows.length <= remaining
+            ? rows
+            : rows.take(remaining).toList(growable: false);
+        remaining -= shown.length;
+        widget = NoteTablePreview(rows: shown);
+      } else {
+        final String text = excerptSource(segment.text ?? '', maxLines: remaining);
+        final int lines = _measurePreviewLines(
+          context,
+          text,
+          style,
+          maxWidth,
+          remaining,
+        );
+        if (lines <= 0) {
+          continue;
+        }
+        remaining -= lines;
+        widget = _SummaryMarkdown(
+          source: text,
+          style: style,
+          colors: colors,
+          headingBoost: 0.86,
+          maxLines: lines,
+        );
+      }
+      if (widgets.isNotEmpty) {
+        widgets.add(const SizedBox(height: 10));
+      }
+      widgets.add(widget);
+    }
+    return widgets;
+  }
+
+  /// 估算一段摘要文本在 [maxWidth] 下占多少视觉行（不超过 [cap]）。
+  ///
+  /// 直接用原始 markdown 文本测量：`#`、`**` 只会让估算偏多，宁可少显示
+  /// 一行，也不能让卡片超过 [maxSummaryLines]。
+  int _measurePreviewLines(
+    BuildContext context,
+    String text,
+    TextStyle style,
+    double maxWidth,
+    int cap,
+  ) {
+    final List<String> lines = text.split('\n');
+    while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+      lines.removeLast();
+    }
+    if (lines.isEmpty) {
+      return 0;
+    }
+    if (maxWidth <= 0) {
+      return math.min(lines.length, cap);
+    }
+    final TextPainter painter = TextPainter(
+      text: TextSpan(text: lines.join('\n'), style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: cap,
+    )..layout(maxWidth: maxWidth);
+    final int measured = painter.computeLineMetrics().length;
+    painter.dispose();
+    return math.max(1, math.min(measured, cap));
   }
 }
 

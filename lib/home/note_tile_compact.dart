@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../editor/block.dart';
 import '../models/note.dart';
-import '../platform/platform_features.dart';
 import '../theme/app_theme.dart';
 import '../ui/pressable.dart';
 import '../util/date_format.dart';
@@ -27,16 +26,11 @@ class NoteTileCompact extends StatelessWidget {
     this.thumbnailPaths = const <String>[],
     this.imageCount = 0,
     this.hasAttachment = false,
-    this.selected = false,
     required this.onTap,
     required this.onLongPress,
-    this.onSecondaryTapAt,
   });
   final Note note;
   final String query;
-
-  /// 桌面双栏当前打开的笔记：行底色 + 左侧主色条。
-  final bool selected;
 
   /// 最多取第一张，紧凑档只放一个 40dp 的方块。
   final List<String> thumbnailPaths;
@@ -47,9 +41,6 @@ class NoteTileCompact extends StatelessWidget {
   final bool hasAttachment;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-
-  /// 桌面端右键位置：动作菜单锚定在指针处。
-  final void Function(Offset globalPosition)? onSecondaryTapAt;
 
   @override
   Widget build(BuildContext context) {
@@ -79,28 +70,14 @@ class NoteTileCompact extends StatelessWidget {
             : null;
     final bool leadMedia = media != null && summary.isEmpty;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: selected ? colors.accentBg : Colors.transparent,
-        border: selected
-            ? Border(left: BorderSide(color: colors.accent, width: 2))
-            : null,
-      ),
-      child: AppPressable(
-        onTap: onTap,
-        // 桌面端只用右键菜单（主流桌面列表的约定）：长按不再弹任何东西，
-        // 避免「按住不放」误触菜单；移动端仍是长按。
-        onLongPress: PlatformFeatures.isDesktop ? null : onLongPress,
-        // 右键只在这里处理一次：同时挂 onSecondaryTap 会在按下与抬起时
-        // 各弹一次菜单（用户反馈「右键出两个弹窗」）。
-        onSecondaryTapDown: PlatformFeatures.isDesktop
-            ? (TapDownDetails d) => onSecondaryTapAt?.call(d.globalPosition)
-            : null,
-        // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
-        pressedColor: AppPress.overlay(context),
-        pressedOpacity: 1,
-        pressedScale: 1,
-        child: Padding(
+    return AppPressable(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      // 整行蒙层：文字不淡出，按下去是「这一行变灰」。
+      pressedColor: AppPress.overlay(context),
+      pressedOpacity: 1,
+      pressedScale: 1,
+      child: Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.page,
             vertical: 12,
@@ -157,7 +134,6 @@ class NoteTileCompact extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 }

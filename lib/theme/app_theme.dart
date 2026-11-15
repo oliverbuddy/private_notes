@@ -522,35 +522,16 @@ abstract final class AppPress {
           : const Color(0x0D000000);
 }
 
-/// 桌面端整体字号系数。
+/// 响应式断点：手机 / 平板。
 ///
-/// 同一套字阶是按手机精读尺度调的（正文 15.5 / 行高 1.7）。放到 27 寸
-/// 显示器上并排对比 Bear / 语雀 / Notion 时，用户会觉得「又大又粗」。
-/// 桌面统一收紧 8%，只缩放文字（图标、热区、布局常量不动），移动端
-/// 完全不受影响。
-const double kDesktopTextScale = 0.92;
-
-/// 响应式断点：手机 / 平板 / 桌面。
-///
-/// 目前先统一「内容最大宽度 + 居中」，后续做 Pad 双栏、PC 侧栏时
-/// 只需要扩展这里，不用逐页改布局。
+/// 统一「内容最大宽度 + 居中」，不逐页写死宽度。
 abstract final class AppBreakpoints {
   static const double compact = 600;
   static const double medium = 1024;
 
-  /// 双栏阈值：宽度 ≥900 且高度 ≥520 时启用「列表 + 正文」并排。
-  ///
-  /// 高度条件是为了排除手机横屏（例如 932×430）：那种尺寸双栏会把
-  /// 正文压得太窄，仍走单栏。桌面窗口最小 560×480，也不会误触发。
-  static const double split = 900;
-  static const double splitMinHeight = 520;
-
-  static bool useSplitPane(double width, double height) =>
-      width >= split && height >= splitMinHeight;
-
   static bool isCompact(double width) => width < compact;
 
-  /// 单列内容的最大宽度：手机全宽，平板/桌面不把一行拉得过长。
+  /// 单列内容的最大宽度：手机全宽，平板不把一行拉得过长。
   static double contentMaxWidth(double width) {
     if (isCompact(width)) {
       return width;
@@ -593,10 +574,6 @@ abstract final class AppTheme {
         builders: <TargetPlatform, PageTransitionsBuilder>{
           TargetPlatform.android: WeChatPageTransitionsBuilder(),
           TargetPlatform.iOS: WeChatPageTransitionsBuilder(),
-          TargetPlatform.macOS: WeChatPageTransitionsBuilder(),
-          TargetPlatform.windows: WeChatPageTransitionsBuilder(),
-          TargetPlatform.linux: WeChatPageTransitionsBuilder(),
-          TargetPlatform.fuchsia: WeChatPageTransitionsBuilder(),
         },
       ),
     );
