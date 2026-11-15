@@ -4270,6 +4270,29 @@ class _NewEditorPageState extends State<NewEditorPage>
                 onColumnAlign: _alignTableColumn,
                 onCellEditingChanged: (bool editing) {
                   _tableCellEditing = editing;
+                  if (editing) {
+                    // 单元格编辑时清掉正文选区：否则正文还画一个光标，
+                    // 看起来就是「表格里一个、下面一个」（用户反馈）。
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted || !_tableCellEditing) {
+                        return;
+                      }
+                      if (_composer.selection != null) {
+                        _editor.execute(
+                          <EditRequest>[const ClearSelectionRequest()],
+                        );
+                      }
+                    });
+                    return;
+                  }
+                  // 编辑结束：把焦点交还正文，⌘Z / ⌘C 等系统快捷键恢复
+                  // 工作（单元格输入框销毁后焦点会落到空处）。
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted || _tableCellEditing) {
+                      return;
+                    }
+                    _editorFocus.requestFocus();
+                  });
                 },
               )
             else

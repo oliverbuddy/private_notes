@@ -258,6 +258,7 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
       viewModel: componentViewModel,
       cursorColor: cursorColor,
       editorFocusNode: editorFocusNode,
+      availableWidth: availableWidth,
       fillWidth: fillWidth,
       onCellCommitted: onCellCommitted,
       onCellStructure: onCellStructure,
@@ -284,6 +285,7 @@ class TyporaTable extends StatefulWidget {
     required this.viewModel,
     required this.cursorColor,
     this.editorFocusNode,
+    this.availableWidth = 0,
     this.fillWidth = false,
     this.onCellCommitted,
     this.onCellStructure,
@@ -298,6 +300,9 @@ class TyporaTable extends StatefulWidget {
 
   /// 正文编辑器的焦点节点（用来判断焦点是不是被内核抢走的）。
   final FocusNode? editorFocusNode;
+
+  /// 正文可用宽度（表格最大宽度）：超出时在单元格内换行，不横向滚动。
+  final double availableWidth;
   final bool fillWidth;
 
   final void Function(
@@ -328,8 +333,6 @@ class TyporaTable extends StatefulWidget {
 }
 
 class _TyporaTableState extends State<TyporaTable> {
-  final ScrollController _scrollController = ScrollController();
-
   /// 正在编辑的单元格；null 表示没有在编辑。
   int? _editRow;
   int? _editColumn;
@@ -403,7 +406,6 @@ class _TyporaTableState extends State<TyporaTable> {
   @override
   void dispose() {
     _resetEditing();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -948,6 +950,10 @@ class _TyporaTableState extends State<TyporaTable> {
     if (available > 0 && total > available) {
       final double scale = available / total;
       widths = <double>[for (final double w in desired) w * scale];
+      // 压缩后过窄（列特别多）就整体等分，保证表格始终不超正文宽度。
+      if (widths.any((double w) => w < 40)) {
+        widths = List<double>.filled(columns, available / columns);
+      }
     }
     if (available > 0) {
       widths = <double>[for (final double w in widths) math.min(w, available)];
@@ -1092,29 +1098,11 @@ class _TyporaTableState extends State<TyporaTable> {
 
   @override
   Widget build(BuildContext context) {
-    final Widget table = _buildInteractiveTable(context);
-    if (widget.fillWidth) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: SizedBox(width: double.infinity, child: table),
-      );
-    }
-    return SingleAxisTrackpadAndWheelScroller(
-      axis: Axis.horizontal,
-      controller: _scrollController,
-      child: Align(
-        // Typora 的表格按内容宽度靠左排，不居中、不强制铺满。
-        alignment: Alignment.centerLeft,
-        child: Scrollbar(
-          controller: _scrollController,
-          scrollbarOrientation: ScrollbarOrientation.bottom,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            scrollDirection: Axis.horizontal,
-            child: table,
-          ),
-        ),
-      ),
+    // 不再套横向滚动：表格最大宽度就是正文宽度，单元格内容超宽时在格内
+    // 换行（Typora 的行为），不需要左右滑动。
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: _buildInteractiveTable(context),
     );
   }
 
@@ -1123,7 +1111,11 @@ class _TyporaTableState extends State<TyporaTable> {
     // onExit，工具条刚出现就消失。
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final double available = constraints.maxWidth;
+        final double parentWidth = constraints.maxWidth;
+        final double available =
+            widget.availableWidth > 0 && parentWidth.isFinite
+                ? math.min(widget.availableWidth, parentWidth)
+                : (parentWidth.isFinite ? parentWidth : widget.availableWidth);
         // 列宽始终按内容自适应（Typora 的 auto 布局），不支持拖动。
         final List<double> widths = _contentWidths(available);
         return MouseRegion(
@@ -1268,6 +1260,9 @@ class _TyporaTableState extends State<TyporaTable> {
       // 不挂 onTapOutside：点工具条时按钮不请求焦点，编辑态应当保留
       // （Typora 里点表格工具条不会结束单元格编辑）；点击正文由焦点
       // 监听负责提交。
+      // 关闭输入框自带右键菜单：页面已经有表格右键菜单，两者会同时弹出。
+      contextMenuBuilder: (BuildContext context, EditableTextState state) =>
+          const SizedBox.shrink(),
       decoration: const InputDecoration(
         isDense: true,
         border: InputBorder.none,

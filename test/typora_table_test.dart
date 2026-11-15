@@ -193,4 +193,42 @@ void main() {
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });
+
+  testWidgets('表格最大宽度不超过正文，长内容在单元格内换行', (
+    WidgetTester tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final String longText = '很长的单元格内容' * 12;
+    final NoteRepository repository = await _createRepository(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: NewEditorPage(
+          repository: repository,
+          note: Note(
+            id: 'table3',
+            created: DateTime(2026, 11, 15),
+            updated: DateTime(2026, 11, 15),
+            body: '| 备注 | 数 |\n| --- | --- |\n| $longText | 3 |',
+          ),
+        ),
+      ),
+    );
+    await _pump(tester);
+
+    final Rect tableRect = tester.getRect(find.byType(Table));
+    // 正文列宽 760（1280 窗口）；表格最多和正文同宽，不出现横向滑动。
+    expect(tableRect.width, lessThanOrEqualTo(760));
+    expect(
+      tester.getSize(find.text(longText)).height,
+      greaterThan(26 * 1.5),
+      reason: '内容超宽时应在单元格内换行，而不是撑宽表格',
+    );
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
 }
