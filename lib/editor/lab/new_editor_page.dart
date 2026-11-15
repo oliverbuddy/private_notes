@@ -1332,6 +1332,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     if ((target - position.pixels).abs() < 1) {
       return true;
     }
+    // 距离超过一屏（粘贴长文、跳转后落位）：交还框架原生的瞬时跳转。
+    // 平滑滚动限速在 22px/帧，跨几屏的目标要滚好几秒，看起来就是
+    // 「粘贴完一直滚到底部才停」；正常编辑器（Typora / 语雀）这里是
+    // 一步到位。
+    if ((target - position.pixels).abs() > position.viewportDimension) {
+      return false;
+    }
     _requestCaretScroll(target);
     return true;
   }
@@ -5580,9 +5587,9 @@ Widget _buildUnorderedListDot(
   BuildContext context,
   UnorderedListItemComponent component,
 ) {
-  final TextStyle textStyle = component.styleBuilder(
-    component.text.getAllAttributionsAt(0).toSet(),
-  );
+  // 记号只用**基础**正文样式：不能读正文的行内属性，否则列表项以行内码
+  // 开头时（`` `x` `` 在第一个字符）记号会跟着变成等宽 + 灰色底。
+  final TextStyle textStyle = component.styleBuilder(const <Attribution>{});
   final String glyph = switch (component.indent) {
     0 => '•',
     1 => '◦',

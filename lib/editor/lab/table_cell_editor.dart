@@ -509,15 +509,23 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       if (composing.isValid && !composing.isCollapsed) {
         return KeyEventResult.ignored;
       }
-      if (key == LogicalKeyboardKey.enter ||
-          key == LogicalKeyboardKey.numpadEnter) {
-        // Shift+Enter 在单元格内换行（与语雀一致），Enter 提交并下移。
-        if (keyboard.isShiftPressed) {
-          return KeyEventResult.ignored;
-        }
-        _commitEditing(moveDown: true);
+      // Cmd/Ctrl+Enter：在当前行下方插一行（Typora 的表格快捷键）。
+      if ((key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.numpadEnter) &&
+          (keyboard.isMetaPressed || keyboard.isControlPressed)) {
+        _commitEditing();
+        widget.onCellStructure?.call(
+          widget.viewModel.nodeId,
+          TableCellAction.insertRowBelow,
+          row,
+          0,
+        );
+        // 光标留在原格继续录入（Typora 插行后不打断输入）。
+        _beginEditingAfterRebuild(row, column);
         return KeyEventResult.handled;
       }
+      // 普通 Enter 不在格间跳转：Typora 里回车就是格内换行（写回 `<br>`），
+      // 交给输入框自己处理。
       if (key == LogicalKeyboardKey.arrowDown) {
         _commitEditing(moveDown: true);
         return KeyEventResult.handled;
@@ -549,10 +557,12 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
       if (_focusNode != focusNode || focusNode.hasFocus) {
         return;
       }
-      // 刚开编辑的 500ms 内失焦，是内核的点击处理在抢正文焦点，不是用户
-      // 想离开；直接把焦点抢回来，否则会「一点就退出编辑」。
+      // 刚开编辑的极短时间内失焦，是内核的点击处理在抢正文焦点，不是用户
+      // 想离开；把焦点抢回来，否则会「一点就退出编辑」。
+      // 窗口只留 150ms：内核的抢焦点发生在同一串点击事件里（1~2 帧），
+      // 原来 500ms 会把「点开格子后马上点别处」也抢回来 —— 想离开却走不掉。
       if (DateTime.now().difference(_editingStartedAt) <
-          const Duration(milliseconds: 500)) {
+          const Duration(milliseconds: 150)) {
         focusNode.requestFocus();
         return;
       }
@@ -610,9 +620,10 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
 
   /// 提交编辑。[cancel] 为真时丢弃输入。
   ///
-  /// 与竞品一致的连续录入方式：
-  ///  - Enter / ↓：提交后光标下移到同列下一行；已在最后一行则新增一行；
-  ///  - ↑：提交后上移一行（第一行时不关闭编辑）；
+  /// 与 Typora 一致的键盘分工：
+  ///  - Enter：格内换行（不提交，交给输入框处理）；
+  ///  - Cmd/Ctrl+Enter：提交后在当前行下方插入一行；
+  ///  - ↓ / ↑：提交后移动到同列下一行 / 上一行（最后一行 ↓ 新增一行）；
   ///  - Tab / Shift+Tab：按行列顺序前后切换，最后一格再 Tab 新增一行；
   ///  - Esc：放弃本次输入。
   void _commitEditing({
@@ -1022,8 +1033,15 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     final Widget content = editing
         ? Stack(
             children: <Widget>[
-              // 保留原文字撑住单元格宽高，编辑框浮在上面，进入编辑不跳版。
-              text,
+              // 原文字只做占位（不上色），保证编辑态与静态态等高、不跳版；
+              // 编辑框本身是透明的，视觉上就是「文字里多了个光标」。
+              Visibility(
+                visible: false,
+                maintainSize: true,
+                maintainAnimation: true,
+                maintainState: true,
+                child: text,
+              ),
               Positioned.fill(child: _buildCellEditor(cell)),
             ],
           )
@@ -1049,31 +1067,29 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     );
   }
 
+  /// 单元格就地编辑框：无边框、无底色，与静态文字同字号同内边距。
+  ///
+  /// Typora 的表格是「文字里直接出现光标」，不是一个浮在格子上的输入框；
+  /// 之前画了蓝框 + 底色，看起来像半成品的弹层。这里只保留一个透明输入
+  /// 区域，视觉差异只有光标和选区。
   Widget _buildCellEditor(MarkdownTableCellViewModel cell) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: widget.editorBackground,
-        border: Border.all(color: widget.cursorColor, width: 1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: TextField(
-        controller: _controller,
-        focusNode: _focusNode,
-        style: cell.textStyleBuilder(const <Attribution>{}),
-        textAlign: cell.textAlign,
-        cursorColor: widget.cursorColor,
-        // 单元格支持多行（Shift+Enter 换行）：语雀的表格也允许单元格内换行。
-        // 键盘语义（Enter/Tab/Esc/↑/↓）在焦点节点里处理，见 _beginEditing。
-        maxLines: null,
-        keyboardType: TextInputType.multiline,
-        textInputAction: TextInputAction.newline,
-        onTapOutside: (_) => _commitEditing(),
-        decoration: const InputDecoration(
-          isDense: true,
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 2),
-          counterText: '',
-        ),
+    return TextField(
+      controller: _controller,
+      focusNode: _focusNode,
+      style: cell.textStyleBuilder(const <Attribution>{}),
+      textAlign: cell.textAlign,
+      cursorColor: widget.cursorColor,
+      // 单元格支持多行：Enter / Shift+Enter 都在格内换行（Typora 的语义），
+      // 提交/切格靠 Tab、Esc、点击别处。
+      maxLines: null,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      onTapOutside: (_) => _commitEditing(),
+      decoration: const InputDecoration(
+        isDense: true,
+        border: InputBorder.none,
+        contentPadding: EdgeInsets.zero,
+        counterText: '',
       ),
     );
   }
