@@ -648,6 +648,9 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   _applyHighlights(document);
   _restoreLinkTitles(document, links.titles);
   _restoreTableCellBreaks(document);
+  // 内核解析器不认分隔行的对齐（表头固定写成 center、`:---` 也被丢掉），
+  // 必须按源码把对齐回填到每一格，否则「标题栏设了左对齐，重开变居中」。
+  _restoreTableAlign(document, links.markdown);
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
@@ -704,6 +707,131 @@ void _restoreTableCellBreaks(MutableDocument document) {
       ),
     );
   }
+}
+
+/// 按源码的分隔行把列对齐回填到表格的所有单元格（含表头）。
+///
+/// super_editor 的 GFM 解析器对表格对齐的处理不可靠：实测 `| :--- | :---: |`
+/// 解析后表头两格都是 `center`、数据首列是 null，表头完全拿不到分隔行的
+/// 对齐。这里直接读源码分隔行，统一写回每一格；`---`（默认）会清掉
+/// textAlign，序列化时仍写回 `---`，不会改动用户的 md。
+void _restoreTableAlign(MutableDocument document, String markdown) {
+  final List<List<String?>> aligns = _tableAlignsInMarkdown(markdown);
+  if (aligns.isEmpty) {
+    return;
+  }
+  final List<TableBlockNode> tables = <TableBlockNode>[];
+  for (final DocumentNode node in document) {
+    if (node is TableBlockNode) {
+      tables.add(node);
+    }
+  }
+  if (tables.length != aligns.length) {
+    return;
+  }
+  for (var i = 0; i < tables.length; i++) {
+    final TableBlockNode table = tables[i];
+    final List<String?> columns = aligns[i];
+    if (columns.length != table.columnCount) {
+      continue;
+    }
+    final List<List<TextNode>> rows = <List<TextNode>>[];
+    bool changed = false;
+    for (var r = 0; r < table.rowCount; r++) {
+      final List<TextNode> row = <TextNode>[];
+      for (var c = 0; c < table.columnCount; c++) {
+        final TextNode cell = table.getCell(rowIndex: r, columnIndex: c);
+        final Object? current = cell.metadata[TextNodeMetadata.textAlign];
+        final String? target = columns[c];
+        if (current == target || (target == null && current == null)) {
+          row.add(cell);
+          continue;
+        }
+        changed = true;
+        final Map<String, dynamic> metadata =
+            Map<String, dynamic>.from(cell.metadata);
+        if (target == null) {
+          metadata.remove(TextNodeMetadata.textAlign);
+        } else {
+          metadata[TextNodeMetadata.textAlign] = target;
+        }
+        row.add(TextNode(id: cell.id, text: cell.text, metadata: metadata));
+      }
+      rows.add(row);
+    }
+    if (!changed) {
+      continue;
+    }
+    document.replaceNodeById(
+      table.id,
+      TableBlockNode(
+        id: table.id,
+        cells: rows,
+        metadata: Map<String, dynamic>.from(table.metadata),
+      ),
+    );
+  }
+}
+
+/// 从源码里提取每张表格的逐列对齐（与表格出现顺序一致）。
+List<List<String?>> _tableAlignsInMarkdown(String markdown) {
+  final List<String> lines = markdown.split('\n');
+  final List<List<String?>> tables = <List<String?>>[];
+  for (var i = 0; i + 1 < lines.length; i++) {
+    if (!lines[i].contains('|') || !_isAlignSeparatorLine(lines[i + 1])) {
+      continue;
+    }
+    tables.add(<String?>[
+      for (final String cell in _splitPipeCells(lines[i + 1]))
+        switch (cell.trim()) {
+          final String t when t.startsWith(':') && t.endsWith(':') => 'center',
+          final String t when t.endsWith(':') => 'right',
+          final String t when t.startsWith(':') => 'left',
+          _ => null,
+        },
+    ]);
+    var end = i + 2;
+    while (end < lines.length && lines[end].contains('|')) {
+      end++;
+    }
+    i = end - 1;
+  }
+  return tables;
+}
+
+bool _isAlignSeparatorLine(String line) {
+  final String trimmed = line.trim();
+  return trimmed.contains('|') &&
+      trimmed.contains('-') &&
+      RegExp(r'^[|\s:-]+$').hasMatch(trimmed);
+}
+
+List<String> _splitPipeCells(String line) {
+  var body = line.trim();
+  if (body.startsWith('|')) {
+    body = body.substring(1);
+  }
+  if (body.endsWith('|')) {
+    body = body.substring(0, body.length - 1);
+  }
+  final List<String> cells = <String>[];
+  final StringBuffer buffer = StringBuffer();
+  for (var i = 0; i < body.length; i++) {
+    final String ch = body[i];
+    if (ch == r'\' && i + 1 < body.length && body[i + 1] == '|') {
+      buffer.write('|');
+      i++;
+      continue;
+    }
+    if (ch == '|') {
+      cells.add(buffer.toString());
+      buffer.clear();
+      continue;
+    }
+    buffer.write(ch);
+  }
+  cells.add(buffer.toString());
+  return cells;
 }
 
 /// 图片行与相邻行紧挨着时，补一个真正的空行隔开。

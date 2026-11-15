@@ -205,6 +205,31 @@ void main() {
     );
   });
 
+  test('解析时分隔行对齐回填到表头（标题栏左对齐重开不丢）', () {
+    final MutableDocument parsed = deserializeXiaojiMarkdown(
+      '| 名称 | 数量 |\n| :--- | :---: |\n| a | b |',
+    );
+    final TableBlockNode table = parsed.getNodeAt(0)! as TableBlockNode;
+    // 内核解析器会把表头写成 center，这里必须按分隔行回填。
+    expect(
+      table
+          .getCell(rowIndex: 0, columnIndex: 0)
+          .metadata[TextNodeMetadata.textAlign],
+      'left',
+    );
+    expect(
+      table
+          .getCell(rowIndex: 0, columnIndex: 1)
+          .metadata[TextNodeMetadata.textAlign],
+      'center',
+    );
+    // 再存回去，分隔行保持原样（不会产生额外改动）。
+    expect(
+      serializeDocumentToXiaojiMarkdown(parsed).contains('| :--- | :---: |'),
+      isTrue,
+    );
+  });
+
   test('列对齐写回分隔行', () {
     final MutableDocument document = MutableDocument(
       nodes: <DocumentNode>[
