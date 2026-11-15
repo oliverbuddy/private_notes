@@ -4316,10 +4316,13 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 桌面阅读尺度：正文同号但行距更松，标题拉大一档。
     // 移动端沿用精读字阶（24/20/16），不因桌面改动而变化。
     final bool desktop = PlatformFeatures.isDesktop;
-    final double h1Size = desktop ? 28 : AppFontSize.titleLg;
-    final double h2Size = desktop ? 22 : AppFontSize.heading;
-    final double h3Size = desktop ? 19 : AppFontSize.bodyLg;
-    final double paragraphHeight = desktop ? 1.7 : 1.6;
+    // 桌面详情页的字阶与留白（参考 Typora 的标题比例 + 语雀的克制留白）：
+    // 标题再放大一档、章节前留白更明显，长文看起来才有「一章一章」的
+    // 结构感；移动端保持原值不动。
+    final double h1Size = desktop ? 30 : AppFontSize.titleLg;
+    final double h2Size = desktop ? 24 : AppFontSize.heading;
+    final double h3Size = desktop ? 20 : AppFontSize.bodyLg;
+    final double paragraphHeight = desktop ? 1.75 : 1.6;
     final double zoom = editorZoom.value;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
@@ -4372,7 +4375,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
                 fontSize: AppFontSize.summary * zoom,
-                height: 1.7,
+                height: desktop ? 1.75 : 1.7,
                 letterSpacing: 0.3,
                 leadingDistribution: TextLeadingDistribution.even,
                 color: colors.text,
@@ -4422,7 +4425,10 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(height: paragraphHeight),
-            Styles.padding: const CascadingPadding.only(top: 12),
+            // 桌面段落间距 14：比移动端 12 稍松，长文更透气。
+            Styles.padding: CascadingPadding.only(
+              top: desktop ? 14 : 12,
+            ),
           },
         ),
         // 标题后的首段落不再叠段距：标题自身已有 bottom padding，
@@ -4484,7 +4490,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: const CascadingPadding.only(top: 24, bottom: 8),
+            Styles.padding: CascadingPadding.only(
+              top: desktop ? 32 : 24,
+              bottom: desktop ? 10 : 8,
+            ),
           },
         ),
         StyleRule(
@@ -4498,7 +4507,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: const CascadingPadding.only(top: 18, bottom: 6),
+            Styles.padding: CascadingPadding.only(
+              top: desktop ? 26 : 18,
+              bottom: desktop ? 8 : 6,
+            ),
           },
         ),
         StyleRule(
@@ -4512,7 +4524,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
-            Styles.padding: const CascadingPadding.only(top: 14, bottom: 4),
+            Styles.padding: CascadingPadding.only(
+              top: desktop ? 20 : 14,
+              bottom: desktop ? 6 : 4,
+            ),
           },
         ),
         // H4–H6：内核默认样式表只写到 H3，不补的话这三档在详情页与正文
