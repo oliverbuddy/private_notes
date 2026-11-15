@@ -138,6 +138,58 @@ List<List<TextNode>> _tableGrid(TableBlockNode table) => <List<TextNode>>[
         ],
     ];
 
+/// 把第 [from] 行移动到 [to]（松手后的目标行下标，表头不参与移动）。
+///
+/// 用于鼠标拖拽整行换位（Typora 的 drag & move）：越界或目标是表头时
+/// 返回 null，由调用方忽略这次拖拽。
+TableBlockNode? moveTableRow(TableBlockNode table, int from, int to) {
+  if (table.rowCount <= 2) {
+    return null;
+  }
+  if (from <= 0 || from >= table.rowCount) {
+    return null;
+  }
+  final int target = to.clamp(1, table.rowCount - 1);
+  if (target == from) {
+    return null;
+  }
+  final List<List<TextNode>> grid = _tableGrid(table);
+  final List<TextNode> moved = grid.removeAt(from);
+  grid.insert(target, moved);
+  return TableBlockNode(
+    id: table.id,
+    cells: grid,
+    metadata: Map<String, dynamic>.from(table.metadata),
+  );
+}
+
+/// 把第 [from] 列移动到 [to]（整列换位，含表头单元格）。
+TableBlockNode? moveTableColumn(TableBlockNode table, int from, int to) {
+  if (table.columnCount <= 1) {
+    return null;
+  }
+  if (from < 0 || from >= table.columnCount) {
+    return null;
+  }
+  final int target = to.clamp(0, table.columnCount - 1);
+  if (target == from) {
+    return null;
+  }
+  final List<List<TextNode>> grid = _tableGrid(table);
+  final List<TextNode> moving = <TextNode>[
+    for (final List<TextNode> row in grid) row[from],
+  ];
+  for (var r = 0; r < grid.length; r++) {
+    grid[r].removeAt(from);
+    grid[r].insert(target, moving[r]);
+  }
+  return TableBlockNode(
+    id: table.id,
+    cells: grid,
+    metadata: Map<String, dynamic>.from(table.metadata),
+  );
+}
+
 /// 列宽 = 内容自适应，但每条列最多 [maxWidth]，超出的单元格内换行。
 ///
 /// Flutter 自带的 `MaxColumnWidth` 是「取两个宽度的较大者」，没有封顶
@@ -175,6 +227,8 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
     this.onCellStructure,
     this.onCellPointerDown,
     this.onColumnAlign,
+    this.onMoveRow,
+    this.onMoveColumn,
     this.onCellEditingChanged,
   }) : super(fit: TableComponentFit.scroll);
 
@@ -221,6 +275,13 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
   final void Function(String tableNodeId, int column, String align)?
       onColumnAlign;
 
+  /// 鼠标拖拽整行换位（from → to）。
+  final void Function(String tableNodeId, int fromRow, int toRow)? onMoveRow;
+
+  /// 鼠标拖拽整列换位。
+  final void Function(String tableNodeId, int fromColumn, int toColumn)?
+      onMoveColumn;
+
   /// 单元格编辑状态变化（页面据此避免拦截 ⌘C / ⌘V，交给输入框自己处理）。
   final ValueChanged<bool>? onCellEditingChanged;
 
@@ -264,6 +325,8 @@ class TyporaTableComponentBuilder extends MarkdownTableComponentBuilder {
       onCellStructure: onCellStructure,
       onCellPointerDown: onCellPointerDown,
       onColumnAlign: onColumnAlign,
+      onMoveRow: onMoveRow,
+      onMoveColumn: onMoveColumn,
       onCellEditingChanged: onCellEditingChanged,
     );
   }
@@ -291,6 +354,8 @@ class TyporaTable extends StatefulWidget {
     this.onCellStructure,
     this.onCellPointerDown,
     this.onColumnAlign,
+    this.onMoveRow,
+    this.onMoveColumn,
     this.onCellEditingChanged,
   });
 
@@ -326,6 +391,13 @@ class TyporaTable extends StatefulWidget {
   final void Function(String tableNodeId, int column, String align)?
       onColumnAlign;
 
+  /// 鼠标拖拽整行换位（from → to）。
+  final void Function(String tableNodeId, int fromRow, int toRow)? onMoveRow;
+
+  /// 鼠标拖拽整列换位。
+  final void Function(String tableNodeId, int fromColumn, int toColumn)?
+      onMoveColumn;
+
   final ValueChanged<bool>? onCellEditingChanged;
 
   @override
@@ -355,6 +427,19 @@ class _TyporaTableState extends State<TyporaTable> {
   int? _cursorRow;
   int? _cursorColumn;
 
+  /// 拖拽换位：正在拖的行/列与累计位移，以及落点指示线位置。
+  int? _dragRow;
+  int? _dragColumn;
+  double _dragDy = 0;
+  double _dragDx = 0;
+
+  /// 悬停在行/列拖拽把手上的行/列（只在它上面显示抓手图标）。
+  int? _handleRow;
+  int? _handleColumn;
+
+  /// 最近一次布局的列宽（列拖拽换算落点用）。
+  List<double> _widths = const <double>[];
+
   bool get _editable => widget.onCellCommitted != null;
 
   /// 单元格锚点：把指针坐标换算成「第几行第几列」，也用来算光标偏移。
@@ -376,6 +461,219 @@ class _TyporaTableState extends State<TyporaTable> {
         local.dy >= 0 &&
         local.dx <= renderObject.size.width &&
         local.dy <= renderObject.size.height;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 鼠标拖拽换位（Typora 的 drag & move）
+  // ---------------------------------------------------------------------------
+
+  int get _rowCount => widget.viewModel.cells.length;
+
+  double _rowHeight(int row) {
+    final RenderObject? renderObject =
+        _cellKey(row, 0).currentContext?.findRenderObject();
+    return renderObject is RenderBox ? renderObject.size.height : 0;
+  }
+
+  double _rowTop(int row) {
+    var y = 0.0;
+    for (var r = 0; r < row; r++) {
+      y += _rowHeight(r);
+    }
+    return y;
+  }
+
+  double _columnLeft(int column) {
+    var x = 0.0;
+    for (var c = 0; c < column && c < _widths.length; c++) {
+      x += _widths[c];
+    }
+    return x;
+  }
+
+  /// 行拖拽的落点行（表头不参与，最少停在 1）。
+  int? get _rowDropTarget {
+    final int? from = _dragRow;
+    if (from == null || _rowCount <= 2) {
+      return null;
+    }
+    final double height = _rowHeight(from);
+    if (height <= 0) {
+      return null;
+    }
+    return (from + (_dragDy / height).round()).clamp(1, _rowCount - 1);
+  }
+
+  /// 列拖拽的落点列（按被拖列中心的落点判断）。
+  int? get _columnDropTarget {
+    final int? from = _dragColumn;
+    if (from == null || _widths.isEmpty || from >= _widths.length) {
+      return null;
+    }
+    final double center = _columnLeft(from) + _widths[from] / 2 + _dragDx;
+    var x = 0.0;
+    var target = from;
+    for (var c = 0; c < _widths.length; c++) {
+      x += _widths[c];
+      target = c;
+      if (center < x) {
+        break;
+      }
+    }
+    return target.clamp(0, _columnCount - 1);
+  }
+
+  void _startRowDrag(int row) {
+    if (row <= 0) {
+      return;
+    }
+    if (_editRow != null) {
+      _commitEditing();
+    }
+    setState(() {
+      _dragRow = row;
+      _dragDy = 0;
+    });
+  }
+
+  void _finishRowDrag() {
+    final int? from = _dragRow;
+    final int? target = _rowDropTarget;
+    setState(() {
+      _dragRow = null;
+      _dragDy = 0;
+    });
+    if (from == null || target == null || target == from) {
+      return;
+    }
+    widget.onMoveRow?.call(widget.viewModel.nodeId, from, target);
+  }
+
+  void _startColumnDrag(int column) {
+    if (_editRow != null) {
+      _commitEditing();
+    }
+    setState(() {
+      _dragColumn = column;
+      _dragDx = 0;
+    });
+  }
+
+  void _finishColumnDrag() {
+    final int? from = _dragColumn;
+    final int? target = _columnDropTarget;
+    setState(() {
+      _dragColumn = null;
+      _dragDx = 0;
+    });
+    if (from == null || target == null || target == from) {
+      return;
+    }
+    widget.onMoveColumn?.call(widget.viewModel.nodeId, from, target);
+  }
+
+  /// 指针是否落在左侧/顶部的拖拽把手带（10px）上。
+  bool _pointerOnHandle(Offset globalPosition) {
+    final RenderObject? renderObject =
+        widget.componentKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) {
+      return false;
+    }
+    final Offset local = renderObject.globalToLocal(globalPosition);
+    if (local.dx < 0 ||
+        local.dy < 0 ||
+        local.dx > renderObject.size.width ||
+        local.dy > renderObject.size.height) {
+      return false;
+    }
+    return local.dx <= 10 || local.dy <= 10;
+  }
+
+  Widget _buildRowHandle(int row) {
+    final double height = _rowHeight(row);
+    if (!_editable || row <= 0 || height <= 0) {
+      return const SizedBox.shrink();
+    }
+    final AppColors colors = AppColors.of(context);
+    final bool active = _dragRow == row;
+    return Positioned(
+      left: 0,
+      top: _rowTop(row),
+      width: 10,
+      height: height,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        onEnter: (_) => setState(() => _handleRow = row),
+        onExit: (_) {
+          if (_handleRow == row) {
+            setState(() => _handleRow = null);
+          }
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanStart: (_) => _startRowDrag(row),
+          onPanUpdate: (DragUpdateDetails details) {
+            if (_dragRow == row) {
+              setState(() => _dragDy += details.delta.dy);
+            }
+          },
+          onPanEnd: (_) => _finishRowDrag(),
+          onPanCancel: _finishRowDrag,
+          child: _handleRow == row || active
+              ? Center(
+                  child: Icon(
+                    Icons.drag_indicator_rounded,
+                    size: 12,
+                    color: colors.accent.withValues(alpha: 0.6),
+                  ),
+                )
+              : const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildColumnHandle(int column) {
+    if (!_editable || column >= _widths.length) {
+      return const SizedBox.shrink();
+    }
+    final AppColors colors = AppColors.of(context);
+    final bool active = _dragColumn == column;
+    return Positioned(
+      left: _columnLeft(column),
+      top: 0,
+      width: _widths[column],
+      height: 10,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        onEnter: (_) => setState(() => _handleColumn = column),
+        onExit: (_) {
+          if (_handleColumn == column) {
+            setState(() => _handleColumn = null);
+          }
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanStart: (_) => _startColumnDrag(column),
+          onPanUpdate: (DragUpdateDetails details) {
+            if (_dragColumn == column) {
+              setState(() => _dragDx += details.delta.dx);
+            }
+          },
+          onPanEnd: (_) => _finishColumnDrag(),
+          onPanCancel: _finishColumnDrag,
+          child: _handleColumn == column || active
+              ? Center(
+                  child: Icon(
+                    Icons.drag_indicator_rounded,
+                    size: 10,
+                    color: colors.accent.withValues(alpha: 0.6),
+                  ),
+                )
+              : const SizedBox.expand(),
+        ),
+      ),
+    );
   }
 
   GlobalKey _cellKey(int row, int column) =>
@@ -783,6 +1081,11 @@ class _TyporaTableState extends State<TyporaTable> {
       _commitEditing();
       return;
     }
+    // 左侧/顶部 10px 是整行 / 整列的拖拽把手：按下不进入单元格编辑，
+    // 交给把手的手势（Typora 的拖拽换位）。
+    if (_pointerOnHandle(event.position)) {
+      return;
+    }
     // 已经在编辑这一格：光标/拖选交给输入框自己处理。
     if (_editRow == cell.$1 && _editColumn == cell.$2) {
       return;
@@ -1118,6 +1421,7 @@ class _TyporaTableState extends State<TyporaTable> {
                 : (parentWidth.isFinite ? parentWidth : widget.availableWidth);
         // 列宽始终按内容自适应（Typora 的 auto 布局），不支持拖动。
         final List<double> widths = _contentWidths(available);
+        _widths = widths;
         return MouseRegion(
           cursor: SystemMouseCursors.basic,
           hitTestBehavior: HitTestBehavior.translucent,
@@ -1148,6 +1452,38 @@ class _TyporaTableState extends State<TyporaTable> {
                   ),
                 ),
               ),
+              // 行 / 列拖拽把手（左边缘、顶部 10px 窄带），Typora 的拖拽换位。
+              if (_editable) ...<Widget>[
+                for (var r = 1; r < widget.viewModel.cells.length; r++)
+                  _buildRowHandle(r),
+                for (var c = 0; c < widths.length; c++)
+                  _buildColumnHandle(c),
+              ],
+              // 拖拽中的落点指示线。
+              if (_rowDropTarget != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: _rowTop(_rowDropTarget!) - 1,
+                  height: 2,
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: AppColors.of(context).accent,
+                    ),
+                  ),
+                ),
+              if (_columnDropTarget != null)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: _columnLeft(_columnDropTarget!) - 1,
+                  width: 2,
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: AppColors.of(context).accent,
+                    ),
+                  ),
+                ),
               // 工具条只在悬停/编辑时出现，盖在表格右上角。
               if (_editable && _hoverRow != null)
                 Positioned(

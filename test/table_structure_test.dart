@@ -205,6 +205,40 @@ void main() {
     );
   });
 
+  test('拖拽换位：moveTableRow / moveTableColumn', () {
+    final TableBlockNode three = table(<List<String>>[
+      <String>['名称', '数量'],
+      <String>['苹果', '3'],
+      <String>['香蕉', '5'],
+      <String>['橙子', '2'],
+    ]);
+    // 第 1 行拖到第 3 行。
+    expect(
+      texts(moveTableRow(three, 1, 3)!),
+      <List<String>>[
+        <String>['名称', '数量'],
+        <String>['香蕉', '5'],
+        <String>['橙子', '2'],
+        <String>['苹果', '3'],
+      ],
+    );
+    // 表头不参与；不动时返回 null。
+    expect(moveTableRow(three, 0, 2), isNull);
+    expect(moveTableRow(three, 2, 2), isNull);
+
+    // 第 0 列拖到第 1 列（整列含表头一起换）。
+    expect(
+      texts(moveTableColumn(three, 0, 1)!),
+      <List<String>>[
+        <String>['数量', '名称'],
+        <String>['3', '苹果'],
+        <String>['5', '香蕉'],
+        <String>['2', '橙子'],
+      ],
+    );
+    expect(moveTableColumn(three, 1, 1), isNull);
+  });
+
   test('解析时分隔行对齐回填到表头（标题栏左对齐重开不丢）', () {
     final MutableDocument parsed = deserializeXiaojiMarkdown(
       '| 名称 | 数量 |\n| :--- | :---: |\n| a | b |',

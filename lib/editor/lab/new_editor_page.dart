@@ -3834,9 +3834,6 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   /// 表格整列对齐（左 / 中 / 右）：写入单元格的 textAlign 元数据。
-  ///
-  /// Markdown 的对齐是**列级**的（`| :--- | ---: |`），所以整列一起改；
-  /// 序列化会按第一行数据单元格的 textAlign 写回分隔行。
   void _alignTableColumn(String tableId, int column, String align) {
     final DocumentNode? node = _document.getNodeById(tableId);
     if (node is! TableBlockNode) {
@@ -3876,6 +3873,39 @@ class _NewEditorPageState extends State<NewEditorPage>
       ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
     ]);
     // 对齐不改变选区：把整张表选中会让表格闪一片蓝底（用户反馈）。
+  }
+
+  /// 鼠标拖拽整行换位（Typora 的 drag & move）。
+  void _moveTableRow(String tableId, int fromRow, int toRow) {
+    final DocumentNode? node = _document.getNodeById(tableId);
+    if (node is! TableBlockNode) {
+      return;
+    }
+    final TableBlockNode? next = moveTableRow(node, fromRow, toRow);
+    if (next == null) {
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
+      const ClearSelectionRequest(),
+    ]);
+  }
+
+  /// 鼠标拖拽整列换位。
+  void _moveTableColumn(String tableId, int fromColumn, int toColumn) {
+    final DocumentNode? node = _document.getNodeById(tableId);
+    if (node is! TableBlockNode) {
+      return;
+    }
+    final TableBlockNode? next =
+        moveTableColumn(node, fromColumn, toColumn);
+    if (next == null) {
+      return;
+    }
+    _editor.execute(<EditRequest>[
+      ReplaceNodeRequest(existingNodeId: node.id, newNode: next),
+      const ClearSelectionRequest(),
+    ]);
   }
 
   /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
@@ -4230,6 +4260,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                 onCellStructure: _mutateTable,
                 onCellPointerDown: _rememberTableCellPointer,
                 onColumnAlign: _alignTableColumn,
+                onMoveRow: _moveTableRow,
+                onMoveColumn: _moveTableColumn,
                 onCellEditingChanged: (bool editing) {
                   _tableCellEditing = editing;
                   if (editing) {
