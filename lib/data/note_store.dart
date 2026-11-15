@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../app/copyright.dart';
 import '../models/note.dart';
 import '../models/note_settings.dart';
 import '../security/security_service.dart';
@@ -967,6 +968,9 @@ class NoteStore {
     return jsonEncode(<String, Object?>{
       'schema': backupSchemaVersion,
       'app': 'xiaoji',
+      // 生成器标识：导出包的「出处」。恢复时用来识别包来源，属于功能性
+      // 元数据（同时也是权属信息的一份可复核记录）。
+      'generator': '$xiaojiProject/$xiaojiOwner',
       if (appVersion != null && appVersion.isNotEmpty) 'appVersion': appVersion,
       'createdAt': DateTime.now().toIso8601String(),
       'kind': kind,

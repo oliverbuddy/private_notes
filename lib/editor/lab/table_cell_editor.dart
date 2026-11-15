@@ -491,6 +491,23 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
         _commitEditing(moveUp: true);
         return KeyEventResult.handled;
       }
+      // 光标在文字最前 / 最后时按 ← / → 跨到相邻单元格（Excel 语义）；
+      // 在文本中间则保持输入框自身的左右移动。
+      final TextSelection selection = controller.selection;
+      if (key == LogicalKeyboardKey.arrowLeft &&
+          selection.isValid &&
+          selection.isCollapsed &&
+          selection.baseOffset == 0) {
+        _commitEditing(movePrevious: true, allowAddRow: false);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowRight &&
+          selection.isValid &&
+          selection.isCollapsed &&
+          selection.baseOffset >= controller.text.length) {
+        _commitEditing(moveNext: true, allowAddRow: false);
+        return KeyEventResult.handled;
+      }
       return KeyEventResult.ignored;
     };
     focusNode.addListener(() {
@@ -568,6 +585,7 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
     bool movePrevious = false,
     bool moveDown = false,
     bool moveUp = false,
+    bool allowAddRow = true,
     bool cancel = false,
   }) {
     final int? row = _editRow;
@@ -606,6 +624,10 @@ class _EditableTableComponentState extends State<EditableTableComponent> {
         nextColumn = index % columnCount;
       } else if (moveNext) {
         // 最后一格再 Tab：新增一行并落到新行首列。
+        // 但 ← / → 跨格到边界时不自动加行，保持在当前格。
+        if (!allowAddRow) {
+          return;
+        }
         addRow = true;
         nextRow = rowCount;
         nextColumn = 0;
