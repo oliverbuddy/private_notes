@@ -155,6 +155,56 @@ void main() {
     );
   });
 
+  test('只设标题行对齐也能写回分隔行（重新打开不丢）', () {
+    // 只有表头一行的表格：旧实现读不到「第 1 行数据」，对齐会丢。
+    final MutableDocument oneRow = MutableDocument(
+      nodes: <DocumentNode>[
+        TableBlockNode(
+          id: 't1',
+          cells: <List<TextNode>>[
+            <TextNode>[
+              TextNode(
+                id: 'h1',
+                text: AttributedText('名称'),
+                metadata: const <String, dynamic>{
+                  TextNodeMetadata.textAlign: 'left',
+                },
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+    expect(
+      serializeDocumentToXiaojiMarkdown(oneRow).contains(':---'),
+      isTrue,
+    );
+
+    // 单行表格设成右对齐同样要保留。
+    final MutableDocument rightAligned = MutableDocument(
+      nodes: <DocumentNode>[
+        TableBlockNode(
+          id: 't2',
+          cells: <List<TextNode>>[
+            <TextNode>[
+              TextNode(
+                id: 'h1',
+                text: AttributedText('名称'),
+                metadata: const <String, dynamic>{
+                  TextNodeMetadata.textAlign: 'right',
+                },
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+    expect(
+      serializeDocumentToXiaojiMarkdown(rightAligned).contains('---:'),
+      isTrue,
+    );
+  });
+
   test('列对齐写回分隔行', () {
     final MutableDocument document = MutableDocument(
       nodes: <DocumentNode>[

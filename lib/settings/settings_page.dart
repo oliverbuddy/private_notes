@@ -900,6 +900,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   AppPressable(
                     onTap: () => Navigator.of(sheetContext).pop(options[i]),
                     pressedScale: 1,
+                    pressedColor: AppPress.overlay(context),
                     child: Container(
                       height: AppSize.actionRow,
                       padding: const EdgeInsets.symmetric(horizontal: 16),

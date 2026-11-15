@@ -1303,13 +1303,23 @@ String? _tableMarkdown(TableBlockNode node) {
       ],
   ];
   final StringBuffer buffer = StringBuffer('| ${rows.first.join(' | ')} |');
-  // 对齐信息存在数据行单元格的 textAlign 上（解析器从表头 align 复制）；
-  // 只有表头行时无法还原，统一按默认左对齐输出。
+  // 对齐信息存在单元格的 textAlign 上。有数据行时沿用第 1 行（内核解析
+  // 后表头默认带 center，不能当作用户设置，否则每次保存都会改写分隔行）；
+  // 只有表头一行的表格读表头，否则用户给标题栏设的对齐一重开就丢。
+  Object? alignOf(int column) {
+    if (node.rowCount > 1) {
+      return node
+          .getCell(rowIndex: 1, columnIndex: column)
+          .metadata[TextNodeMetadata.textAlign];
+    }
+    final Object? header = node
+        .getCell(rowIndex: 0, columnIndex: column)
+        .metadata[TextNodeMetadata.textAlign];
+    return header == 'left' || header == 'right' ? header : null;
+  }
+
   final List<String> separators = <String>[
-    for (int c = 0; c < columns; c++)
-      _tableSeparator(
-        node.rowCount > 1 ? node.getCell(rowIndex: 1, columnIndex: c) : null,
-      ),
+    for (int c = 0; c < columns; c++) _tableSeparator(alignOf(c)),
   ];
   buffer.write('\n| ${separators.join(' | ')} |');
   for (int r = 1; r < rows.length; r++) {
@@ -1330,8 +1340,7 @@ String _tableCellMarkdown(TextNode cell) {
 }
 
 /// 分隔行：`:---` 左对齐、`:---:` 居中、`---:` 右对齐、`---` 默认。
-String _tableSeparator(TextNode? firstDataCell) {
-  final Object? align = firstDataCell?.metadata[TextNodeMetadata.textAlign];
+String _tableSeparator(Object? align) {
   return switch (align) {
     'center' => ':---:',
     'right' => '---:',

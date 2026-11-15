@@ -213,6 +213,13 @@ class AppListRow extends StatelessWidget {
     if (onTap == null) {
       return content;
     }
-    return AppPressable(onTap: onTap, child: content);
+    // 桌面端统一交互反馈：悬停/按下时铺一层淡蒙层（与首页卡片、弹窗
+    // 选项一致），否则设置项在 Mac 上「点上去没有反应」。
+    return AppPressable(
+      onTap: onTap,
+      pressedScale: 1,
+      pressedColor: AppPress.overlay(context),
+      child: content,
+    );
   }
 }

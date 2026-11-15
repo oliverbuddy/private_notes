@@ -3797,43 +3797,10 @@ class _NewEditorPageState extends State<NewEditorPage>
   ({String tableId, int row, int column})? _lastTableCell;
 
   void _rememberTableCellPointer(String tableId, int row, int column) {
+    // 只记录行列（右键菜单定位用）。点击表格的滚动位置不再「补还原」：
+    // 表格选区已经不会触发框架自动滚动，之前 0/60/160ms 的三次 jumpTo
+    // 反而让光标落进单元格时正文抖一下（用户反馈）。
     _lastTableCell = (tableId: tableId, row: row, column: column);
-    // 点击表格后内核会把整表选中并自动滚动到表格末尾，表现为「点一下
-    // 页面就往下跳」。这里记下点击前的滚动位置，随后几帧内还原。
-    if (_editorScroll.hasClients) {
-      _tableTapScroll = _editorScroll.position.pixels;
-      _scheduleScrollRestoreAfterTableTap();
-    }
-  }
-
-  /// 点击表格前的滚动位置（null = 没有待还原的滚动）。
-  double? _tableTapScroll;
-
-  void _scheduleScrollRestoreAfterTableTap() {
-    final double? target = _tableTapScroll;
-    if (target == null) {
-      return;
-    }
-    for (final int delay in const <int>[0, 60, 160]) {
-      Future<void>.delayed(Duration(milliseconds: delay), () {
-        if (!mounted || !_editorScroll.hasClients) {
-          return;
-        }
-        final ScrollPosition position = _editorScroll.position;
-        final double clamped = target.clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        );
-        if ((position.pixels - clamped).abs() > 1) {
-          // 还原期间不许光标跟随再把手势滚回去。
-          _stopCaretScroll();
-          position.jumpTo(clamped);
-        }
-      });
-    }
-    Future<void>.delayed(const Duration(milliseconds: 400), () {
-      _tableTapScroll = null;
-    });
   }
 
   /// 是否正在编辑表格单元格：此时焦点在单元格输入框上，⌘C / ⌘V 必须交给
@@ -4483,12 +4450,13 @@ class _NewEditorPageState extends State<NewEditorPage>
               fontSize: h1Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
-              letterSpacing: 0.3,
+              // 中文标题加字距会显得松散：收紧到 0.1，标题更「整」。
+              letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
             Styles.padding: CascadingPadding.only(
-              top: desktop ? 32 : 24,
+              top: desktop ? 36 : 24,
               bottom: desktop ? 10 : 8,
             ),
           },
@@ -4500,7 +4468,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               fontSize: h2Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
-              letterSpacing: 0.25,
+              letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
@@ -4517,7 +4485,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               fontSize: h3Size * zoom,
               fontWeight: AppWeight.semibold,
               height: 1.3,
-              letterSpacing: 0.2,
+              letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.text,
             ),
