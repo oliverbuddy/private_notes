@@ -77,8 +77,10 @@ class NoteTileComfortable extends StatelessWidget {
     // 是表格），文字摘要则从表格之后的正文开始。
     final List<List<String>>? tableRows =
         note.locked ? null : tablePreviewOf(note.body);
+    // 文字摘要里不再出现任何表格：开头那张已经用表格预览画出来了，
+    // 其余表格按用户要求不显示（否则第二个表格会以文字形式冒出来）。
     final String bodyForSummary =
-        tableRows == null ? note.body : bodyAfterLeadingTable(note.body);
+        note.locked ? '' : bodyWithoutTables(note.body);
     final summary = note.locked ? '' : plainSummary(bodyForSummary);
 
     // iOS 正文 17pt / 行高 1.5。

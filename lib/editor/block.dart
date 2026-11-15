@@ -267,7 +267,7 @@ String plainSummary(String markdown) {
 /// 列出正文开头的表格，给列表卡片做「迷你表格」预览。
 ///
 /// 只在正文第一块是 GFM 表格时返回（用户要求：详情顶部是表格，列表里要
-/// 看得出是表格，而不是一串被压平的摘要文字）。最多 3 行 × 4 列，
+/// 看得出是表格，而不是一串被压平的摘要文字）。最多 5 行 × 4 列，
 /// 分隔行自动跳过，单元格里的行内标记会被剥掉。
 List<List<String>>? tablePreviewOf(String markdown) {
   if (markdown.trim().isEmpty) {
@@ -287,7 +287,7 @@ List<List<String>>? tablePreviewOf(String markdown) {
   }
   final int end = _tableBlockEnd(lines, start);
   final List<List<String>> rows = <List<String>>[];
-  for (var i = start; i < end && rows.length < 3; i++) {
+  for (var i = start; i < end && rows.length < 5; i++) {
     if (i == start + 1) {
       // 分隔行。
       continue;
@@ -312,25 +312,25 @@ List<List<String>>? tablePreviewOf(String markdown) {
   return rows.isEmpty ? null : rows;
 }
 
-/// 去掉正文开头的表格，返回剩下的正文（列表摘要用）。
-String bodyAfterLeadingTable(String markdown) {
+/// 去掉正文里的**所有** GFM 表格（列表文字摘要用）。
+///
+/// 列表卡片用 [tablePreviewOf] 单独画正文开头那张表格；如果文字摘要里
+/// 再出现表格内容，第二个表格就会以文字形式冒出来（用户反馈「两个表格
+/// 时第二个还显示」）。这里把所有表格整块去掉，列表里只保留预览表格
+/// 与普通正文，和详情页的结构一致。
+String bodyWithoutTables(String markdown) {
   final List<String> lines = markdown.split('\n');
-  var start = -1;
+  final List<String> kept = <String>[];
   for (var i = 0; i < lines.length; i++) {
-    if (lines[i].trim().isEmpty) {
+    final int end = _tableBlockEnd(lines, i);
+    if (end > i) {
+      // 整块表格跳过（for 循环还会 +1，这里停在最后一行之前）。
+      i = end - 1;
       continue;
     }
-    start = i;
-    break;
+    kept.add(lines[i]);
   }
-  if (start < 0) {
-    return markdown;
-  }
-  final int end = _tableBlockEnd(lines, start);
-  if (end <= start) {
-    return markdown;
-  }
-  return lines.sublist(end).join('\n');
+  return kept.join('\n');
 }
 
 /// 表格块结束下标（不含）。[start] 不是「表头 + 分隔行」形态时返回 -1。

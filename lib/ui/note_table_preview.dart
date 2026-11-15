@@ -1,12 +1,14 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// 列表卡片里的迷你表格预览。
+/// 列表卡片里的表格预览。
 ///
-/// 详情正文第一块是表格时，列表里只给一行压平的摘要完全看不出是表格
-/// （用户反馈）。这里按详情页的「轻网格」观感画一张最多 3 行 × 4 列的
-/// 小表：表头淡底加粗、数据行正文色，超出的单元格省略号截断。
+/// 正文第一块是表格时，列表里按**详情页的观感**画一张最多 5 行 × 4 列的
+/// 小表：表头淡底加粗、数据行正文色、列宽按内容分配（与详情一致，而不是
+/// 等分）、内容过长在格内换行。
 class NoteTablePreview extends StatelessWidget {
   const NoteTablePreview({
     super.key,
@@ -29,11 +31,21 @@ class NoteTablePreview extends StatelessWidget {
       1,
       (int max, List<String> row) => row.length > max ? row.length : max,
     );
+    final TextStyle textStyle = TextStyle(
+      fontSize: AppFontSize.body,
+      height: 1.35,
+      letterSpacing: 0,
+      color: colors.text,
+    );
+    // 列宽按内容分配：与详情页的 auto 表格一致（长文本列更宽）。
+    final List<double> weights = _contentWeights(columns, textStyle);
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Table(
         border: TableBorder.all(color: colors.divider, width: 0.6),
-        defaultColumnWidth: const FlexColumnWidth(),
+        columnWidths: <int, TableColumnWidth>{
+          for (var i = 0; i < columns; i++) i: FlexColumnWidth(weights[i]),
+        },
         children: <TableRow>[
           for (var row = 0; row < rows.length; row++)
             TableRow(
@@ -49,12 +61,7 @@ class NoteTablePreview extends StatelessWidget {
                     ),
                     child: Text(
                       column < rows[row].length ? rows[row][column] : '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppFontSize.caption,
-                        height: 1.2,
-                        color: colors.text,
+                      style: textStyle.copyWith(
                         fontWeight:
                             row == 0 ? AppWeight.semibold : AppWeight.regular,
                       ),
@@ -65,5 +72,22 @@ class NoteTablePreview extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 每列的内容权重（按最长一行文字宽度，最少 1）。
+  List<double> _contentWeights(int columns, TextStyle style) {
+    final List<double> weights = List<double>.filled(columns, 1);
+    for (final List<String> row in rows) {
+      for (var c = 0; c < row.length && c < columns; c++) {
+        final TextPainter painter = TextPainter(
+          text: TextSpan(text: row[c], style: style),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+        )..layout();
+        weights[c] = math.max(weights[c], painter.maxIntrinsicWidth);
+        painter.dispose();
+      }
+    }
+    return weights;
   }
 }
