@@ -1181,6 +1181,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_selectionNode() is TableBlockNode) {
       return;
     }
+    // 桌面端不做「舒适落位」：用户明确要求 PC 上不要为了输入把页面
+    // 上下挪动（只在移动端保留，避开软键盘遮挡）。
+    if (PlatformFeatures.isDesktop) {
+      return;
+    }
     final selection = _composer.selection;
     if (selection == null || !selection.isCollapsed) {
       return;
@@ -1348,6 +1353,11 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 逐帧平滑或原生跳转都会把表格上下拽动（PC 上表现为抖动）。
     if (_selectionNode() is TableBlockNode) {
       return true;
+    }
+    // 桌面端不接管框架跳转：没有软键盘，光标本来就在视口里；接管只会
+    // 在光标接近底/顶时把页面平滑挪动（用户要求 PC 去掉这套逻辑）。
+    if (PlatformFeatures.isDesktop) {
+      return false;
     }
     _requestCaretScroll(target);
     return true;
@@ -3432,7 +3442,6 @@ class _NewEditorPageState extends State<NewEditorPage>
           _menuItem('下方插入行', 'insertRowBelow', enabled: hasCell),
           _menuItem('左侧插入列', 'insertColumnLeft', enabled: hasCell),
           _menuItem('右侧插入列', 'insertColumnRight', enabled: hasCell),
-          const PopupMenuDivider(height: 8),
           _menuItem(
             '上移该行',
             'moveRowUp',
@@ -3456,7 +3465,6 @@ class _NewEditorPageState extends State<NewEditorPage>
             'moveColumnRight',
             enabled: hasCell && targetColumn < selectedNode.columnCount - 1,
           ),
-          const PopupMenuDivider(height: 8),
           _menuItem(
             '删除行',
             'deleteRow',
@@ -3468,9 +3476,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             'deleteColumn',
             enabled: hasCell && selectedNode.columnCount > 1,
           ),
-          const PopupMenuDivider(height: 8),
           _menuItem('复制表格', 'copyTable'),
-          const PopupMenuDivider(height: 8),
           _menuItem('删除表格', 'deleteTable'),
         ],
       );
@@ -3564,7 +3570,6 @@ class _NewEditorPageState extends State<NewEditorPage>
         _menuItem('复制', 'copy', enabled: hasSelection),
         _menuItem('剪切', 'cut', enabled: hasSelection),
         _menuItem('粘贴', 'paste'),
-        const PopupMenuDivider(height: 8),
         _menuItem('全选', 'selectAll'),
       ],
     );

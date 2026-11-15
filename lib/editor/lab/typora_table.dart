@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show setEquals;
@@ -346,6 +347,11 @@ class _TyporaTableState extends State<TyporaTable> {
   int? _hoverRow;
   int? _hoverColumn;
 
+  /// 最后一次落光标的单元格：指针移到工具条上时，悬停位置可能已经变了，
+  /// 工具条的对齐/增删要以「光标在哪一格」为准（Typora 的语义）。
+  int? _cursorRow;
+  int? _cursorColumn;
+
   bool get _editable => widget.onCellCommitted != null;
 
   /// 单元格锚点：把指针坐标换算成「第几行第几列」，也用来算光标偏移。
@@ -471,12 +477,21 @@ class _TyporaTableState extends State<TyporaTable> {
         focusNode.requestFocus();
         return;
       }
-      _commitEditing();
+      // 不能在这个 FocusNode 的变更通知里同步提交：_commitEditing 会
+      // dispose 该节点，框架会直接断言（dispose during notifyListeners）。
+      scheduleMicrotask(() {
+        if (!mounted || _focusNode != focusNode) {
+          return;
+        }
+        _commitEditing();
+      });
     });
 
     setState(() {
       _editRow = row;
       _editColumn = column;
+      _cursorRow = row;
+      _cursorColumn = column;
       _controller = controller;
       _focusNode = focusNode;
     });
@@ -1038,9 +1053,12 @@ class _TyporaTableState extends State<TyporaTable> {
     );
   }
 
-  /// 工具条上的整列对齐。
+  /// 工具条上的整列对齐：作用在**光标所在列**（没有光标时用悬停列）。
+  ///
+  /// 之前用悬停列：鼠标从格子移到右上角工具条时会经过别的列，对齐就落到
+  /// 最后一列（用户反馈「点某列居中，最后一列变了」）。
   void _runAlign(String align) {
-    final int? column = _hoverColumn;
+    final int? column = _editColumn ?? _cursorColumn ?? _hoverColumn;
     if (column == null) {
       return;
     }
@@ -1050,11 +1068,10 @@ class _TyporaTableState extends State<TyporaTable> {
     widget.onColumnAlign?.call(widget.viewModel.nodeId, column, align);
   }
 
-  /// 工具条执行结构操作：先把正在编辑的内容提交掉，避免两次整表重建
-  /// 互相覆盖。
+  /// 工具条执行结构操作：同样以光标所在格为准（没有光标时用悬停格）。
   void _runStructure(TableCellAction action) {
-    final int? row = _hoverRow;
-    final int? column = _hoverColumn;
+    final int? row = _editRow ?? _cursorRow ?? _hoverRow;
+    final int? column = _editColumn ?? _cursorColumn ?? _hoverColumn;
     if (row == null || column == null) {
       return;
     }
@@ -1221,20 +1238,12 @@ class _TyporaTableState extends State<TyporaTable> {
 
     final Widget padded = Padding(padding: cell.padding, child: content);
     final BoxDecoration decoration = cell.decoration ?? const BoxDecoration();
-    // 当前行（悬停或编辑中）加一层很淡的底色：宽表里一眼看出光标在哪一行。
-    final int? activeRow = _editRow ?? _hoverRow;
-    final bool highlighted = _editable && activeRow == row;
+    // 不做行高亮：选中/悬停整行变底色在长表里很像「整行被选中」，
+    // 与 Typora 的观感不一致（用户明确要求去掉）。
     return DecoratedBox(
       decoration: decoration,
-      child: DecoratedBox(
-        decoration: highlighted
-            ? BoxDecoration(
-                color: AppColors.of(context).accent.withValues(alpha: 0.06),
-              )
-            : const BoxDecoration(),
-        // 锚点仅用于把指针坐标换算成行列，不影响命中测试。
-        child: KeyedSubtree(key: _cellKey(row, column), child: padded),
-      ),
+      // 锚点仅用于把指针坐标换算成行列，不影响命中测试。
+      child: KeyedSubtree(key: _cellKey(row, column), child: padded),
     );
   }
 
@@ -1256,7 +1265,9 @@ class _TyporaTableState extends State<TyporaTable> {
       maxLines: null,
       keyboardType: TextInputType.multiline,
       textInputAction: TextInputAction.newline,
-      onTapOutside: (_) => _commitEditing(),
+      // 不挂 onTapOutside：点工具条时按钮不请求焦点，编辑态应当保留
+      // （Typora 里点表格工具条不会结束单元格编辑）；点击正文由焦点
+      // 监听负责提交。
       decoration: const InputDecoration(
         isDense: true,
         border: InputBorder.none,

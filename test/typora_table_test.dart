@@ -122,7 +122,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('单击一次即落光标、可拖选文字、工具条对齐作用在悬停的列', (
+  testWidgets('单击一次即落光标、可拖选文字、工具条对齐作用在光标所在列', (
     WidgetTester tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -171,9 +171,8 @@ void main() {
       reason: '编辑态应该能拖选格内文字',
     );
 
-    // 3) 悬停第二列 → 工具条出现 → 点「中」，只改这一列。
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await _pump(tester);
+    // 3) 光标在「苹果」那一列，鼠标从格子移到工具条会经过别的列；
+    //    点「中」必须作用在光标所在列（而不是经过的「数量」列）。
     final TestGesture mouse =
         await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
@@ -184,12 +183,13 @@ void main() {
     await tester.tap(find.text('中'));
     await _pump(tester);
 
-    final Text aligned = tester.widget<Text>(find.text('3'));
+    final Text aligned = tester.widget<Text>(find.text('苹果'));
     expect(
       aligned.textAlign,
       TextAlign.center,
-      reason: '对齐要作用在悬停的那一列，而不是最后一列或整表',
+      reason: '对齐要作用在光标所在列，而不是鼠标经过的那一列',
     );
+    expect(tester.widget<Text>(find.text('3')).textAlign, isNot(TextAlign.center));
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });
