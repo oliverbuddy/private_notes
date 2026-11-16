@@ -313,6 +313,46 @@ void main() {
       expect(find.textContaining('苹果', findRichText: true), findsOneWidget);
       expect(find.byType(UnknownComponent), findsNothing);
     });
+
+    testWidgets('点表格不移动文档光标，长按选单元格不滚走', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_table_touch_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note(
+            'table-touch',
+            '开头一段。\n\n| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n结尾一段。',
+          ),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder cell = find.textContaining('苹果', findRichText: true);
+      final Finder caret = find.byKey(xiaojiCaretKey);
+      final Rect? caretBefore =
+          caret.evaluate().isEmpty ? null : tester.getRect(caret);
+      final double topBefore = tester.getRect(cell).top;
+
+      await tester.tap(cell);
+      await _pumpFrames(tester, frames: 6);
+      final Rect? caretAfter =
+          caret.evaluate().isEmpty ? null : tester.getRect(caret);
+      expect(
+        caretAfter?.top,
+        caretBefore?.top,
+        reason: '点表格不应把光标落到表格下方（随后会自动滚动）',
+      );
+
+      await tester.longPress(cell);
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(
+        tester.getRect(cell).top,
+        closeTo(topBefore, 0.5),
+        reason: '长按选单元格文本时页面不应滚动',
+      );
+    });
   });
 
   group('行内样式渲染（详情页）', () {
@@ -683,8 +723,7 @@ void main() {
     expect(below.text.toPlainText(), isEmpty);
   });
 
-  testWidgets('分享长图直接复用详情文档布局（表格/代码块完整、宽 1080）',
-      (WidgetTester tester) async {
+  testWidgets('分享长图直接复用详情文档布局（表格/代码块完整、宽 1080）', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetPhysicalSize);
@@ -744,8 +783,7 @@ void main() {
   });
 
   group('输入法组词下划线', () {
-    testWidgets('组词区用主题色 1dp 细线，不再是默认黑色 2dp',
-        (WidgetTester tester) async {
+    testWidgets('组词区用主题色 1dp 细线，不再是默认黑色 2dp', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_composing_');
       await tester.pumpWidget(

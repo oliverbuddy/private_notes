@@ -3093,9 +3093,23 @@ class _NewEditorPageState extends State<NewEditorPage>
           ),
           androidHandleColor: colors.accent,
           stylesheet: _buildStylesheet(colors, contentWidth),
+          // 表格里的 SelectionArea 拿到焦点时，编辑器的 FocusNode 作为祖先
+          // 也会被判定为 hasFocus：默认策略会立刻把光标放到文末并弹键盘，
+          // 表现为「长按选单元格 → 页面往下滚、光标跑到表格后面」。
+          // 首次光标由页面自己放（_placeInitialCaret），这里关掉这两个由
+          // 焦点派生出来的副作用；正文点击定位与 IME 行为不变。
+          selectionPolicies: const SuperEditorSelectionPolicies(
+            placeCaretAtEndOfDocumentOnGainFocus: false,
+          ),
+          imePolicies: const SuperEditorImePolicies(
+            openImeOnNonPrimaryFocusGain: false,
+          ),
           // 点链接直接跳系统浏览器。官方默认 handler 只在「交互模式」生效，
           // 常驻编辑的小记永远不满足条件，链接点了没反应（用户反馈）。
           contentTapDelegateFactories: <SuperEditorContentTapDelegateFactory>[
+            // 表格是只读块：点按/双击不要移动文档光标，否则光标会落到
+            // 表格下方并触发自动滚动（长按复制单元格文本时尤其明显）。
+            (SuperEditorContext context) => _TableTapBlocker(context.document),
             (SuperEditorContext context) =>
                 XiaojiLinkTapHandler(context.document),
           ],
@@ -4398,6 +4412,38 @@ class _LabHorizontalRuleComponentBuilder implements ComponentBuilder {
       // 品牌色的分隔线：浅色用 6% 黑、深色用 7% 白，两种主题都贴纸感。
       color: colors.divider,
     );
+  }
+}
+
+/// 表格块的点击拦截：表格只读，点它不移动文档光标。
+///
+/// 不拦的话，点在单元格上会把光标放到「表格下游」（视觉上就是表格下面
+/// 那一段），随后编辑器的自动落位会把页面滚下去。文本选择由表格内部的
+/// SelectionArea 负责，不依赖文档光标。
+class _TableTapBlocker extends ContentTapDelegate {
+  _TableTapBlocker(this._document);
+
+  final Document _document;
+
+  @override
+  TapHandlingInstruction onTap(DocumentTapDetails details) => _halt(details);
+
+  @override
+  TapHandlingInstruction onDoubleTap(DocumentTapDetails details) =>
+      _halt(details);
+
+  @override
+  TapHandlingInstruction onTripleTap(DocumentTapDetails details) =>
+      _halt(details);
+
+  TapHandlingInstruction _halt(DocumentTapDetails details) {
+    final DocumentPosition? position = details.documentLayout
+        .getDocumentPositionNearestToOffset(details.layoutOffset);
+    if (position != null &&
+        _document.getNodeById(position.nodeId) is TableBlockNode) {
+      return TapHandlingInstruction.halt;
+    }
+    return TapHandlingInstruction.continueHandling;
   }
 }
 

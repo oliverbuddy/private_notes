@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
+import '../../theme/app_theme.dart';
+
 /// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
 ///
 /// 2~3 列表格在手机上基本一屏放下；列特别多时单列不低于 [min]，宁可
@@ -119,10 +121,43 @@ class MobileTable extends StatefulWidget {
 class _MobileTableState extends State<MobileTable> {
   final ScrollController _scrollController = ScrollController();
 
+  /// 本次按下期间是否由表格临时关掉了编辑器的长按选块。
+  bool _suppressedEditorLongPress = false;
+
   @override
   void dispose() {
+    // 页面在按住表格时被关闭的兜底：别把全局开关留在 true。
+    _restoreEditorLongPress();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 表格按下时，临时关掉 super_editor 自己的长按选块。
+  ///
+  /// 内核的长按不是手势竞技场里的识别器，而是 `onTapDown` 之后直接起
+  /// 500ms 定时器：它和 SelectionArea 的长按同时到点，谁先执行不稳定。
+  /// 抢输的那次就会把整张表当成块选中、requestFocus 并把光标落到表格
+  /// 下方，表现为「长按选单元格时页面隔三差五往下滚一下」。
+  /// 内核提供了 `disableLongPressSelectionForSuperlist` 开关，这里只在
+  /// 手指按在表格上的这段时间打开，抬起即恢复，不影响正文长按选词。
+  void _suppressEditorLongPress() {
+    // 内核这个开关被标记为 deprecated（issue #1547）：组件与文档手势都是
+    // translucent，长按会同时触发两套逻辑。但它正是当前唯一可用的官方
+    // 逃生口 —— 表格自己用 SelectionArea 处理长按，需要让内核那套让路。
+    // ignore: deprecated_member_use
+    if (!disableLongPressSelectionForSuperlist) {
+      // ignore: deprecated_member_use
+      disableLongPressSelectionForSuperlist = true;
+      _suppressedEditorLongPress = true;
+    }
+  }
+
+  void _restoreEditorLongPress() {
+    if (_suppressedEditorLongPress) {
+      // ignore: deprecated_member_use
+      disableLongPressSelectionForSuperlist = false;
+      _suppressedEditorLongPress = false;
+    }
   }
 
   @override
@@ -132,35 +167,46 @@ class _MobileTableState extends State<MobileTable> {
     return BoxComponent(
       key: widget.componentKey,
       opacity: widget.viewModel.opacity,
-      child: SelectionArea(
-        child: _buildFit(context, _buildTable(context)),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _suppressEditorLongPress(),
+        onPointerUp: (_) => _restoreEditorLongPress(),
+        onPointerCancel: (_) => _restoreEditorLongPress(),
+        child: SelectionArea(
+          child: _buildFit(context, _buildTable(context)),
+        ),
       ),
     );
   }
 
   Widget _buildTable(BuildContext context) {
     final MarkdownTableViewModel viewModel = widget.viewModel;
-    return Table(
-      border: viewModel.border ?? TableBorder.all(),
-      defaultColumnWidth: viewModel.columnWidth,
-      children: <TableRow>[
-        for (final List<MarkdownTableCellViewModel> row in viewModel.cells)
-          TableRow(
-            children: <Widget>[
-              for (final MarkdownTableCellViewModel cell in row)
-                DecoratedBox(
-                  decoration: cell.decoration ?? const BoxDecoration(),
-                  child: Padding(
-                    padding: cell.padding,
-                    child: Text.rich(
-                      _cellSpan(context, cell),
-                      textAlign: cell.textAlign,
+    // 外圈圆角：网格线本身是直角，裁一下四角后与卡片的圆角语言一致，
+    // 不再是一块「贴在正文里的生硬表格」。滚动条在裁剪层外面，不受影响。
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.block),
+      child: Table(
+        border: viewModel.border ?? TableBorder.all(),
+        defaultColumnWidth: viewModel.columnWidth,
+        children: <TableRow>[
+          for (final List<MarkdownTableCellViewModel> row in viewModel.cells)
+            TableRow(
+              children: <Widget>[
+                for (final MarkdownTableCellViewModel cell in row)
+                  DecoratedBox(
+                    decoration: cell.decoration ?? const BoxDecoration(),
+                    child: Padding(
+                      padding: cell.padding,
+                      child: Text.rich(
+                        _cellSpan(context, cell),
+                        textAlign: cell.textAlign,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-      ],
+              ],
+            ),
+        ],
+      ),
     );
   }
 
