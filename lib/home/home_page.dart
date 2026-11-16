@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
@@ -540,6 +541,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 之前深色下底色误用了 page（和卡片同色），卡片轮廓会完全消失；
     // 现在固定用 pageAlt 当底色，与设置页同一套层次。
     final comfortableBg = colors.pageAlt;
+    // 平板/横屏：悬浮球跟着内容版心收进来，不再贴着屏幕最右缘
+    // （正文与标题都居中收窄了，只有 FAB 贴边会显得整页错位）。
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double contentWidth = AppBreakpoints.contentMaxWidth(screenWidth);
+    final double fabEndInset = math.max(0, (screenWidth - contentWidth) / 2);
 
     return Scaffold(
       // 两档密度两种底色语义：紧凑 = 纯色列表（文字对比优先），
@@ -610,26 +616,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       floatingActionButton: _searchMode
           ? null
           // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
-          : Tooltip(
-              message: '新建小记',
-              child: AppPressable(
-                onTap: () => _openEditor(null),
-                pressedScale: 0.95,
-                pressedOpacity: 0.9,
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: colors.fabBackground,
-                    shape: BoxShape.circle,
-                    boxShadow: AppShadow.floating,
-                  ),
-                  child: Icon(
-                    // 实色圆底上用实心笔（与 Gmail 新建按钮同一处理）：
-                    // 描边笔在饱和蓝上笔画偏细，远看容易糊成一团。
-                    Icons.edit_rounded,
-                    size: AppIcon.fab,
-                    color: colors.fabForeground,
+          : Padding(
+              padding: EdgeInsets.only(right: fabEndInset),
+              child: Tooltip(
+                message: '新建小记',
+                child: AppPressable(
+                  onTap: () => _openEditor(null),
+                  pressedScale: 0.95,
+                  pressedOpacity: 0.9,
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: colors.fabBackground,
+                      shape: BoxShape.circle,
+                      boxShadow: AppShadow.floating,
+                    ),
+                    child: Icon(
+                      // 实色圆底上用实心笔（与 Gmail 新建按钮同一处理）：
+                      // 描边笔在饱和蓝上笔画偏细，远看容易糊成一团。
+                      Icons.edit_rounded,
+                      size: AppIcon.fab,
+                      color: colors.fabForeground,
+                    ),
                   ),
                 ),
               ),

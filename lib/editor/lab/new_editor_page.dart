@@ -2826,7 +2826,10 @@ class _NewEditorPageState extends State<NewEditorPage>
             color: colors.page,
             // 面板内容垂直居中：＋ 面板只有一组、Aa 面板四行，顶在上沿会让
             // 下面留一大片空白（用户反馈「太空」）。居中后上下留白对称。
-            child: Center(child: _buildPanelContent()),
+            // 平板：内容跟正文同一条版心居中，不再把四列卡片拉到整屏宽。
+            child: Center(
+              child: ContentFrame(child: _buildPanelContent()),
+            ),
           ),
         ),
       ),

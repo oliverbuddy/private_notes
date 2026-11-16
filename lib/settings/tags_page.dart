@@ -299,24 +299,19 @@ class TagsPage extends StatelessWidget {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
-                                // 与回收站/主页空态同一套层级：图标 + 20 号标题 + 14 号说明。
-                                Icon(Icons.sell_outlined,
-                                    size: AppIcon.hero, color: colors.tertiary),
-                                const SizedBox(height: 12),
                                 Text(
                                   '还没有标签',
                                   style: TextStyle(
-                                    fontSize: AppFontSize.subtitle,
-                                    fontWeight: AppWeight.medium,
-                                    color: colors.text,
+                                    fontSize: AppFontSize.value,
+                                    color: colors.tertiary,
                                   ),
                                 ),
-                                const SizedBox(height: AppSpace.sm),
+                                const SizedBox(height: 8),
                                 Text(
                                   '在编辑页底部的「标签」按钮里添加',
                                   style: TextStyle(
-                                    fontSize: AppFontSize.labelLg,
-                                    color: colors.secondary,
+                                    fontSize: AppFontSize.caption,
+                                    color: colors.tertiary,
                                   ),
                                 ),
                               ],

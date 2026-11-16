@@ -108,7 +108,7 @@ class PinEntry extends StatelessWidget {
                   padding: const EdgeInsets.all(5),
                   child: Material(
                     color: colors.surface2,
-                    borderRadius: BorderRadius.circular(AppRadius.card),
+                    borderRadius: BorderRadius.circular(12),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       onTap: _backspace,
@@ -149,7 +149,7 @@ class PinEntry extends StatelessWidget {
       padding: const EdgeInsets.all(5),
       child: Material(
         color: colors.surface2,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+        borderRadius: BorderRadius.circular(12),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => onTap(label),

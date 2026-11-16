@@ -94,11 +94,16 @@ Future<T?> showXiaojiPanel<T>({
   required BuildContext context,
   required WidgetBuilder builder,
 }) {
+  // 平板同样按手机宽度收窄居中：历史版本/预览是按行阅读的面板，
+  // 拉成 1000+ 宽后一行文字过长，按钮也会变成超长横条。
+  final bool wide = !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
   return showModalBottomSheet<T>(
     context: context,
     // 面板内容自己画底色与圆角（底部弹层要露出手势条背景）。
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
+    constraints:
+        wide ? const BoxConstraints(maxWidth: kXiaojiSheetMaxWidth) : null,
     builder: builder,
   );
 }

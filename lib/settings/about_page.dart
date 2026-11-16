@@ -171,7 +171,7 @@ class _AboutPageState extends State<AboutPage> {
         Text(
           '构建 $xiaojiBuildTag',
           style: TextStyle(
-            fontSize: AppFontSize.caption,
+            fontSize: 10,
             height: 1.2,
             letterSpacing: 0.2,
             color: colors.tertiary.withValues(alpha: 0.7),

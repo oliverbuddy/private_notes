@@ -215,11 +215,8 @@ class _TrashPageState extends State<TrashPage> {
           const SizedBox(height: 12),
           Text(
             '回收站是空的',
-            style: TextStyle(
-              fontSize: AppFontSize.subtitle,
-              fontWeight: AppWeight.medium,
-              color: colors.text,
-            ),
+            style:
+                TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
           ),
         ],
       ),

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 Timer? _hideTimer;
 
 /// 统一的底部提示条：自动消失 + 可选操作按钮。
@@ -26,8 +28,12 @@ void showSnack(
           ? const Duration(seconds: 2)
           : const Duration(seconds: 4));
   final Duration visible = accessible
-      ? (action == null ? const Duration(seconds: 6) : const Duration(seconds: 10))
+      ? (action == null
+          ? const Duration(seconds: 6)
+          : const Duration(seconds: 10))
       : base;
+  // 平板：提示条收窄成悬浮胶囊，不再横贯整屏（手机保持原来的贴底样式）。
+  final bool wide = !AppBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
 
   _hideTimer?.cancel();
   messenger
@@ -37,6 +43,8 @@ void showSnack(
         content: Text(message),
         action: action,
         duration: visible,
+        behavior: wide ? SnackBarBehavior.floating : null,
+        width: wide ? 480 : null,
       ),
     );
 
