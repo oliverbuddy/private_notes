@@ -616,17 +616,23 @@ abstract final class AppTheme {
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: c.text,
+        // 参考鸿蒙：深浅色都用「深灰底 + 浅色字」的胶囊提示，
+        // 深色模式不再用整块反白底色（夜里弹出整屏亮条很刺眼）。
+        backgroundColor:
+            brightness == Brightness.dark ? const Color(0xFF3A3D43) : c.text,
         contentTextStyle: TextStyle(
-          color: c.page,
+          color:
+              brightness == Brightness.dark ? const Color(0xFFF2F3F5) : c.page,
           fontSize: AppFontSize.label,
           fontWeight: AppWeight.regular,
         ),
         behavior: SnackBarBehavior.floating,
         elevation: 0,
-        // SnackBar 底色是「反色」，普通 accent 在上面只有约 2:1，
-        // 这里换成专门的反色强调（浅色深底用亮蓝、深色浅底用深蓝）。
-        actionTextColor: c.inverseAccent,
+        // SnackBar 底色是深灰：普通 accent 在上面只有约 2:1，
+        // 这里换成专门的反色强调（浅色用亮蓝、深色用更亮的蓝）。
+        actionTextColor: brightness == Brightness.dark
+            ? const Color(0xFF9CC3FF)
+            : c.inverseAccent,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(AppRadius.button)),
         ),
