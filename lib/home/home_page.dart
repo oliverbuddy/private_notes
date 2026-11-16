@@ -384,7 +384,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
             child: ListenableBuilder(
               listenable: _repo,
               builder: (BuildContext context, Widget? _) {
@@ -718,7 +718,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(Icons.sell_rounded, size: AppIcon.chip, color: colors.accent),
+              Icon(Icons.sell_rounded,
+                  size: AppIcon.chip, color: colors.accent),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(

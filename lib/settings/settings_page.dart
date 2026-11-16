@@ -205,8 +205,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       ],
                     ),
                     Padding(
-                      padding:
-                          const EdgeInsets.fromLTRB(AppSpace.lg, 12, AppSpace.lg, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          AppSpace.lg, 12, AppSpace.lg, 0),
                       child: Text(
                         '附件是正文里引用的图片与文件。回收站内容保留 30 天，到期自动释放。',
                         style: AppText.caption.copyWith(color: colors.tertiary),
@@ -218,8 +218,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             AppSpace.lg, 8, AppSpace.lg, 0),
                         child: Text(
                           _storageHint!,
-                          style:
-                              AppText.caption.copyWith(color: colors.accent),
+                          style: AppText.caption.copyWith(color: colors.accent),
                         ),
                       ),
                     const SizedBox(height: 16),
@@ -700,24 +699,28 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildHeader(BuildContext context, AppColors colors) {
-    return SizedBox(
-      height: AppSize.navBar,
-      child: Row(
-        children: <Widget>[
-          const AppBackButton(),
-          // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-              child: Text(
-                '设置',
-                style: AppText.sheetTitle.copyWith(color: colors.text),
+    // 与内容同一版心：宽屏下返回键/标题不再贴着窗口左缘。
+    return ContentFrame(
+      child: SizedBox(
+        height: AppSize.navBar,
+        child: Row(
+          children: <Widget>[
+            const AppBackButton(),
+            // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                child: Text(
+                  '设置',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -883,7 +886,8 @@ class _SettingsPageState extends State<SettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+                  // 标题与行内容同一条左缘（16），不再额外缩进。
+                  padding: const EdgeInsets.fromLTRB(0, 8, 0, 12),
                   child: Text(
                     title,
                     style: AppText.sheetTitle.copyWith(color: colors.text),
@@ -1165,8 +1169,8 @@ class _SettingsPageState extends State<SettingsPage> {
           return;
         }
         try {
-          decrypted =
-              await repository.store.createTempExportFile('restore-decoded.zip');
+          decrypted = await repository.store
+              .createTempExportFile('restore-decoded.zip');
           await decryptBackupFile(
             sourcePath: backupPath,
             targetPath: decrypted.path,
@@ -1363,8 +1367,8 @@ class _SettingsPageState extends State<SettingsPage> {
       );
       File upload = temp;
       if (encrypt) {
-        cipherTemp = await repository.store
-            .createTempExportFile('xiaoji-export-$stamp$encryptedBackupExtension');
+        cipherTemp = await repository.store.createTempExportFile(
+            'xiaoji-export-$stamp$encryptedBackupExtension');
         await encryptBackupFile(
           sourcePath: temp.path,
           targetPath: cipherTemp.path,

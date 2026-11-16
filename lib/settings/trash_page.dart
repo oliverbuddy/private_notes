@@ -128,7 +128,14 @@ class _TrashPageState extends State<TrashPage> {
             _buildHeader(colors),
             Expanded(
               child: _loading
-                  ? const SizedBox.shrink()
+                  // 与主页同一个加载指示：空白首帧容易被误认为「打不开」。
+                  ? const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 1.6),
+                      ),
+                    )
                   : _entries.isEmpty
                       ? _buildEmpty(colors)
                       : ContentFrame(
@@ -162,34 +169,38 @@ class _TrashPageState extends State<TrashPage> {
   }
 
   Widget _buildHeader(AppColors colors) {
-    return SizedBox(
-      height: AppSize.navBar,
-      child: Row(
-        children: <Widget>[
-          const AppBackButton(),
-          // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-              child: Text(
-                '回收站',
-                style: AppText.sheetTitle.copyWith(color: colors.text),
+    // 与内容同一版心：宽屏下返回键/标题不再贴着窗口左缘。
+    return ContentFrame(
+      child: SizedBox(
+        height: AppSize.navBar,
+        child: Row(
+          children: <Widget>[
+            const AppBackButton(),
+            // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                child: Text(
+                  '回收站',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
               ),
             ),
-          ),
-          const Spacer(),
-          if (_entries.isNotEmpty)
-            TextButton(
-              onPressed: _clearAll,
-              child: Text(
-                '清空',
-                style: TextStyle(
-                    fontSize: AppFontSize.labelLg, color: colors.danger),
+            const Spacer(),
+            if (_entries.isNotEmpty)
+              TextButton(
+                onPressed: _clearAll,
+                child: Text(
+                  '清空',
+                  style: TextStyle(
+                      fontSize: AppFontSize.labelLg, color: colors.danger),
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -204,8 +215,11 @@ class _TrashPageState extends State<TrashPage> {
           const SizedBox(height: 12),
           Text(
             '回收站是空的',
-            style:
-                TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
+            style: TextStyle(
+              fontSize: AppFontSize.subtitle,
+              fontWeight: AppWeight.medium,
+              color: colors.text,
+            ),
           ),
         ],
       ),

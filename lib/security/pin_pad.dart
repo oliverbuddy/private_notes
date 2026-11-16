@@ -59,7 +59,8 @@ class PinEntry extends StatelessWidget {
             child: Text(
               error!,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: AppFontSize.meta, color: colors.danger),
+              style:
+                  TextStyle(fontSize: AppFontSize.meta, color: colors.danger),
             ),
           ),
         const SizedBox(height: 20),
@@ -107,7 +108,7 @@ class PinEntry extends StatelessWidget {
                   padding: const EdgeInsets.all(5),
                   child: Material(
                     color: colors.surface2,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       onTap: _backspace,
@@ -148,7 +149,7 @@ class PinEntry extends StatelessWidget {
       padding: const EdgeInsets.all(5),
       child: Material(
         color: colors.surface2,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => onTap(label),

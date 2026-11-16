@@ -299,19 +299,24 @@ class TagsPage extends StatelessWidget {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
+                                // 与回收站/主页空态同一套层级：图标 + 20 号标题 + 14 号说明。
+                                Icon(Icons.sell_outlined,
+                                    size: AppIcon.hero, color: colors.tertiary),
+                                const SizedBox(height: 12),
                                 Text(
                                   '还没有标签',
                                   style: TextStyle(
-                                    fontSize: AppFontSize.value,
-                                    color: colors.tertiary,
+                                    fontSize: AppFontSize.subtitle,
+                                    fontWeight: AppWeight.medium,
+                                    color: colors.text,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: AppSpace.sm),
                                 Text(
                                   '在编辑页底部的「标签」按钮里添加',
                                   style: TextStyle(
-                                    fontSize: AppFontSize.caption,
-                                    color: colors.tertiary,
+                                    fontSize: AppFontSize.labelLg,
+                                    color: colors.secondary,
                                   ),
                                 ),
                               ],
@@ -363,24 +368,28 @@ class TagsPage extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext context, AppColors colors) {
-    return SizedBox(
-      height: AppSize.navBar,
-      child: Row(
-        children: <Widget>[
-          const AppBackButton(),
-          // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-              child: Text(
-                '标签管理',
-                style: AppText.sheetTitle.copyWith(color: colors.text),
+    // 与内容同一版心：宽屏下返回键/标题不再贴着窗口左缘。
+    return ContentFrame(
+      child: SizedBox(
+        height: AppSize.navBar,
+        child: Row(
+          children: <Widget>[
+            const AppBackButton(),
+            // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                child: Text(
+                  '标签管理',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

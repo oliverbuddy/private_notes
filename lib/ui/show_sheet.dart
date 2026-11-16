@@ -121,7 +121,7 @@ Future<bool?> showXiaojiConfirmSheet({
       return SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,

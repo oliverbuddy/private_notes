@@ -171,7 +171,7 @@ class _AboutPageState extends State<AboutPage> {
         Text(
           '构建 $xiaojiBuildTag',
           style: TextStyle(
-            fontSize: 10,
+            fontSize: AppFontSize.caption,
             height: 1.2,
             letterSpacing: 0.2,
             color: colors.tertiary.withValues(alpha: 0.7),
@@ -182,24 +182,28 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Widget _buildHeader(BuildContext context, AppColors colors) {
-    return SizedBox(
-      height: AppSize.navBar,
-      child: Row(
-        children: <Widget>[
-          const AppBackButton(),
-          // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-              child: Text(
-                '关于',
-                style: AppText.sheetTitle.copyWith(color: colors.text),
+    // 与内容同一版心：宽屏下返回键/标题不再贴着窗口左缘。
+    return ContentFrame(
+      child: SizedBox(
+        height: AppSize.navBar,
+        child: Row(
+          children: <Widget>[
+            const AppBackButton(),
+            // 标题与箭头同属「返回」热区：点标题也能返回（主流桌面应用惯例）。
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                child: Text(
+                  '关于',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

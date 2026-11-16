@@ -160,8 +160,8 @@ Future<BackupAction?> showBackupMenu(
                     : '关闭时备份包是明文 zip，网盘同步时会原样上传',
                 value: encrypted,
                 enabled: !autoBusy,
-                onChanged: () => Navigator.of(sheetContext)
-                    .pop(BackupAction.toggleEncrypt),
+                onChanged: () =>
+                    Navigator.of(sheetContext).pop(BackupAction.toggleEncrypt),
               ),
             _Hairline(colors: colors),
             _ActionRow(
@@ -517,7 +517,7 @@ class _BackupPasswordSheetState extends State<_BackupPasswordSheet> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + keyboard),
+        padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + keyboard),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,9 +543,8 @@ class _BackupPasswordSheetState extends State<_BackupPasswordSheet> {
               controller: _password,
               autofocus: true,
               obscureText: true,
-              textInputAction: widget.creating
-                  ? TextInputAction.next
-                  : TextInputAction.done,
+              textInputAction:
+                  widget.creating ? TextInputAction.next : TextInputAction.done,
               onSubmitted: widget.creating ? null : (_) => _submit(),
               style: TextStyle(fontSize: AppFontSize.body, color: colors.text),
               decoration: appFieldDecoration(context, hintText: '备份口令'),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -126,6 +128,10 @@ class AppListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppColors colors = AppColors.of(context);
     final Color foreground = destructive ? colors.danger : colors.text;
+    // 右侧值最多 180dp；窄屏再收到 45% 屏宽，避免「自动锁定」这类标签
+    // 被长值（邮箱、时间）挤成省略号。
+    final double valueMaxWidth =
+        math.min(180, MediaQuery.sizeOf(context).width * 0.45);
 
     Widget content = Padding(
       padding: padding,
@@ -177,7 +183,7 @@ class AppListRow extends StatelessWidget {
             // 值最多占 180dp，超出省略：iOS 设置行也是「左标签可压缩、
             // 右侧值截断」，避免窄屏/长邮箱把行撑破。
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 180),
+              constraints: BoxConstraints(maxWidth: valueMaxWidth),
               child: Text(
                 value!,
                 maxLines: 1,

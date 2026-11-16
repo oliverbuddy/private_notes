@@ -49,7 +49,8 @@ Future<T?> showXiaojiActionSheet<T>({
             children: <Widget>[
               if (title.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+                  // 与确认弹层同一左缘（16），不再额外缩进 4dp。
+                  padding: const EdgeInsets.fromLTRB(0, 8, 0, 12),
                   child: Text(
                     title,
                     maxLines: 1,
@@ -135,7 +136,8 @@ class _ActionRow<T> extends StatelessWidget {
                 ),
               ),
               if (action.selected)
-                Icon(Icons.check_rounded, size: AppIcon.chevron, color: colors.accent),
+                Icon(Icons.check_rounded,
+                    size: AppIcon.chevron, color: colors.accent),
             ],
           ),
         ),
