@@ -80,13 +80,6 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
   @override
   Widget build(BuildContext context) {
     final localizations = MaterialLocalizations.of(context);
-    final brightness = Theme.of(context).brightness;
-    // 胶囊用反色：浅色页面黑胶囊白字，深色页面白胶囊黑字，
-    // 无论笔记底色如何都够对比（微信同款思路）。
-    final background =
-        brightness == Brightness.light ? Colors.black87 : Colors.white;
-    final foreground =
-        brightness == Brightness.light ? Colors.white : Colors.black87;
 
     void run(VoidCallback action) {
       action();
@@ -95,20 +88,19 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
 
     return KeyedSubtree(
       key: widget.floatingToolbarKey,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            _button(localizations.copyButtonLabel, foreground,
-                () => run(widget.editorOps.copy)),
-            _button(localizations.cutButtonLabel, foreground,
-                () => run(widget.editorOps.cut)),
-            _button(localizations.pasteButtonLabel, foreground, () {
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: SelectionCapsule(
+          actions: <SelectionCapsuleAction>[
+            SelectionCapsuleAction(
+              localizations.copyButtonLabel,
+              () => run(widget.editorOps.copy),
+            ),
+            SelectionCapsuleAction(
+              localizations.cutButtonLabel,
+              () => run(widget.editorOps.cut),
+            ),
+            SelectionCapsuleAction(localizations.pasteButtonLabel, () {
               final Future<bool> Function()? handler = widget.onPaste;
               if (handler == null) {
                 run(widget.editorOps.paste);
@@ -119,24 +111,69 @@ class _XiaojiSelectionToolbarState extends State<XiaojiSelectionToolbar> {
               widget.controls.hideToolbar();
               handler();
             }),
-            _button(localizations.selectAllButtonLabel, foreground,
-                () => run(widget.editorOps.selectAll)),
+            SelectionCapsuleAction(
+              localizations.selectAllButtonLabel,
+              () => run(widget.editorOps.selectAll),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _button(String label, Color foreground, VoidCallback onPressed) {
-    return InkWell(
-      onTap: onPressed,
+/// 选区工具条上的一个按钮。
+class SelectionCapsuleAction {
+  const SelectionCapsuleAction(this.label, this.onTap);
+
+  final String label;
+  final VoidCallback onTap;
+}
+
+/// 反色胶囊工具条：正文长按与表格单元格长按共用同一套视觉。
+///
+/// 浅色页面黑胶囊白字、深色页面白胶囊黑字，无论笔记底色如何都够对比
+/// （微信/语雀同款思路）。
+///
+/// 胶囊外壳必须自带 [Material]：`SelectableRegion` 的自定义菜单被放进
+/// 根 Overlay，那条分支不在 Scaffold/Material 之下，`DefaultTextStyle`
+/// 会回落到 WidgetsApp 的错误文本样式（等宽、48px、黄色双下划线），
+/// `Text.style` 默认是合并继承，会把这些属性一起带进按钮文字。
+class SelectionCapsule extends StatelessWidget {
+  const SelectionCapsule({super.key, required this.actions});
+
+  final List<SelectionCapsuleAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool light = Theme.of(context).brightness == Brightness.light;
+    final Color background = light ? Colors.black87 : Colors.white;
+    final Color foreground = light ? Colors.white : Colors.black87;
+    return Material(
+      color: background,
       borderRadius: BorderRadius.circular(AppRadius.card),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: AppFontSize.value, color: foreground),
-        ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (final SelectionCapsuleAction action in actions)
+            InkWell(
+              onTap: action.onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Text(
+                  action.label,
+                  style: TextStyle(
+                    fontSize: AppFontSize.value,
+                    color: foreground,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -353,9 +353,35 @@ void main() {
         reason: '长按选单元格文本时页面不应滚动',
       );
       // 表格用的是小记自定义的选区菜单，不是系统默认弹窗。
+      final Finder menu =
+          find.byKey(const ValueKey<String>('table-selection-menu'));
+      expect(menu, findsOneWidget);
+
+      // 菜单必须贴着选区的小胶囊，不能被拉满整屏（SelectableRegion 的自定义
+      // 菜单被直接塞进根 Overlay，裸 Widget 会撑满屏幕）。
+      final Size screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final Rect menuRect = tester.getRect(menu);
+      expect(menuRect.width, lessThan(screen.width * 0.8));
+      expect(menuRect.height, lessThan(120));
+      expect(menuRect.left, greaterThanOrEqualTo(0));
+      expect(menuRect.right, lessThanOrEqualTo(screen.width));
+
+      // 按钮文字不能继承 WidgetsApp 的错误文本样式（等宽 48px + 黄色下划线），
+      // 那是 Overlay 分支没有 Material 祖先时的默认 DefaultTextStyle。
+      final BuildContext labelContext = tester.element(
+        find.descendant(of: menu, matching: find.byType(Text)).first,
+      );
+      final DefaultTextStyle inherited = DefaultTextStyle.of(labelContext);
       expect(
-        find.byKey(const ValueKey<String>('table-selection-menu')),
-        findsOneWidget,
+        inherited.style.decoration?.contains(TextDecoration.underline) ?? false,
+        isFalse,
+        reason: '文字不能继承 WidgetsApp 错误样式里的黄色下划线',
+      );
+      expect(inherited.style.fontSize, lessThanOrEqualTo(16));
+      expect(
+        find.descendant(of: menu, matching: find.byType(Material)),
+        findsWidgets,
+        reason: '胶囊要自带 Material，否则 InkWell 与 DefaultTextStyle 都拿不到',
       );
     });
   });

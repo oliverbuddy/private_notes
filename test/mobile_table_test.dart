@@ -116,7 +116,8 @@ void main() {
       expect(border.right, BorderSide.none);
       expect(border.horizontalInside, isNot(BorderSide.none));
 
-      // 外圈容器带圆角。
+      // 外圈容器带圆角，且描边画在裁剪层外面（Container 的 clipBehavior
+      // 会把 ClipPath 包在 DecoratedBox 里，描边会被单元格背景压掉）。
       final DecoratedBox frame = tester.widget<DecoratedBox>(
         find
             .ancestor(
@@ -125,9 +126,20 @@ void main() {
             )
             .first,
       );
+      final BoxDecoration decoration = frame.decoration as BoxDecoration;
+      expect(decoration.borderRadius, BorderRadius.circular(AppRadius.block));
+      expect(decoration.border!.top.width, 1);
+      expect(decoration.border!.top.color, AppColors.light.dividerStrong);
+
+      // 内容再内缩 1px 做圆角裁剪，不覆盖描边。
+      final ClipRRect clip = tester.widget<ClipRRect>(
+        find
+            .ancestor(of: find.byType(Table), matching: find.byType(ClipRRect))
+            .first,
+      );
       expect(
-        (frame.decoration as BoxDecoration).borderRadius,
-        BorderRadius.circular(AppRadius.block),
+        clip.borderRadius,
+        BorderRadius.circular(AppRadius.block - 1),
       );
     });
   });

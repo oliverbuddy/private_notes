@@ -41,47 +41,55 @@ class NoteTablePreview extends StatelessWidget {
     final List<double> weights = _contentWeights(columns, textStyle);
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
-      // 与详情页表格同一套外框：圆角 + 完整外边框，内部只画分隔线。
-      // 之前预览用 TableBorder.all，外框是直角且被边缘裁掉一半，
-      // 列表里看和详情不一致（用户反馈）。
-      child: Container(
+      // 与详情页表格同一套外框：描边画在裁剪层外面 + 内容内缩 1px 再圆角
+      // 裁剪。Container 的 clipBehavior 会把 ClipPath 包在 DecoratedBox
+      // 内部，描边和裁剪边界重合，单元格背景会把描边整条压掉（实测
+      // 看起来「没有边框、没有圆角」）。
+      child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppRadius.block),
-          border: Border.all(color: colors.divider, width: 1),
+          border: Border.all(color: colors.dividerStrong, width: 1),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Table(
-          border: TableBorder(
-            horizontalInside: BorderSide(color: colors.divider, width: 0.8),
-            verticalInside: BorderSide(color: colors.divider, width: 0.8),
-          ),
-          columnWidths: <int, TableColumnWidth>{
-            for (var i = 0; i < columns; i++) i: FlexColumnWidth(weights[i]),
-          },
-          children: <TableRow>[
-            for (var row = 0; row < rows.length; row++)
-              TableRow(
-                decoration: BoxDecoration(
-                  color: row == 0 ? colors.pageAlt : null,
-                ),
-                children: <Widget>[
-                  for (var column = 0; column < columns; column++)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 5,
-                      ),
-                      child: Text(
-                        column < rows[row].length ? rows[row][column] : '',
-                        style: textStyle.copyWith(
-                          fontWeight:
-                              row == 0 ? AppWeight.semibold : AppWeight.regular,
-                        ),
-                      ),
-                    ),
-                ],
+        child: Padding(
+          padding: const EdgeInsets.all(1),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.block - 1),
+            child: Table(
+              border: TableBorder(
+                horizontalInside: BorderSide(color: colors.divider, width: 0.8),
+                verticalInside: BorderSide(color: colors.divider, width: 0.8),
               ),
-          ],
+              columnWidths: <int, TableColumnWidth>{
+                for (var i = 0; i < columns; i++)
+                  i: FlexColumnWidth(weights[i]),
+              },
+              children: <TableRow>[
+                for (var row = 0; row < rows.length; row++)
+                  TableRow(
+                    decoration: BoxDecoration(
+                      color: row == 0 ? colors.pageAlt : null,
+                    ),
+                    children: <Widget>[
+                      for (var column = 0; column < columns; column++)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          child: Text(
+                            column < rows[row].length ? rows[row][column] : '',
+                            style: textStyle.copyWith(
+                              fontWeight: row == 0
+                                  ? AppWeight.semibold
+                                  : AppWeight.regular,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );

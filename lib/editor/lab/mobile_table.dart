@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
 import '../../theme/app_theme.dart';
+import 'selection_toolbar.dart';
 
 /// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
 ///
@@ -173,8 +174,8 @@ class _MobileTableState extends State<MobileTable> {
         onPointerUp: (_) => _restoreEditorLongPress(),
         onPointerCancel: (_) => _restoreEditorLongPress(),
         child: SelectionArea(
-          // 表格是只读内容：长按只给「复制 / 全选」，并用与正文一致的
-          // 深色胶囊（浅色黑底白字、深色白底黑字），不再弹系统默认菜单。
+          // 表格是只读内容：长按只给「复制 / 全选」，并与正文长按共用
+          // 同一套反色胶囊（[SelectionCapsule]），不再弹系统默认菜单。
           contextMenuBuilder: (
             BuildContext context,
             SelectableRegionState state,
@@ -189,49 +190,53 @@ class _MobileTableState extends State<MobileTable> {
   Widget _buildTable(BuildContext context) {
     final MarkdownTableViewModel viewModel = widget.viewModel;
     final AppColors colors = AppColors.of(context);
-    // 外圈边框改由外层 Container 画：Table 自己的外边框是「骑」在边线上的
-    // 半像素描边，被圆角裁掉后几乎看不见（用户反馈「边框不显示」）。
-    // 内网格只保留横/竖分隔线，四角与外沿交给圆角边框。
+    // 外圈边框由外层 DecoratedBox 画，Table 只保留内网格。
     final TableBorder? source = viewModel.border;
-    final BorderSide outerSide =
-        source?.top ?? BorderSide(color: colors.divider, width: 1);
     final BorderSide innerSide = source?.horizontalInside ??
         BorderSide(color: colors.divider, width: 0.8);
-    return Container(
+    const double borderWidth = 1;
+    // 外框必须画在裁剪层**外面**：Container 的 clipBehavior 把 ClipPath
+    // 包在 DecoratedBox 里（container.dart 实测），裁剪边界和描边完全重合，
+    // 单元格背景正好压掉整条 1px 描边 —— 用户看到的就是「没有边框、
+    // 没有圆角」。这里描边由 DecoratedBox 画，正文内容再内缩 [borderWidth]
+    // 交给 ClipRRect 圆角裁剪。
+    // 外框用 dividerStrong（实色）比内网格 divider（半透明）重一档，
+    // 圆角才有对比度。
+    return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.block),
-        border: Border.fromBorderSide(
-          BorderSide(
-            color: outerSide.color,
-            width: math.max(outerSide.width, 1),
+        border: Border.all(color: colors.dividerStrong, width: borderWidth),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(borderWidth),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.block - borderWidth),
+          child: Table(
+            border: TableBorder(
+              horizontalInside: innerSide,
+              verticalInside: source?.verticalInside ?? innerSide,
+            ),
+            defaultColumnWidth: viewModel.columnWidth,
+            children: <TableRow>[
+              for (final List<MarkdownTableCellViewModel> row in viewModel.cells)
+                TableRow(
+                  children: <Widget>[
+                    for (final MarkdownTableCellViewModel cell in row)
+                      DecoratedBox(
+                        decoration: cell.decoration ?? const BoxDecoration(),
+                        child: Padding(
+                          padding: cell.padding,
+                          child: Text.rich(
+                            _cellSpan(context, cell),
+                            textAlign: cell.textAlign,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+            ],
           ),
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Table(
-        border: TableBorder(
-          horizontalInside: innerSide,
-          verticalInside: source?.verticalInside ?? innerSide,
-        ),
-        defaultColumnWidth: viewModel.columnWidth,
-        children: <TableRow>[
-          for (final List<MarkdownTableCellViewModel> row in viewModel.cells)
-            TableRow(
-              children: <Widget>[
-                for (final MarkdownTableCellViewModel cell in row)
-                  DecoratedBox(
-                    decoration: cell.decoration ?? const BoxDecoration(),
-                    child: Padding(
-                      padding: cell.padding,
-                      child: Text.rich(
-                        _cellSpan(context, cell),
-                        textAlign: cell.textAlign,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-        ],
       ),
     );
   }
@@ -285,9 +290,12 @@ class _MobileTableState extends State<MobileTable> {
 
 /// 表格单元格的选区菜单：只读内容，只给「复制 / 全选」。
 ///
-/// 视觉与正文的 `XiaojiSelectionToolbar` 一致：反色胶囊（浅色黑底白字、
-/// 深色白底黑字），字号/内边距同一套，不再出现系统默认菜单在深色页面
-/// 里突兀的浅色块。
+/// 视觉与正文的 `XiaojiSelectionToolbar` 共用 [SelectionCapsule]（反色胶囊、
+/// 同一套字号与内边距）。定位必须交给 [TextSelectionToolbar]：
+/// `SelectableRegion` 把 `contextMenuBuilder` 的返回值直接塞进根 Overlay，
+/// 不做任何锚点或尺寸约束 —— 裸 Widget 会被拉满整屏（用户反馈
+/// 「菜单盖住整个屏幕」）。[TextSelectionToolbar] 负责上下避让、屏幕内
+/// 夹取与超宽溢出，和框架默认菜单用的是同一套布局。
 class _TableSelectionMenu extends StatelessWidget {
   const _TableSelectionMenu({required this.state});
 
@@ -297,50 +305,30 @@ class _TableSelectionMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final MaterialLocalizations localizations =
         MaterialLocalizations.of(context);
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    final Color background = dark ? Colors.white : Colors.black87;
-    final Color foreground = dark ? Colors.black87 : Colors.white;
+    final TextSelectionToolbarAnchors anchors = state.contextMenuAnchors;
 
-    return Container(
-      key: const ValueKey<String>('table-selection-menu'),
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _button(
-            localizations.copyButtonLabel,
-            foreground,
-            // 自定义菜单里复制没有替代接口；官方默认菜单内部同样调用它。
-            // ignore: deprecated_member_use
-            () => state.copySelection(SelectionChangedCause.toolbar),
-          ),
-          _button(
-            localizations.selectAllButtonLabel,
-            foreground,
-            () => state.selectAll(SelectionChangedCause.toolbar),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _button(String label, Color foreground, VoidCallback onTap) {
-    // 选区浮层不在 Material 之下，用 InkWell 会触发「No Material widget
-    // found」断言；胶囊本身是实底，用 GestureDetector 点击即可。
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: AppFontSize.value, color: foreground),
+    return TextSelectionToolbar(
+      anchorAbove: anchors.primaryAnchor,
+      anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
+      // 背景由胶囊自己画，别再叠一层默认的浅色菜单底板。
+      toolbarBuilder: (BuildContext context, Widget child) => child,
+      children: <Widget>[
+        SelectionCapsule(
+          key: const ValueKey<String>('table-selection-menu'),
+          actions: <SelectionCapsuleAction>[
+            SelectionCapsuleAction(
+              localizations.copyButtonLabel,
+              // 自定义菜单里复制没有替代接口；官方默认菜单内部同样调用它。
+              // ignore: deprecated_member_use
+              () => state.copySelection(SelectionChangedCause.toolbar),
+            ),
+            SelectionCapsuleAction(
+              localizations.selectAllButtonLabel,
+              () => state.selectAll(SelectionChangedCause.toolbar),
+            ),
+          ],
         ),
-      ),
+      ],
     );
   }
 }
