@@ -4513,7 +4513,10 @@ TableCellDecorator _tableCellDecorator(AppColors colors) {
     required AttributedText cellText,
     required Map<String, dynamic> cellMetadata,
   }) {
-    return rowIndex == 0 ? BoxDecoration(color: colors.pageAlt) : null;
+    // 表头用 surface2 而不是 pageAlt：浅色下两者同为 #F1F3F5（观感不变），
+    // 深色下 pageAlt 是纯黑（设置页底色），当表头会在正文里挖出一块黑条；
+    // surface2 比页面亮一档，表头才像「抬起来的一行」。
+    return rowIndex == 0 ? BoxDecoration(color: colors.surface2) : null;
   };
 }
 

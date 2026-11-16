@@ -67,7 +67,9 @@ class NoteTablePreview extends StatelessWidget {
                 for (var row = 0; row < rows.length; row++)
                   TableRow(
                     decoration: BoxDecoration(
-                      color: row == 0 ? colors.pageAlt : null,
+                      // 与编辑器表头同一套：浅色下 surface2 与 pageAlt 同色，
+                      // 深色下 surface2 比页面亮一档，不会变成纯黑条。
+                      color: row == 0 ? colors.surface2 : null,
                     ),
                     children: <Widget>[
                       for (var column = 0; column < columns; column++)

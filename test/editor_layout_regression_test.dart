@@ -56,9 +56,9 @@ Future<NoteRepository> _createRepository(
 }
 
 Widget _buildEditor(NoteRepository repository, Note note,
-    {bool autoFocus = true}) {
+    {bool autoFocus = true, Brightness brightness = Brightness.light}) {
   return MaterialApp(
-    theme: AppTheme.light(),
+    theme: brightness == Brightness.dark ? AppTheme.dark() : AppTheme.light(),
     home: NewEditorPage(
       repository: repository,
       note: note,
@@ -932,6 +932,107 @@ void main() {
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('深色模式（本轮新增部分）', () {
+    testWidgets('表格表头 / 外框 / 附件卡片都用深色 token，没有浅色残留',
+        (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_dark_table_');
+      const String relative = 'assets/att/1.pdf';
+      final File file = File(repository.store.absoluteAssetPath(relative));
+      await tester.runAsync(() async {
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(<int>[0x25, 0x50, 0x44, 0x46]);
+      });
+
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note(
+            'dark-table',
+            '开头一段。\n\n| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n'
+                '[报告.pdf]($relative)',
+          ),
+          autoFocus: false,
+          brightness: Brightness.dark,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+      expect(find.byType(MobileTable), findsOneWidget);
+
+      // 外框描边换成深色 token（浅色值会在深色页面里亮出一条白边）。
+      final DecoratedBox frame = tester.widget<DecoratedBox>(
+        find
+            .ancestor(
+              of: find.byType(Table),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      final BoxDecoration frameDecoration = frame.decoration as BoxDecoration;
+      expect(frameDecoration.border!.top.color, AppColors.dark.dividerStrong);
+      expect(
+        frameDecoration.border!.top.color,
+        isNot(AppColors.light.dividerStrong),
+      );
+
+      // 表头底色：深色下必须是「比页面亮一档」的 surface2。
+      // pageAlt 在深色下是纯黑（设置页底色），拿来当表头会在正文里挖出一块黑条。
+      final List<Color?> fills = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byType(Table),
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .map<Color?>(
+            (DecoratedBox box) => (box.decoration as BoxDecoration).color,
+          )
+          .toList();
+      expect(fills, contains(AppColors.dark.surface2));
+      expect(fills, isNot(contains(AppColors.dark.pageAlt)));
+
+      // 附件卡片：深色下用深色表面，不能沿用浅色底 + 深色字。
+      final bool hasDarkCard = tester
+          .widgetList<Material>(find.byType(Material))
+          .any((Material material) => material.color == AppColors.dark.surface2);
+      expect(hasDarkCard, isTrue, reason: '附件卡片底色必须跟随深色主题');
+    });
+
+    testWidgets('表格长按菜单在深色下反色：白底黑字', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_dark_menu_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('dark-menu', '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |'),
+          autoFocus: false,
+          brightness: Brightness.dark,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      await tester.longPress(find.textContaining('苹果', findRichText: true));
+      await tester.pump(const Duration(milliseconds: 700));
+
+      final Finder menu =
+          find.byKey(const ValueKey<String>('table-selection-menu'));
+      expect(menu, findsOneWidget);
+
+      final Material capsule = tester.widget<Material>(
+        find.descendant(of: menu, matching: find.byType(Material)).first,
+      );
+      expect(
+        capsule.color,
+        Colors.white,
+        reason: '深色页面上的选区菜单要反色成白胶囊',
+      );
+      final Text label = tester.widget<Text>(
+        find.descendant(of: menu, matching: find.byType(Text)).first,
+      );
+      expect(label.style?.color, Colors.black87);
     });
   });
 }
