@@ -17,6 +17,7 @@ import '../settings/settings_page.dart';
 import '../settings/tags_page.dart';
 import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
+import '../ui/app_empty_state.dart';
 import '../ui/app_icon_button.dart';
 import '../ui/content_frame.dart';
 import '../ui/note_actions.dart';
@@ -1163,11 +1164,10 @@ class _EmptyState extends StatelessWidget {
     final colors = AppColors.of(context);
 
     if (searching) {
-      return Center(
-        child: Text(
-          '没有匹配的小记',
-          style: TextStyle(fontSize: AppFontSize.label, color: colors.tertiary),
-        ),
+      return const AppEmptyState(
+        icon: Icons.search_off_rounded,
+        title: '没有匹配的小记',
+        hint: '换个关键词试试',
       );
     }
 

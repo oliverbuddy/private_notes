@@ -4,6 +4,7 @@ import '../data/note_repository.dart';
 import '../data/note_store.dart';
 import '../theme/app_theme.dart';
 import '../ui/app_icon_button.dart';
+import '../ui/app_empty_state.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/pressable.dart';
@@ -137,7 +138,7 @@ class _TrashPageState extends State<TrashPage> {
                       ),
                     )
                   : _entries.isEmpty
-                      ? _buildEmpty(colors)
+                      ? _buildEmpty()
                       : ContentFrame(
                           child: ListView(
                             padding: const EdgeInsets.fromLTRB(
@@ -205,21 +206,11 @@ class _TrashPageState extends State<TrashPage> {
     );
   }
 
-  Widget _buildEmpty(AppColors colors) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(Icons.delete_outline_rounded,
-              size: AppIcon.hero, color: colors.tertiary),
-          const SizedBox(height: 12),
-          Text(
-            '回收站是空的',
-            style:
-                TextStyle(fontSize: AppFontSize.hint, color: colors.secondary),
-          ),
-        ],
-      ),
+  Widget _buildEmpty() {
+    return const AppEmptyState(
+      icon: Icons.delete_outline_rounded,
+      title: '回收站是空的',
+      hint: '删除的小记会在这里保留 30 天',
     );
   }
 }

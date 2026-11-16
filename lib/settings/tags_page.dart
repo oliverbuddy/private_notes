@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
 import '../ui/app_field.dart';
 import '../ui/app_icon_button.dart';
+import '../ui/app_empty_state.dart';
 import '../ui/app_list.dart';
 import '../ui/content_frame.dart';
 import '../ui/show_sheet.dart';
@@ -295,27 +296,10 @@ class TagsPage extends StatelessWidget {
                 Expanded(
                   child: ContentFrame(
                     child: names.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Text(
-                                  '还没有标签',
-                                  style: TextStyle(
-                                    fontSize: AppFontSize.value,
-                                    color: colors.tertiary,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '在编辑页底部的「标签」按钮里添加',
-                                  style: TextStyle(
-                                    fontSize: AppFontSize.caption,
-                                    color: colors.tertiary,
-                                  ),
-                                ),
-                              ],
-                            ),
+                        ? const AppEmptyState(
+                            icon: Icons.sell_outlined,
+                            title: '还没有标签',
+                            hint: '在编辑页底部的「标签」按钮里添加',
                           )
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(
