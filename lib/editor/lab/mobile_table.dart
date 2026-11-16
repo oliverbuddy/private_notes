@@ -173,6 +173,13 @@ class _MobileTableState extends State<MobileTable> {
         onPointerUp: (_) => _restoreEditorLongPress(),
         onPointerCancel: (_) => _restoreEditorLongPress(),
         child: SelectionArea(
+          // 表格是只读内容：长按只给「复制 / 全选」，并用与正文一致的
+          // 深色胶囊（浅色黑底白字、深色白底黑字），不再弹系统默认菜单。
+          contextMenuBuilder: (
+            BuildContext context,
+            SelectableRegionState state,
+          ) =>
+              _TableSelectionMenu(state: state),
           child: _buildFit(context, _buildTable(context)),
         ),
       ),
@@ -181,12 +188,31 @@ class _MobileTableState extends State<MobileTable> {
 
   Widget _buildTable(BuildContext context) {
     final MarkdownTableViewModel viewModel = widget.viewModel;
-    // 外圈圆角：网格线本身是直角，裁一下四角后与卡片的圆角语言一致，
-    // 不再是一块「贴在正文里的生硬表格」。滚动条在裁剪层外面，不受影响。
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadius.block),
+    final AppColors colors = AppColors.of(context);
+    // 外圈边框改由外层 Container 画：Table 自己的外边框是「骑」在边线上的
+    // 半像素描边，被圆角裁掉后几乎看不见（用户反馈「边框不显示」）。
+    // 内网格只保留横/竖分隔线，四角与外沿交给圆角边框。
+    final TableBorder? source = viewModel.border;
+    final BorderSide outerSide =
+        source?.top ?? BorderSide(color: colors.divider, width: 1);
+    final BorderSide innerSide = source?.horizontalInside ??
+        BorderSide(color: colors.divider, width: 0.8);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.block),
+        border: Border.fromBorderSide(
+          BorderSide(
+            color: outerSide.color,
+            width: math.max(outerSide.width, 1),
+          ),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: Table(
-        border: viewModel.border ?? TableBorder.all(),
+        border: TableBorder(
+          horizontalInside: innerSide,
+          verticalInside: source?.verticalInside ?? innerSide,
+        ),
         defaultColumnWidth: viewModel.columnWidth,
         children: <TableRow>[
           for (final List<MarkdownTableCellViewModel> row in viewModel.cells)
@@ -254,5 +280,67 @@ class _MobileTableState extends State<MobileTable> {
           },
         );
     }
+  }
+}
+
+/// 表格单元格的选区菜单：只读内容，只给「复制 / 全选」。
+///
+/// 视觉与正文的 `XiaojiSelectionToolbar` 一致：反色胶囊（浅色黑底白字、
+/// 深色白底黑字），字号/内边距同一套，不再出现系统默认菜单在深色页面
+/// 里突兀的浅色块。
+class _TableSelectionMenu extends StatelessWidget {
+  const _TableSelectionMenu({required this.state});
+
+  final SelectableRegionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final MaterialLocalizations localizations =
+        MaterialLocalizations.of(context);
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final Color background = dark ? Colors.white : Colors.black87;
+    final Color foreground = dark ? Colors.black87 : Colors.white;
+
+    return Container(
+      key: const ValueKey<String>('table-selection-menu'),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _button(
+            localizations.copyButtonLabel,
+            foreground,
+            // 自定义菜单里复制没有替代接口；官方默认菜单内部同样调用它。
+            // ignore: deprecated_member_use
+            () => state.copySelection(SelectionChangedCause.toolbar),
+          ),
+          _button(
+            localizations.selectAllButtonLabel,
+            foreground,
+            () => state.selectAll(SelectionChangedCause.toolbar),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _button(String label, Color foreground, VoidCallback onTap) {
+    // 选区浮层不在 Material 之下，用 InkWell 会触发「No Material widget
+    // found」断言；胶囊本身是实底，用 GestureDetector 点击即可。
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: AppFontSize.value, color: foreground),
+        ),
+      ),
+    );
   }
 }

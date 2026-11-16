@@ -352,6 +352,11 @@ void main() {
         closeTo(topBefore, 0.5),
         reason: '长按选单元格文本时页面不应滚动',
       );
+      // 表格用的是小记自定义的选区菜单，不是系统默认弹窗。
+      expect(
+        find.byKey(const ValueKey<String>('table-selection-menu')),
+        findsOneWidget,
+      );
     });
   });
 

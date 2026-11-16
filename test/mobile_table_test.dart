@@ -84,5 +84,51 @@ void main() {
         reason: '抬起后要恢复，正文长按选词不受影响',
       );
     });
+
+    testWidgets('表格只画内网格，四边交给圆角容器', (WidgetTester tester) async {
+      final MutableDocument document = deserializeXiaojiMarkdown(
+        '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
+      );
+      final TableBlockNode table = document.whereType<TableBlockNode>().single;
+      final MarkdownTableViewModel viewModel =
+          const MobileTableComponentBuilder(availableWidth: 324)
+              .createViewModel(document, table)! as MarkdownTableViewModel;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: MobileTable(
+              componentKey: GlobalKey(),
+              viewModel: viewModel,
+            ),
+          ),
+        ),
+      );
+
+      // 四边交给圆角容器画，Table 自身只留内部分隔线，
+      // 否则外边框会被圆角裁成不到半像素、看起来「没有边框」。
+      final Table tableWidget = tester.widget<Table>(find.byType(Table));
+      final TableBorder border = tableWidget.border!;
+      expect(border.top, BorderSide.none);
+      expect(border.bottom, BorderSide.none);
+      expect(border.left, BorderSide.none);
+      expect(border.right, BorderSide.none);
+      expect(border.horizontalInside, isNot(BorderSide.none));
+
+      // 外圈容器带圆角。
+      final DecoratedBox frame = tester.widget<DecoratedBox>(
+        find
+            .ancestor(
+              of: find.byType(Table),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      expect(
+        (frame.decoration as BoxDecoration).borderRadius,
+        BorderRadius.circular(AppRadius.block),
+      );
+    });
   });
 }

@@ -41,35 +41,48 @@ class NoteTablePreview extends StatelessWidget {
     final List<double> weights = _contentWeights(columns, textStyle);
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
-      child: Table(
-        border: TableBorder.all(color: colors.divider, width: 0.6),
-        columnWidths: <int, TableColumnWidth>{
-          for (var i = 0; i < columns; i++) i: FlexColumnWidth(weights[i]),
-        },
-        children: <TableRow>[
-          for (var row = 0; row < rows.length; row++)
-            TableRow(
-              decoration: BoxDecoration(
-                color: row == 0 ? colors.pageAlt : null,
-              ),
-              children: <Widget>[
-                for (var column = 0; column < columns; column++)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 5,
-                    ),
-                    child: Text(
-                      column < rows[row].length ? rows[row][column] : '',
-                      style: textStyle.copyWith(
-                        fontWeight:
-                            row == 0 ? AppWeight.semibold : AppWeight.regular,
+      // 与详情页表格同一套外框：圆角 + 完整外边框，内部只画分隔线。
+      // 之前预览用 TableBorder.all，外框是直角且被边缘裁掉一半，
+      // 列表里看和详情不一致（用户反馈）。
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.block),
+          border: Border.all(color: colors.divider, width: 1),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Table(
+          border: TableBorder(
+            horizontalInside: BorderSide(color: colors.divider, width: 0.8),
+            verticalInside: BorderSide(color: colors.divider, width: 0.8),
+          ),
+          columnWidths: <int, TableColumnWidth>{
+            for (var i = 0; i < columns; i++) i: FlexColumnWidth(weights[i]),
+          },
+          children: <TableRow>[
+            for (var row = 0; row < rows.length; row++)
+              TableRow(
+                decoration: BoxDecoration(
+                  color: row == 0 ? colors.pageAlt : null,
+                ),
+                children: <Widget>[
+                  for (var column = 0; column < columns; column++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      child: Text(
+                        column < rows[row].length ? rows[row][column] : '',
+                        style: textStyle.copyWith(
+                          fontWeight:
+                              row == 0 ? AppWeight.semibold : AppWeight.regular,
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-        ],
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
