@@ -20,6 +20,7 @@ import '../../ui/action_sheet.dart';
 import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
 import '../../ui/app_icon_button.dart';
+import '../../ui/attachment_preview_page.dart';
 import '../../ui/content_frame.dart';
 import '../../ui/quote_block.dart';
 import '../../ui/show_sheet.dart';
@@ -2667,6 +2668,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               children: <Widget>[
                 _buildHeader(colors, contentWidth),
                 Container(height: 0.5, color: colors.dividerStrong),
+                // 标签是笔记属性：放在顶栏下方，不占底部正文区。
+                _buildTagRow(contentWidth),
                 Expanded(
                   // 工具条是浮层，会盖住正文底部。工具条可见时给视口
                   // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
@@ -2789,8 +2792,6 @@ class _NewEditorPageState extends State<NewEditorPage>
                     ),
                   ),
                 ),
-                // 左下角标签栏：显示本条笔记的标签，点标签打开编辑弹层。
-                _buildTagBar(colors, imeInset, contentWidth),
               ],
             ),
             // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
@@ -2929,13 +2930,26 @@ class _NewEditorPageState extends State<NewEditorPage>
     _openAttachmentFile(url);
   }
 
-  /// 交给系统查看器打开附件。
+  /// 点开附件：PDF 走应用内预览，其余交给系统查看器。
   ///
-  /// 设备上没有能打开该格式的应用时给出明确提示，而不是静默失败。
+  /// 设备上没有能打开该格式的应用时不再只弹一句话，而是给出「分享 /
+  /// 复制路径」的兜底弹层（见 [_showNoViewerActions]）。
   Future<void> _openAttachmentFile(String url) async {
     final String path = widget.repository.store.absoluteAssetPath(url);
     if (!File(path).existsSync()) {
       showSnack(context, message: '文件已丢失');
+      return;
+    }
+    // PDF：应用内预览（pdfrx），不依赖设备上装没装查看器。
+    if (AttachmentPreviewPage.supports(path)) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) => AttachmentPreviewPage(
+            fileName: url.split('/').last,
+            path: path,
+          ),
+        ),
+      );
       return;
     }
     String? failure;
@@ -2954,78 +2968,141 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (failure == null || !mounted) {
       return;
     }
-    showSnack(context, message: failure);
+    await _showNoViewerActions(path);
   }
 
-  /// 左下角标签栏。
-  ///
-  /// 展示当前笔记的标签（与列表卡片同一个 [TagChip] 规格），点任意标签
-  /// 打开「编辑标签」弹层（含候选标签）。没有标签时只留一个「+ 标签」
-  /// 入口，保证随时能加。
-  ///
-  /// 编辑态且键盘弹起时整条隐藏：那时底部已经有工具条，再挂一条标签栏
-  /// 会把正文挤掉，也和工具条抢位置。
-  Widget _buildTagBar(AppColors colors, double imeInset, double contentWidth) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: _editing,
-      builder: (BuildContext context, bool editing, _) {
-        // 编辑态键盘弹起、或面板 ↔ 键盘交替时整条隐藏：底部已经有
-        // 工具条/面板，再挂一条标签栏会把正文挤掉。交替期间也必须隐藏，
-        // 否则正文视口会多出标签栏那一截，滚动位置被 clamp → 内容跟着动。
-        //
-        if (_panelTransitioning || (editing && imeInset > 0)) {
-          return const SizedBox.shrink();
-        }
-        final List<String> tags = _currentNote.tags;
-        // 无标签时不占位，也不显示「+标签」：新增入口已移到工具栏的
-        // 标签按钮（用户要求），左下角只负责展示已有标签，避免两个入口重复。
-        if (tags.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        return ContentFrame(
-          maxWidth: contentWidth,
+  /// 没有可打开该格式的应用时的兜底弹层：分享 / 复制路径。
+  Future<void> _showNoViewerActions(String path) async {
+    final AppColors colors = AppColors.of(context);
+    final String? action = await showXiaojiSheet<String>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        return SafeArea(
+          top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppSpace.page,
-              2,
-              AppSpace.page,
-              8 + MediaQuery.paddingOf(context).bottom,
-            ),
-            // 固定一行高：标签多了横向滚动，不再换行把正文顶上去。
-            // （换行会让底部条越堆越高，标签多时正文被压得只剩半屏。）
-            // width: infinity 必须给：Column 的 crossAxisAlignment 默认居中，
-            // 内容宽度只按标签占位时，只有一个标签会被整条居中（用户反馈）。
-            child: SizedBox(
-              width: double.infinity,
-              height: 22,
-              // 整行都可点：以前只有 chip 本身有热区，标签右侧的空白点了
-              // 没反应，像被一层背景挡住（用户反馈）。这里点空白与点 chip
-              // 走同一个动作（打开标签编辑），横向拖动仍归滚动视图。
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _editTags,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    children: <Widget>[
-                      for (final tag in tags)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _editTags,
-                            child: TagChip(label: tag),
-                          ),
-                        ),
-                    ],
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '本机没有可预览此文件的应用',
+                  style: AppText.sheetTitle.copyWith(color: colors.text),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '可以分享到其他应用（如 WPS、浏览器）打开，或复制文件路径。',
+                  style: TextStyle(
+                    fontSize: AppFontSize.label,
+                    height: 1.5,
+                    color: colors.secondary,
                   ),
                 ),
-              ),
+                const SizedBox(height: 20),
+                AppSheetButton(
+                  label: '分享到其他应用',
+                  background: colors.accent,
+                  foreground: colors.page,
+                  onTap: () => Navigator.of(sheetContext).pop('share'),
+                ),
+                const SizedBox(height: 12),
+                AppSheetButton(
+                  label: '复制路径',
+                  background: colors.surface2,
+                  foreground: colors.accent,
+                  onTap: () => Navigator.of(sheetContext).pop('copy'),
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: path));
+      if (mounted) {
+        showSnack(context, message: '已复制文件路径');
+      }
+      return;
+    }
+    try {
+      final bool handled = await shareAttachmentWithSystem(path);
+      if (!handled && mounted) {
+        showSnack(context, message: '当前平台不支持分享附件');
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        showSnack(context, message: error.message ?? '分享失败');
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        showSnack(context, message: '当前平台不支持分享附件');
+      }
+    } catch (error) {
+      if (mounted) {
+        showSnack(context, message: '分享失败：$error');
+      }
+    }
+  }
+
+  /// 标签属性行：放在顶栏下方，随页面固定，不压正文。
+  ///
+  /// 之前挂在页面底部：常驻占掉正文底部一条的高度，滚到文末时最后一行
+  /// 贴着标签，底部那一块也点不进光标（用户反馈「标签背后的区域遮挡了
+  /// 正文」）。标签本质是笔记属性（语雀/Notion 同款做法），放到顶栏下方
+  /// 既始终可见，又把整个底部还给正文与工具条。
+  ///
+  /// 展示规格与列表卡片一致（[TagChip]）；点整行任意位置（含标签右侧
+  /// 空白）都打开「编辑标签」弹层。
+  Widget _buildTagRow(double contentWidth) {
+    final List<String> tags = _currentNote.tags;
+    // 无标签时不占位：新增入口在工具栏的标签按钮，这里只展示已有标签。
+    if (tags.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return ContentFrame(
+      maxWidth: contentWidth,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.page,
+          6,
+          AppSpace.page,
+          2,
+        ),
+        // 固定一行高：标签多了横向滚动，不换行把正文往下顶。
+        // width: infinity 必须给：Column 的 crossAxisAlignment 默认居中，
+        // 内容宽度只按标签占位时，只有一个标签会被整条居中（用户反馈）。
+        child: SizedBox(
+          width: double.infinity,
+          height: 22,
+          // 整行都可点：点空白与点 chip 走同一个动作（打开标签编辑），
+          // 横向拖动仍归滚动视图。
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _editTags,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: <Widget>[
+                  for (final tag in tags)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _editTags,
+                        child: TagChip(label: tag),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

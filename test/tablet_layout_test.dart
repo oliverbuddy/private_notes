@@ -168,6 +168,12 @@ void main() {
       lessThan(40),
       reason: '「撤销」提示的左侧文案必须单行',
     );
+    // 操作按钮不能沿用 TextButton 的 48 高点击区，否则整条提示被撑到 72。
+    expect(
+      tester.getSize(find.byType(SnackBar)).height,
+      lessThan(60),
+      reason: '带操作的提示条要紧凑，不能有大块内边距',
+    );
 
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(milliseconds: 400));

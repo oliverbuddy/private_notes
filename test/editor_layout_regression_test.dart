@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +19,7 @@ import 'package:xiaoji/editor/markdown_view.dart' show CodeBlockCardStyle;
 import 'package:xiaoji/editor/note_image_share.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
+import 'package:xiaoji/ui/attachment_preview_page.dart';
 import 'package:xiaoji/ui/quote_block.dart';
 import 'package:xiaoji/ui/tag_chip.dart';
 
@@ -371,8 +373,9 @@ void main() {
     });
   });
 
-  group('详情底部标签栏', () {
-    testWidgets('点标签行右侧空白也能打开标签弹层', (WidgetTester tester) async {
+  group('标签行', () {
+    testWidgets('标签在顶栏下方、不占正文底部；点标签行空白也能打开弹层',
+        (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_tag_bar_');
       final DateTime time = DateTime(2026, 11, 2, 10);
@@ -392,8 +395,18 @@ void main() {
       await _pumpFrames(tester, frames: 12);
 
       final Finder chip = find.byType(TagChip);
-      expect(chip, findsOneWidget, reason: '标签栏要显示已有标签');
+      expect(chip, findsOneWidget, reason: '标签行要显示已有标签');
       final Rect chipRect = tester.getRect(chip);
+      // 标签挪到顶栏下方：它不再是页面底部的一条，正文可以一直用到屏幕
+      // 底部（用户反馈「底部标签占空间、遮挡正文」）。
+      final Rect bodyRect = tester.getRect(
+        find.textContaining('正文一段', findRichText: true),
+      );
+      expect(
+        chipRect.bottom,
+        lessThan(bodyRect.top),
+        reason: '标签行必须在正文上方，不能压在正文底部',
+      );
       // 点 chip 右侧的空白：以前这里是死区（点不动），现在与点 chip 一样
       // 打开标签弹层。位置取 chip 右缘 +40，保证落在标签行内（宽屏时
       // 标签行跟随版心居中，不能直接按屏幕右缘算）。
@@ -434,17 +447,72 @@ void main() {
       await tester.tap(find.text('附件 · 点击查看'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      // 点卡片走「打开」流程（测试环境没有原生查看器，这一步只验证它
-      // 不再先弹操作弹层）。
+      // PDF 走应用内预览：不依赖设备上有没有查看器，直接进预览页。
+      expect(find.byType(AttachmentPreviewPage), findsOneWidget);
       expect(find.text('复制路径'), findsNothing);
 
-      // 长按才出操作弹层，且新增了主操作「打开」。
+      // 返回详情，长按卡片仍出操作弹层（含「打开」主操作）。
+      await tester.pageBack();
+      await _pumpFrames(tester, frames: 12);
+      expect(find.text('附件 · 点击查看'), findsOneWidget);
+
       await tester.longPress(find.text('附件 · 点击查看'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('打开'), findsOneWidget);
       expect(find.text('复制路径'), findsOneWidget);
       expect(find.text('从正文移除'), findsOneWidget);
+    });
+
+    testWidgets('没有查看器时给「分享 / 复制路径」兜底，而不是一句干提示',
+        (WidgetTester tester) async {
+      // 测试环境没有原生查看器；用非 Android 平台让打开链路同步失败，
+      // 避免真实文件 IO 卡在 fake-async 里（那条路只能真机验证）。
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_attachment_fallback_');
+      const String relative = 'assets/att/1.docx';
+      final File file = File(repository.store.absoluteAssetPath(relative));
+      await tester.runAsync(() async {
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(<int>[0x50, 0x4b, 0x03, 0x04]);
+      });
+
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('attachment-docx', '[方案.docx]($relative)'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      // Word 没有应用内渲染器：走系统查看器，测试环境里必然失败 →
+      // 应该弹兜底弹层，给出能走的路。
+      await tester.tap(find.text('附件 · 点击查看'));
+      await tester.pump();
+      // 打开链路里有真实文件 IO，fake-async 下不推进，交给 runAsync 跑完。
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('本机没有可预览此文件的应用'), findsOneWidget);
+      expect(find.text('分享到其他应用'), findsOneWidget);
+      expect(find.text('复制路径'), findsOneWidget);
+      // 框架的收尾检查早于 tearDown，必须在本用例体内还原调试开关。
+      debugDefaultTargetPlatformOverride = null;
+    });
+  });
+
+  group('附件预览路由', () {
+    test('只有 PDF 走应用内预览', () {
+      expect(AttachmentPreviewPage.supports('/tmp/a.PDF'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.pdf'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.docx'), isFalse);
+      expect(AttachmentPreviewPage.supports('/tmp/a'), isFalse);
     });
   });
 
@@ -1033,6 +1101,32 @@ void main() {
         find.descendant(of: menu, matching: find.byType(Text)).first,
       );
       expect(label.style?.color, Colors.black87);
+    });
+    testWidgets('PDF 预览页跟随深色主题：页面与阅读区都是深色底',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: const AttachmentPreviewPage(
+            fileName: '报告.pdf',
+            path: '/tmp/不存在.pdf',
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      final Scaffold scaffold = tester.widget<Scaffold>(
+        find.byType(Scaffold),
+      );
+      expect(
+        scaffold.backgroundColor,
+        AppColors.dark.page,
+        reason: '预览页要跟随深色主题，不能沿用浅色页面底',
+      );
+      expect(
+        tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
+        AppColors.dark.page,
+      );
     });
   });
 }

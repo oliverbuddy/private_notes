@@ -89,7 +89,7 @@ void main() {
         3,
       ]));
     final File legacy = File('${tempDir.path}/legacy.zip')
-      ..writeAsBytesSync(Uint8List.fromList(ZipEncoder().encode(archive)!));
+      ..writeAsBytesSync(Uint8List.fromList(ZipEncoder().encode(archive)));
 
     final BackupSummary summary = await store.inspectBackupFile(legacy.path);
     expect(summary.hasManifest, isFalse);

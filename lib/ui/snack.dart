@@ -54,42 +54,67 @@ void showSnack(
   }
 
   final double maxWidth = math.min(MediaQuery.sizeOf(context).width - 32, 360);
-  // SnackBarAction 内部是 TextButton：最小宽度 64、左右各 8 内边距，与正文
-  // 之间还有 8 的间距。之前只按「文字宽 + 32」估，宽度少了几像素，左侧
-  // 文案会被挤到换行（用户反馈「撤销弹窗文字不多却换行」）。
-  final double actionWidth = action == null
+  // 操作按钮不再用 SnackBarAction：它内部是 TextButton，自带 48 高的点击区
+  // （整条提示被撑到 72 高，看起来"内边距很大"），左右还各有一层内边距，
+  // 宽度很难量准 —— 少算十几像素，短提示就被挤到换行（用户反馈）。
+  // 这里自己排版：正文 + 16 间距 + 操作文字，宽度按同一套样式精确测量。
+  final TextStyle? actionStyle = action == null
+      ? null
+      : contentStyle.copyWith(
+          fontWeight: AppWeight.medium,
+          color:
+              action.textColor ?? theme.snackBarTheme.actionTextColor,
+        );
+  final double labelWidth = action == null
       ? 0
-      : math.max(
-            64,
-            measureWidth(
-                  action.label,
-                  contentStyle.copyWith(fontWeight: AppWeight.medium),
-                ) +
-                24,
-          ) +
-          8;
+      : measureWidth(action.label, actionStyle!) + 4;
+  final double gap = action == null ? 0 : 16;
   // +2 是亚像素取整余量：TextPainter 量出来是浮点，布局再取整时可能多占 1px。
   final double textWidth = math.max(
     0,
     math.min(
       measureWidth(message, contentStyle) + 2,
-      maxWidth - 32 - actionWidth,
+      maxWidth - 32 - gap - labelWidth,
     ),
   );
-  final double toastWidth =
-      math.max(96, math.min(textWidth + 32 + actionWidth, maxWidth));
+  final double toastWidth = math.max(
+    96,
+    math.min(textWidth + 32 + gap + labelWidth, maxWidth),
+  );
 
   _hideTimer?.cancel();
   messenger
     ..clearSnackBars()
     ..showSnackBar(
       SnackBar(
-        content: Text(message),
-        action: action,
+        content: Row(
+          children: <Widget>[
+            Flexible(child: Text(message)),
+            if (action != null) ...<Widget>[
+              const SizedBox(width: 16),
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                // 与框架的 SnackBarAction 一致：先收起提示，再执行回调。
+                onTap: () {
+                  _hideTimer?.cancel();
+                  messenger.hideCurrentSnackBar();
+                  action.onPressed();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 4,
+                  ),
+                  child: Text(action.label, style: actionStyle),
+                ),
+              ),
+            ],
+          ],
+        ),
         duration: visible,
         behavior: SnackBarBehavior.floating,
         width: toastWidth,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       ),
     );
 

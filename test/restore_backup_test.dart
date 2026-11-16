@@ -102,18 +102,22 @@ void main() {
       updated: DateTime(2026, 11, 2, 10),
       body: '正常内容',
     ).encode();
+    // archive 4 会校验条目声明长度与实际解压数据：中文按 UTF-8 是 3 字节，
+    // 用字符串 length 会让声明长度偏小、解压时报错。
+    final List<int> deletedBytes = utf8.encode(deleted);
+    final List<int> keptBytes = utf8.encode(kept);
     final archive = Archive()
       ..addFile(ArchiveFile(
         'trash/20261102-1000-gone/note.md',
-        deleted.length,
-        utf8.encode(deleted),
+        deletedBytes.length,
+        deletedBytes,
       ))
       ..addFile(ArchiveFile(
         'notes/2026/11/20261102-1000-keep.md',
-        kept.length,
-        utf8.encode(kept),
+        keptBytes.length,
+        keptBytes,
       ));
-    final bytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
+    final bytes = Uint8List.fromList(ZipEncoder().encode(archive));
 
     final (restored, _) = await store.restoreFromZip(bytes);
     expect(restored, 1, reason: '只恢复 notes/ 下的那篇');
@@ -218,18 +222,20 @@ void main() {
       updated: DateTime(2026, 11, 2, 9),
       body: '旧快照内容',
     ).encode();
+    final List<int> snapshotBytes = utf8.encode(snapshot);
+    final List<int> legacyBytes = utf8.encode(legacy);
     final archive = Archive()
       ..addFile(ArchiveFile(
         'notes/2026/11/20261102-1000-kept.md',
-        snapshot.length,
-        utf8.encode(snapshot),
+        snapshotBytes.length,
+        snapshotBytes,
       ))
       ..addFile(ArchiveFile(
         'export-20261102-0900/20261102-1000-kept.md',
-        legacy.length,
-        utf8.encode(legacy),
+        legacyBytes.length,
+        legacyBytes,
       ));
-    final bytes = Uint8List.fromList(ZipEncoder().encode(archive)!);
+    final bytes = Uint8List.fromList(ZipEncoder().encode(archive));
 
     final (restored, _) = await store.restoreFromZip(bytes);
     expect(restored, 1, reason: '只恢复 notes/ 下的那一份');

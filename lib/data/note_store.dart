@@ -1545,8 +1545,9 @@ class NoteStore {
         // manifest 拼装失败不影响数据本身，跳过即可。
       }
     }
+    // archive 4 起 encode() 返回非空字节，不再需要空值兜底。
     final encoded = ZipEncoder().encode(archive);
-    return Uint8List.fromList(encoded ?? <int>[]);
+    return Uint8List.fromList(encoded);
   }
 
   /// 取正文第一行做回收站标题（去掉标题符号/列表符号，截断到 60 字）。

@@ -17,7 +17,7 @@ Uint8List _zip(Map<String, List<int>> entries) {
       ArchiveFile(entry.key, entry.value.length, entry.value),
     );
   }
-  return Uint8List.fromList(ZipEncoder().encode(archive)!);
+  return Uint8List.fromList(ZipEncoder().encode(archive));
 }
 
 Note _note(String id, {String body = ''}) {

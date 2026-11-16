@@ -99,6 +99,7 @@ class MainActivity : FlutterActivity() {
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
                     "shareImage" -> shareImage(call.argument<String>("path"), result)
                     "openFile" -> openLocalFile(call.argument<String>("path"), result)
+                    "shareFile" -> shareAttachment(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
                     "appInfo" -> appInfo(result)
                     "consumeSharedContent" -> {
@@ -326,6 +327,39 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             Log.w("XiaojiFile", "打开附件失败", error)
             result.error("open_failed", error.message ?: "打开失败", null)
+        }
+    }
+
+    /**
+     * 分享任意附件（ACTION_SEND）：本机没有预览器时的兜底出口。
+     *
+     * 与 [openLocalFile] 共用 FileProvider 与 MIME 推断：Dart 侧已经把文件
+     * 拷到缓存目录，这里只负责换成授权 URI 并拉起系统分享面板。
+     */
+    private fun shareAttachment(path: String?, result: MethodChannel.Result) {
+        if (path.isNullOrBlank()) {
+            result.error("bad_args", "缺少文件路径", null)
+            return
+        }
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            result.error("missing_file", "文件不存在", null)
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = mimeTypeForDocument(file.extension)
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(send, "分享附件")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(chooser)
+            result.success(true)
+        } catch (error: Exception) {
+            Log.w("XiaojiFile", "分享附件失败", error)
+            result.error("share_failed", error.message ?: "分享失败", null)
         }
     }
 

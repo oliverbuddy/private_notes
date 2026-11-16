@@ -24,6 +24,33 @@ Future<bool> openAttachmentWithSystemViewer(String sourcePath) async {
   if (!PlatformFeatures.isAndroid) {
     return false;
   }
+  final File target = await _copyToCache(sourcePath);
+  await _channel.invokeMethod<void>('openFile', <String, Object?>{
+    'path': target.path,
+  });
+  return true;
+}
+
+/// 用系统分享面板把附件发出去（ACTION_SEND）。
+///
+/// 没有能预览该格式的应用时的兜底：用户可以把文件发到微信/WPS 等能看的
+/// 地方，而不是只能看到一句「打不开」。返回 false 表示当前平台没有这条
+/// 能力；失败时抛 [PlatformException]。
+Future<bool> shareAttachmentWithSystem(String sourcePath) async {
+  if (!PlatformFeatures.isAndroid) {
+    return false;
+  }
+  final File target = await _copyToCache(sourcePath);
+  await _channel.invokeMethod<void>('shareFile', <String, Object?>{
+    'path': target.path,
+  });
+  return true;
+}
+
+/// 附件在应用私有目录里，外部应用拿不到：先复制一份到缓存目录，再换成
+/// `content://` 授权 URI（FileProvider 只注册了 cache-path，见
+/// `share_paths.xml`），既不放宽暴露范围，也不用申请存储权限。
+Future<File> _copyToCache(String sourcePath) async {
   final File source = File(sourcePath);
   if (!await source.exists()) {
     throw PlatformException(code: 'missing_file', message: '文件不存在');
@@ -34,8 +61,5 @@ Future<bool> openAttachmentWithSystemViewer(String sourcePath) async {
   await directory.create(recursive: true);
   final File target = File(p.join(directory.path, p.basename(sourcePath)));
   await source.copy(target.path);
-  await _channel.invokeMethod<void>('openFile', <String, Object?>{
-    'path': target.path,
-  });
-  return true;
+  return target;
 }
