@@ -131,64 +131,77 @@ class _MarkdownToolbarState extends State<MarkdownToolbar> {
   ///  - 右侧收键盘：退出编辑的唯一出口，永远在最外侧。
   /// 每组内部 8dp 等距，组间用 0.5dp 竖线分隔，视觉上是三块而不是一排。
   Widget _controlledToolbarRow(BuildContext context, AppColors colors) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: Row(
-        children: <Widget>[
-          _ToolButton(
-            icon: _effectivePanel == MarkdownToolbarPanel.attach
-                ? Icons.close_rounded
-                : Icons.add_rounded,
-            selected: _effectivePanel == MarkdownToolbarPanel.attach,
-            onTap: () => _setPanel(
-              _effectivePanel == MarkdownToolbarPanel.attach
-                  ? MarkdownToolbarPanel.none
-                  : MarkdownToolbarPanel.attach,
-            ),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        // 320dp 窄屏：三个内容按钮 + 撤销/还原 + 收键盘，按 48dp 热区
+        // 会横向溢出 13dp（真机实测）。窄屏收一档到 44dp（仍高于 40dp
+        // 最小可点），间距 8→6、页边距 10→8；360dp 以上保持原规格。
+        final bool compact = constraints.maxWidth < 360;
+        final double hitSize = compact ? 44 : 48;
+        final double gap = compact ? 6 : 8;
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10),
+          child: Row(
+            children: <Widget>[
+              _ToolButton(
+                icon: _effectivePanel == MarkdownToolbarPanel.attach
+                    ? Icons.close_rounded
+                    : Icons.add_rounded,
+                selected: _effectivePanel == MarkdownToolbarPanel.attach,
+                hitSize: hitSize,
+                onTap: () => _setPanel(
+                  _effectivePanel == MarkdownToolbarPanel.attach
+                      ? MarkdownToolbarPanel.none
+                      : MarkdownToolbarPanel.attach,
+                ),
+              ),
+              SizedBox(width: gap),
+              _TextToolButton(
+                selected: _isHeadingActive() ||
+                    _effectivePanel == MarkdownToolbarPanel.textStyle,
+                showClose: _effectivePanel == MarkdownToolbarPanel.textStyle,
+                hitSize: hitSize,
+                onTap: () => _setPanel(
+                  _effectivePanel == MarkdownToolbarPanel.textStyle
+                      ? MarkdownToolbarPanel.none
+                      : MarkdownToolbarPanel.textStyle,
+                ),
+              ),
+              SizedBox(width: gap),
+              _ToolButton(
+                icon: Icons.sell_outlined,
+                size: AppIcon.action,
+                hitSize: hitSize,
+                onTap: widget.onEditTags ?? () {},
+              ),
+              // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
+              // 两侧各占一块，不再把五个按钮均匀撒满整条。
+              const Spacer(),
+              // 撤销/还原用「掉头箭头」：方向感最直观，也不会和返回/前进混淆。
+              _FixedButton(
+                icon: Icons.u_turn_left_rounded,
+                size: AppIcon.action,
+                hitSize: hitSize,
+                enabled: widget.canUndo,
+                onTap: widget.onUndo,
+              ),
+              _FixedButton(
+                icon: Icons.u_turn_right_rounded,
+                size: AppIcon.action,
+                hitSize: hitSize,
+                enabled: widget.canRedo,
+                onTap: widget.onRedo,
+              ),
+              _GroupDivider(color: colors.divider),
+              _FixedButton(
+                icon: Icons.keyboard_hide_outlined,
+                hitSize: hitSize,
+                onTap: widget.onHideKeyboard,
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          _TextToolButton(
-            selected: _isHeadingActive() ||
-                _effectivePanel == MarkdownToolbarPanel.textStyle,
-            showClose: _effectivePanel == MarkdownToolbarPanel.textStyle,
-            onTap: () => _setPanel(
-              _effectivePanel == MarkdownToolbarPanel.textStyle
-                  ? MarkdownToolbarPanel.none
-                  : MarkdownToolbarPanel.textStyle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          _ToolButton(
-            icon: Icons.sell_outlined,
-            // 价签图标的字形几乎填满 em 框，用 24 会比相邻图标重一圈；
-            // 降到 22 与「加号 / Aa / 收键盘」的视觉重量对齐。
-            size: AppIcon.dense,
-            onTap: widget.onEditTags ?? () {},
-          ),
-          // 中间弹性空白：内容组贴左（拇指区），历史组贴右，
-          // 两侧各占一块，不再把五个按钮均匀撒满整条。
-          const Spacer(),
-          // 撤销/还原用「掉头箭头」：方向感最直观，也不会和返回/前进混淆。
-          // 掉头箭头同样比常规线性图标更满，统一降到 22 保持视觉一致。
-          _FixedButton(
-            icon: Icons.u_turn_left_rounded,
-            size: AppIcon.dense,
-            enabled: widget.canUndo,
-            onTap: widget.onUndo,
-          ),
-          _FixedButton(
-            icon: Icons.u_turn_right_rounded,
-            size: AppIcon.dense,
-            enabled: widget.canRedo,
-            onTap: widget.onRedo,
-          ),
-          _GroupDivider(color: colors.divider),
-          _FixedButton(
-            icon: Icons.keyboard_hide_outlined,
-            onTap: widget.onHideKeyboard,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -806,16 +819,25 @@ class _ActionCell extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Icon(icon, size: AppIcon.action, color: foreground),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppFontSize.badge,
-                height: 1,
-                letterSpacing: 0.2,
-                color: foreground,
+            // 图标与文字之间从 4 收到 2：系统字号放到 2.0 时 22+2+24=48
+            // 正好等于卡片高度，不会再纵向溢出；正常字号几乎看不出差别。
+            const SizedBox(height: 2),
+            // 窄屏 + 大字号时「减少缩进」这类四字标签会比卡片宽：
+            // 只缩小字号、保留完整文字，不出现省略号（与工具栏的分工一致）。
+            SizedBox(
+              width: double.infinity,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: AppFontSize.badge,
+                    height: 1,
+                    letterSpacing: 0.2,
+                    color: foreground,
+                  ),
+                ),
               ),
             ),
           ],
@@ -832,11 +854,15 @@ class _TextToolButton extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.showClose = false,
+    this.hitSize = 48,
   });
 
   final bool selected;
   final VoidCallback onTap;
   final bool showClose;
+
+  /// 点击热区：窄屏收一档由工具栏统一传入，宽屏保持 48。
+  final double hitSize;
 
   @override
   Widget build(BuildContext context) {
@@ -845,9 +871,9 @@ class _TextToolButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.button),
       child: SizedBox(
-        width: 48,
-        height: 48,
-        // 命中区仍是 48；选中只画 36 圆形底，避免「一个大色块」压住图标
+        width: hitSize,
+        height: hitSize,
+        // 选中只画 36 圆形底，避免「一个大色块」压住图标
         // （用户反馈关闭按钮的背景太大）。
         child: Center(
           child: Container(
@@ -887,14 +913,17 @@ class _ToolButton extends StatelessWidget {
     required this.onTap,
     this.selected = false,
     this.size = AppIcon.action,
+    this.hitSize = 48,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final bool selected;
 
-  /// 图标绘制尺寸。字形偏满的图标（价签等）传 [AppIcon.dense]，
-  /// 让视觉重量与其他 24dp 图标一致。
+  /// 点击热区：窄屏收一档由工具栏统一传入，宽屏保持 48。
+  final double hitSize;
+
+  /// 图标绘制尺寸。工具条内统一取 [AppIcon.action]（22vp）。
   final double size;
 
   @override
@@ -904,8 +933,8 @@ class _ToolButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.button),
       child: SizedBox(
-        width: 48,
-        height: 48,
+        width: hitSize,
+        height: hitSize,
         child: Center(
           child: Container(
             width: 36,
@@ -958,13 +987,17 @@ class _FixedButton extends StatelessWidget {
     required this.onTap,
     this.enabled = true,
     this.size = AppIcon.action,
+    this.hitSize = 48,
   });
 
   final IconData icon;
   final VoidCallback? onTap;
   final bool enabled;
 
-  /// 见 [_ToolButton.size]：字形偏满的图标降一档，保持视觉重量一致。
+  /// 点击热区：窄屏收一档由工具栏统一传入，宽屏保持 48。
+  final double hitSize;
+
+  /// 见 [_ToolButton.size]：工具条内统一取 [AppIcon.action]（22vp）。
   final double size;
 
   @override
@@ -974,8 +1007,8 @@ class _FixedButton extends StatelessWidget {
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(AppRadius.button),
       child: Container(
-        width: 48,
-        height: 48,
+        width: hitSize,
+        height: hitSize,
         alignment: Alignment.center,
         child: Icon(
           icon,

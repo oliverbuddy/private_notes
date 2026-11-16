@@ -351,7 +351,7 @@ class _ActionRow extends StatelessWidget {
         child: Row(
           children: <Widget>[
             if (icon != null) ...<Widget>[
-              Icon(icon, size: AppIcon.nav, color: colors.secondary),
+              Icon(icon, size: AppIcon.action, color: colors.secondary),
               const SizedBox(width: 12),
             ],
             Expanded(
@@ -404,7 +404,7 @@ class _BackupEntryRow extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Icon(_backupIcon(entry.kind),
-                size: AppIcon.nav, color: colors.secondary),
+                size: AppIcon.action, color: colors.secondary),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

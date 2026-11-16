@@ -59,6 +59,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   NoteRepository get _repo => widget.repository;
 
+  /// 页面左右边距：窄屏（<360dp）收一档到 12，给正文多留 8dp；
+  /// 主流宽度保持 16。标题栏、搜索栏、列表卡片共用同一值，左缘始终对齐。
+  double get _pageInset =>
+      MediaQuery.sizeOf(context).width < 360 ? 12 : AppSpace.page;
+
   @override
   void initState() {
     super.initState();
@@ -560,10 +565,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 if (_repo.isSearching && !_repo.isLoading)
                   ContentFrame(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpace.page,
+                      padding: EdgeInsets.fromLTRB(
+                        _pageInset,
                         AppSpace.xs,
-                        AppSpace.page,
+                        _pageInset,
                         AppSpace.sm,
                       ),
                       child: Align(
@@ -635,101 +640,118 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildTitleBar(AppColors colors) {
     final activeTag = _repo.activeTag;
-    return Padding(
-      // HarmonyOS 标题 24：上下各 9，栏高与 48 对齐。
-      padding: const EdgeInsets.fromLTRB(
-        AppSpace.page,
-        9,
-        8,
-        9,
-      ),
-      child: Row(
-        children: <Widget>[
-          Text(
-            '小记',
-            style: AppText.pageTitle.copyWith(color: colors.text),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        // 标题固定两字，先按实际字号（含系统字体缩放）留出宽度，剩下的
+        // 才分给标签胶囊和两个 44dp 动作按钮。以前胶囊文字写死 96 上限，
+        // 320dp 窄屏 + 系统大字号时整行会溢出约 10dp（顶栏右侧被裁掉，
+        // 也就是「有些手机上不好看」的来源），这里改成按可用宽度收缩。
+        final double titleWidth =
+            MediaQuery.textScalerOf(context).scale(AppFontSize.pageTitle) * 2 +
+                12;
+        final double rowWidth = constraints.maxWidth - _pageInset - 8;
+        final double pillMaxWidth =
+            (rowWidth - titleWidth - 44 * 2).clamp(72.0, 220.0);
+        return Padding(
+          // 上下各 6：与 44dp 图标热区合成 56 的标准导航栏高度。
+          // （原 9+44+9=62 比搜索栏高 14，切换搜索态时列表会跳一下。）
+          padding: EdgeInsets.fromLTRB(_pageInset, 6, 8, 6),
+          child: Row(
+            children: <Widget>[
+              Text(
+                '小记',
+                maxLines: 1,
+                style: AppText.pageTitle.copyWith(color: colors.text),
+              ),
+              const Spacer(),
+              // 标签入口（语雀式）：未选中时是描边图标；选中后整个入口变成
+              // 「图标 + 标签名 + 清除」的胶囊，原位替换图标 —— 筛选状态
+              // 一眼可见，也不再用一整行筛选条占掉列表高度。
+              if (activeTag == null)
+                _IconAction(
+                  icon: Icons.sell_outlined,
+                  onTap: _showTagFilterSheet,
+                )
+              else
+                _buildTagPill(colors, activeTag, maxWidth: pillMaxWidth),
+              _IconAction(
+                icon: Icons.search_rounded,
+                onTap: _enterSearch,
+              ),
+              _IconAction(
+                icon: Icons.settings_outlined,
+                onTap: _openSettings,
+              ),
+            ],
           ),
-          const Spacer(),
-          // 标签入口（语雀式）：未选中时是描边图标；选中后整个入口变成
-          // 「图标 + 标签名 + 清除」的胶囊，原位替换图标 —— 筛选状态
-          // 一眼可见，也不再用一整行筛选条占掉列表高度。
-          if (activeTag == null)
-            _IconAction(
-              icon: Icons.sell_outlined,
-              onTap: _showTagFilterSheet,
-            )
-          else
-            _buildTagPill(colors, activeTag),
-          _IconAction(
-            icon: Icons.search_rounded,
-            onTap: _enterSearch,
-          ),
-          // 齿轮齿多、笔画密，24vp 会和左边的「标签 / 搜索」比起来偏重，
-          // 按光学尺寸缩到 22vp 做视觉平衡。
-          _IconAction(
-            icon: Icons.settings_outlined,
-            iconSize: AppIcon.dense,
-            onTap: _openSettings,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   /// 标题栏里的激活标签胶囊：点主体重新打开筛选弹层（可换标签或选
   /// 「全部」清除），点 × 直接清除筛选。
-  Widget _buildTagPill(AppColors colors, String tag) {
-    return InkWell(
-      onTap: _showTagFilterSheet,
-      borderRadius: BorderRadius.circular(AppRadius.chip),
-      child: Container(
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: colors.accentBg,
-          borderRadius: BorderRadius.circular(AppRadius.chip),
-          border: Border.all(
-            color: colors.chipBorderSelected,
-            width: 0.5,
+  ///
+  /// [maxWidth] 由标题栏按剩余空间算出来：窄屏上标签名截断，胶囊和
+  /// 右侧图标都不会被挤出屏幕。
+  Widget _buildTagPill(
+    AppColors colors,
+    String tag, {
+    required double maxWidth,
+  }) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: InkWell(
+        onTap: _showTagFilterSheet,
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+        child: Container(
+          height: 28,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: colors.accentBg,
+            borderRadius: BorderRadius.circular(AppRadius.chip),
+            border: Border.all(
+              color: colors.chipBorderSelected,
+              width: 0.5,
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.sell_rounded, size: AppIcon.chip, color: colors.accent),
-            const SizedBox(width: 4),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 96),
-              child: Text(
-                '#$tag',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppFontSize.label,
-                  height: 1,
-                  letterSpacing: 0.1,
-                  fontWeight: AppWeight.medium,
-                  color: colors.accent,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.sell_rounded, size: AppIcon.chip, color: colors.accent),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  '#$tag',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppFontSize.label,
+                    height: 1,
+                    letterSpacing: 0.1,
+                    fontWeight: AppWeight.medium,
+                    color: colors.accent,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 4),
-            // × 独立命中区（热区放大到整格）：清除是个高频轻动作，
-            // 不该强迫用户再进弹层绕一圈。
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _repo.setActiveTag(null),
-              child: SizedBox(
-                width: 18,
-                height: 28,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Icon(Icons.close_rounded,
-                      size: AppIcon.chip, color: colors.accent),
+              const SizedBox(width: 4),
+              // × 独立命中区（热区放大到整格）：清除是个高频轻动作，
+              // 不该强迫用户再进弹层绕一圈。
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _repo.setActiveTag(null),
+                child: SizedBox(
+                  width: 18,
+                  height: 28,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Icon(Icons.close_rounded,
+                        size: AppIcon.chip, color: colors.accent),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -737,10 +759,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildSearchBar(AppColors colors) {
     return Padding(
-      // 左边距与标题、列表卡片统一（AppSpace.page），否则搜索框会比其他
-      // 内容往左凸出 4dp，进入搜索态时整页像被挪了一下。
-      // 上下各 4：搜索栏总高 48，与 30pt 大标题栏切换时高度不跳。
-      padding: const EdgeInsets.fromLTRB(AppSpace.page, 4, 10, 4),
+      // 上下各 8：搜索框 40 + 16 = 56，与标题栏同高，切换搜索态时
+      // 列表不会上下跳。
+      padding: EdgeInsets.fromLTRB(_pageInset, 8, 10, 8),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -817,9 +838,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildBackupTip(AppColors colors, ListDensity density) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        AppSpace.page,
+        _pageInset,
         density == ListDensity.compact ? 10 : 2,
-        AppSpace.page,
+        _pageInset,
         12,
       ),
       child: Material(
@@ -984,6 +1005,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           tile = NoteTileCompact(
             note: note,
             query: query,
+            // 与标题、舒适档卡片共用同一条左缘（窄屏收一档）。
+            horizontalPadding: _pageInset,
             // 紧凑档同样带图：右侧 40dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
@@ -1013,19 +1036,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               tile,
               if (noteIndex != notes.length - 1)
                 Padding(
-                  padding: const EdgeInsets.only(left: AppSpace.page),
+                  padding: EdgeInsets.only(left: _pageInset),
                   child: Container(height: 0.5, color: separator),
                 ),
             ],
           );
         }
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpace.page),
+          padding: EdgeInsets.symmetric(horizontal: _pageInset),
           child: Column(
             children: <Widget>[
               tile,
               // 卡片间距 12：比 10 更有呼吸感，长列表滚动时卡片边界更清楚。
-              const SizedBox(height: AppSpace.md),
+              // 窄屏收紧到 10，一屏能多露出一点下一条。
+              SizedBox(height: _pageInset < AppSpace.page ? 10 : AppSpace.md),
             ],
           ),
         );
@@ -1038,19 +1062,16 @@ class _IconAction extends StatelessWidget {
   const _IconAction({
     required this.icon,
     required this.onTap,
-    this.iconSize = AppIcon.action,
   });
 
   final IconData icon;
   final VoidCallback onTap;
-  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
     // 44dp 热区（鸿蒙最小可点 40）：三个入口并排也不挤。
     return AppIconButton(
       icon: icon,
-      iconSize: iconSize,
       onTap: onTap,
       hitSize: 44,
     );

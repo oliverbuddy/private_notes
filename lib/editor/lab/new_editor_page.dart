@@ -43,6 +43,7 @@ import 'link_tap_handler.dart';
 import 'list_style.dart';
 import 'markdown_paste.dart';
 import 'markdown_inline.dart';
+import 'mobile_table.dart';
 import 'paste_ime_decorator.dart';
 import 'task_component.dart';
 import 'xiaoji_markdown.dart';
@@ -2974,10 +2975,25 @@ class _NewEditorPageState extends State<NewEditorPage>
         child: Stack(
           children: <Widget>[
             // 顶栏按早期版本逻辑：居中显示更新时间（编辑后实时刷新）。
+            // 窄屏 + 大字号时给左右图标让位，时间过长就省略，
+            // 避免文字压到目录/更多按钮下面（320dp 实测会重叠）。
             Center(
-              child: Text(
-                formatEditorTime(_updated),
-                style: AppText.meta.copyWith(color: colors.secondary),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: math.max(
+                    0,
+                    contentWidth -
+                        56 -
+                        48.0 * (_outline.length >= 2 ? 2 : 1) -
+                        16,
+                  ),
+                ),
+                child: Text(
+                  formatEditorTime(_updated),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.meta.copyWith(color: colors.secondary),
+                ),
               ),
             ),
             Positioned(
@@ -3132,14 +3148,10 @@ class _NewEditorPageState extends State<NewEditorPage>
             // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
             // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
             // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
-            // 才保留横向滚动兜底。
-            _AdaptiveTableComponentBuilder(
+            // 才保留横向滚动兜底。单元格文本可长按选中、复制。
+            MobileTableComponentBuilder(
               availableWidth: contentWidth - AppSpace.page * 2,
               columnMax: 240,
-              selectionColor: Color.alphaBlend(
-                colors.accent.withValues(alpha: 0.25),
-                colors.page,
-              ),
             ),
             ...defaultComponentBuilders,
             const UnknownComponentBuilder(),
@@ -4399,89 +4411,6 @@ TableCellDecorator _tableCellDecorator(AppColors colors) {
   }) {
     return rowIndex == 0 ? BoxDecoration(color: colors.pageAlt) : null;
   };
-}
-
-/// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
-///
-/// 2~3 列表格在手机上基本一屏放下；列特别多时单列不低于 [min]，宁可
-/// 略微横向滚动也不把字挤成一条；平板/PC 因 [availableWidth] 更大，
-/// 单列自然更宽，不需要按端写第二套分支。
-double tableColumnCap({
-  required double availableWidth,
-  required int columns,
-  double min = 96,
-  double max = 240,
-}) {
-  if (columns <= 0 || availableWidth <= 0) {
-    return max;
-  }
-  return (availableWidth / columns).clamp(min, max).toDouble();
-}
-
-/// 列宽按内容取「固有宽度」，但不超过 [maxWidth]。
-///
-/// 表格内核默认用 [IntrinsicColumnWidth]：长文本会把整张表撑到几千 dp，
-/// 手机窄屏必须横向滑很久才能看完。封顶后长内容在单元格内换行。
-class CappedIntrinsicColumnWidth extends TableColumnWidth {
-  const CappedIntrinsicColumnWidth(this.maxWidth);
-
-  final double maxWidth;
-
-  static const TableColumnWidth _intrinsic = IntrinsicColumnWidth();
-
-  @override
-  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.minIntrinsicWidth(cells, containerWidth), maxWidth);
-
-  @override
-  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.maxIntrinsicWidth(cells, containerWidth), maxWidth);
-}
-
-/// 表格组件：按「正文可用宽度 / 列数」给每列分配上限。
-///
-/// 手机窄屏下，长文本单元格以前会把列撑到内容宽度（整表几千 dp），
-/// 必须横向滑很久才能看完。现在每列最多拿到自己那份屏宽。
-class _AdaptiveTableComponentBuilder extends MarkdownTableComponentBuilder {
-  const _AdaptiveTableComponentBuilder({
-    required this.availableWidth,
-    required this.selectionColor,
-    this.columnMax = 240,
-  }) : super(fit: TableComponentFit.scroll);
-
-  /// 正文内容区宽度（已扣掉页面左右页边距）。
-  final double availableWidth;
-
-  /// 表格是整块选中：必须给它一个可见的选中底色，否则用户不知道
-  /// 已经选中，也就不会想到可以复制。
-  final Color selectionColor;
-
-  /// 单列宽度上限：窄屏 240，宽屏（平板）可略宽。
-  final double columnMax;
-
-  @override
-  SingleColumnLayoutComponentViewModel? createViewModel(
-    Document document,
-    DocumentNode node,
-  ) {
-    final SingleColumnLayoutComponentViewModel? viewModel =
-        super.createViewModel(document, node);
-    if (viewModel is! MarkdownTableViewModel || node is! TableBlockNode) {
-      return viewModel;
-    }
-    viewModel.selectionColor = selectionColor;
-    final int columns = node.columnCount;
-    if (columns > 0 && availableWidth > 0) {
-      viewModel.columnWidth = CappedIntrinsicColumnWidth(
-        tableColumnCap(
-          availableWidth: availableWidth,
-          columns: columns,
-          max: columnMax,
-        ),
-      );
-    }
-    return viewModel;
-  }
 }
 
 /// 图片长按菜单的动作。

@@ -25,8 +25,10 @@ class TagChip extends StatelessWidget {
     final colors = AppColors.of(context);
     final TagTone tone = TagPalette.toneFor(label, colors);
     return Container(
-      height: 20,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+      // 用最小高度而不是固定 20：系统字体放大到 1.5 以上时，固定高会把
+      // 文字裁掉；这里让 chip 跟着字号长高，正常字号下观感不变。
+      constraints: const BoxConstraints(minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: isOverflow ? colors.accentBg : tone.background,
         borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -43,6 +45,8 @@ class TagChip extends StatelessWidget {
         widthFactor: 1,
         child: Text(
           isOverflow ? label : '#$label',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: AppFontSize.caption,
             height: 1,

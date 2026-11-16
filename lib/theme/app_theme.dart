@@ -446,14 +446,12 @@ abstract final class AppIcon {
   /// 行尾箭头、「⋯」这类弱操作图标。
   static const double chevron = 16;
 
-  /// 顶部栏动作图标、弹层行动图标。
-  static const double action = 24;
-
-  /// 笔画密度高的图标（齿轮等）的光学尺寸。
+  /// 所有可点动作图标：顶栏、列表行、弹层、工具条统一 22。
   ///
-  /// 齿轮的齿多、留白少，同样 24vp 会比返回箭头、放大镜重一圈；
-  /// 鸿蒙图标规范也允许按视觉重量做 ±2vp 的光学补偿。
-  static const double dense = 22;
+  /// 之前把「齿轮/价签」这类字形偏满的图标单独拆成 22 做光学补偿，
+  /// 结果同一工具条里加号（24）与价签/撤销（22）并排时，反而显得
+  /// 个别图标偏大。现在统一到活动区 22vp，只有返回箭头保留 24。
+  static const double action = 22;
 
   /// 次要动作 / 工具条图标（20）。
   static const double compact = 20;

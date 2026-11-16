@@ -7,7 +7,7 @@ import 'pressable.dart';
 ///
 /// 统一约束（此前各页面各写一套 48/44/40 热区与 48 选中底）：
 /// - 点击热区 [hitSize] 默认 48vp（最小 40vp）；
-/// - 图标默认 24vp，落在 22vp 活动区内；
+/// - 图标默认 22vp（活动区），返回箭头单独用 24vp；
 /// - 选中态只画 36vp 圆形底，不再铺满整个 48 热区；
 /// - 常规色用正文色，选中用主色，禁用用三级文字色。
 class AppIconButton extends StatelessWidget {
@@ -98,6 +98,8 @@ class AppBackButton extends StatelessWidget {
       icon: Icons.chevron_left_rounded,
       onTap: onTap ?? () => Navigator.of(context).maybePop(),
       color: color ?? colors.text,
+      // 返回箭头是导航图标：不跟随动作图标的 22vp 基准缩小。
+      iconSize: AppIcon.nav,
       hitSize: hitSize,
       tooltip: '返回',
     );

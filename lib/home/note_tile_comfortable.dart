@@ -104,10 +104,12 @@ class NoteTileComfortable extends StatelessWidget {
             pressedOpacity: 1,
             pressedColor: AppPress.overlay(context),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.lg,
+              // 窄屏卡片内边距收一档（16→14）：正文多出 4dp，
+              // 320dp 机型一行能少折一次；常规宽度保持 16。
+              padding: EdgeInsets.fromLTRB(
+                MediaQuery.sizeOf(context).width < 360 ? 14 : AppSpace.lg,
                 14,
-                AppSpace.lg,
+                MediaQuery.sizeOf(context).width < 360 ? 14 : AppSpace.lg,
                 14,
               ),
               child: Column(

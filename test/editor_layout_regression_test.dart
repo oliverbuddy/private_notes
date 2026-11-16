@@ -11,6 +11,7 @@ import 'package:xiaoji/data/note_store.dart';
 import 'package:xiaoji/editor/lab/caret_overlay.dart';
 import 'package:xiaoji/editor/lab/editor_request_handlers.dart';
 import 'package:xiaoji/editor/lab/list_style.dart';
+import 'package:xiaoji/editor/lab/mobile_table.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
 import 'package:xiaoji/editor/markdown_view.dart' show CodeBlockCardStyle;
@@ -305,7 +306,11 @@ void main() {
       );
       await _pumpFrames(tester, frames: 12);
 
-      expect(find.byType(MarkdownTableComponent), findsOneWidget);
+      // 手机端表格已换成「单元格文本可选中」的自定义组件，不再走内核
+      // 的整表块选中（MarkdownTableComponent）。
+      expect(find.byType(MobileTable), findsOneWidget);
+      expect(find.byType(SelectionArea), findsOneWidget);
+      expect(find.textContaining('苹果', findRichText: true), findsOneWidget);
       expect(find.byType(UnknownComponent), findsNothing);
     });
   });

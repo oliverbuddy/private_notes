@@ -26,11 +26,15 @@ class NoteTileCompact extends StatelessWidget {
     this.thumbnailPaths = const <String>[],
     this.imageCount = 0,
     this.hasAttachment = false,
+    this.horizontalPadding = AppSpace.page,
     required this.onTap,
     required this.onLongPress,
   });
   final Note note;
   final String query;
+
+  /// 左右内边距：窄屏由主页传入 12，与标题/卡片左缘对齐。
+  final double horizontalPadding;
 
   /// 最多取第一张，紧凑档只放一个 40dp 的方块。
   final List<String> thumbnailPaths;
@@ -78,8 +82,8 @@ class NoteTileCompact extends StatelessWidget {
       pressedOpacity: 1,
       pressedScale: 1,
       child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.page,
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
             vertical: 12,
           ),
           child: Row(
