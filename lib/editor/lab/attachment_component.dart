@@ -19,19 +19,26 @@ import 'attachment_editing.dart';
 ///
 /// 这里回到「文本 + 卡片外观」的组合：正文仍是真正的 `TextComponent`
 /// （文件名可选中、光标位置、IME 输入全部走官方链路，不会再出现位置类型
-/// 冲突），外面套一层卡片底色、文件图标和副标题。点击卡片打开操作弹层，
-/// 与之前的手感一致。
+/// 冲突），外面套一层卡片底色、文件图标和副标题。
+///
+/// 交互按主流文件消息的约定：**点一下直接用系统查看器打开**（PDF/Office
+/// 等交给用户装好的应用），长按才打开操作弹层（复制路径 / 从正文移除）。
 class AttachmentComponentBuilder implements ComponentBuilder {
   const AttachmentComponentBuilder({
     required this.repository,
     required this.editor,
     required this.onShowActions,
+    required this.onOpen,
   });
 
   final NoteRepository repository;
   final Editor editor;
   final void Function(BuildContext context, String nodeId, String name, String url)
       onShowActions;
+
+  /// 点卡片：用系统查看器打开附件。
+  final void Function(BuildContext context, String nodeId, String name, String url)
+      onOpen;
 
   static const ParagraphComponentBuilder _delegate = ParagraphComponentBuilder();
 
@@ -68,7 +75,13 @@ class AttachmentComponentBuilder implements ComponentBuilder {
       viewModel: componentViewModel,
       repository: repository,
       url: link.plainTextUri,
-      onTap: () => onShowActions(
+      onTap: () => onOpen(
+        componentContext.context,
+        componentViewModel.nodeId,
+        componentViewModel.text.toPlainText().trim(),
+        link.plainTextUri,
+      ),
+      onLongPress: () => onShowActions(
         componentContext.context,
         componentViewModel.nodeId,
         componentViewModel.text.toPlainText().trim(),
@@ -90,13 +103,19 @@ class _AttachmentCardComponent extends StatefulWidget {
     required this.repository,
     required this.url,
     required this.onTap,
+    required this.onLongPress,
   });
 
   final GlobalKey componentKey;
   final ParagraphComponentViewModel viewModel;
   final NoteRepository repository;
   final String url;
+
+  /// 点卡片：用系统查看器打开。
   final VoidCallback onTap;
+
+  /// 长按卡片：操作弹层。
+  final VoidCallback onLongPress;
 
   @override
   State<_AttachmentCardComponent> createState() =>
@@ -121,7 +140,7 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: widget.onTap,
-          onLongPress: widget.onTap,
+          onLongPress: widget.onLongPress,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             child: Row(
@@ -190,10 +209,11 @@ class _AttachmentCardComponentState extends State<_AttachmentCardComponent> {
   }
 }
 
-/// 附件操作弹层：复制路径 / 从正文移除。
+/// 附件操作弹层：打开 / 复制路径 / 从正文移除。
 ///
 /// 单独抽成函数，组件只关心「点了要回调」，弹层不再依赖组件内部状态。
-Future<void> showAttachmentActionsSheet({
+/// 返回选中的动作标识（`open` / `copy` / `remove`），取消时为 null。
+Future<String?> showAttachmentActionsSheet({
   required BuildContext context,
   required NoteRepository repository,
   required Editor editor,
@@ -237,6 +257,19 @@ Future<void> showAttachmentActionsSheet({
                 ),
               ),
               const SizedBox(height: 20),
+              // 主操作：和文件消息的惯例一致，打开排在最上面、用强调色。
+              // 文件丢失时不给入口，避免点了只弹一句「文件已丢失」。
+              if (exists) ...<Widget>[
+                AppSheetButton(
+                  label: '打开',
+                  // 主色实底按钮：文字色跟悬浮按钮同一套 token，
+                  // 深色主题的亮蓝底上必须是黑字，白字只有 2.8:1。
+                  background: colors.fabBackground,
+                  foreground: colors.fabForeground,
+                  onTap: () => Navigator.of(sheetContext).pop('open'),
+                ),
+                const SizedBox(height: 12),
+              ],
               Row(
                 children: <Widget>[
                   Expanded(
@@ -286,6 +319,7 @@ Future<void> showAttachmentActionsSheet({
       ),
     ]);
   }
+  return action;
 }
 
 String _formatSize(int bytes) {

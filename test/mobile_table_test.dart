@@ -9,26 +9,22 @@ import 'package:xiaoji/theme/app_theme.dart';
 
 void main() {
   group('MobileTableComponentBuilder', () {
-    test('表格节点使用封顶的固有列宽', () {
+    test('表格列宽均分：铺满正文宽度，不再按内容封顶', () {
       final MutableDocument document = deserializeXiaojiMarkdown(
         '| 名称 | 数量 |\n| --- | --- |\n| 苹果 | 3 |',
       );
       final TableBlockNode table = document.whereType<TableBlockNode>().single;
 
       const MobileTableComponentBuilder builder =
-          MobileTableComponentBuilder(availableWidth: 324);
+          MobileTableComponentBuilder();
       final SingleColumnLayoutComponentViewModel? viewModel =
           builder.createViewModel(document, table);
 
       expect(viewModel, isA<MarkdownTableViewModel>());
       final MarkdownTableViewModel tableViewModel =
           viewModel! as MarkdownTableViewModel;
-      expect(tableViewModel.columnWidth, isA<CappedIntrinsicColumnWidth>());
-      // 324 / 2 列 = 162，夹在 96~240 之间。
-      expect(
-        (tableViewModel.columnWidth as CappedIntrinsicColumnWidth).maxWidth,
-        162,
-      );
+      // 全宽显示：列宽均分，Table 取父级（正文）宽度铺满，长内容换行。
+      expect(tableViewModel.columnWidth, isA<FlexColumnWidth>());
     });
 
     test('非表格节点不接管', () {
@@ -36,7 +32,7 @@ void main() {
       final TextNode paragraph = document.getNodeAt(0)! as TextNode;
 
       const MobileTableComponentBuilder builder =
-          MobileTableComponentBuilder(availableWidth: 324);
+          MobileTableComponentBuilder();
       expect(builder.createViewModel(document, paragraph), isNull);
     });
   });
@@ -51,7 +47,7 @@ void main() {
       );
       final TableBlockNode table = document.whereType<TableBlockNode>().single;
       final MarkdownTableViewModel viewModel =
-          const MobileTableComponentBuilder(availableWidth: 324)
+          const MobileTableComponentBuilder()
               .createViewModel(document, table)! as MarkdownTableViewModel;
 
       await tester.pumpWidget(
@@ -91,7 +87,7 @@ void main() {
       );
       final TableBlockNode table = document.whereType<TableBlockNode>().single;
       final MarkdownTableViewModel viewModel =
-          const MobileTableComponentBuilder(availableWidth: 324)
+          const MobileTableComponentBuilder()
               .createViewModel(document, table)! as MarkdownTableViewModel;
 
       await tester.pumpWidget(

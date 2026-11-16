@@ -19,6 +19,7 @@ import 'package:xiaoji/editor/note_image_share.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
 import 'package:xiaoji/ui/quote_block.dart';
+import 'package:xiaoji/ui/tag_chip.dart';
 
 /// 详情页排版与编辑语义的行为回归。
 ///
@@ -76,22 +77,6 @@ Note _note(String id, String body) {
 }
 
 void main() {
-  group('表格列宽适配手机窄屏', () {
-    test('列数少时按可用宽度均分，铺满一屏', () {
-      // 360dp 手机、正文左右各 18dp 页边距 → 可用 324。
-      expect(tableColumnCap(availableWidth: 324, columns: 2), 162);
-      expect(tableColumnCap(availableWidth: 324, columns: 3), 108);
-    });
-
-    test('列很多时单列不低于下限，靠横向滚动兜底', () {
-      expect(tableColumnCap(availableWidth: 324, columns: 6), 96);
-    });
-
-    test('平板/PC 单列不超过上限，避免一行字拉得过长', () {
-      expect(tableColumnCap(availableWidth: 800, columns: 2), 240);
-    });
-  });
-
   group('引用块回车续行', () {
     test('有内容的引用行末尾回车，新行仍然是引用', () {
       final MutableDocument document = deserializeXiaojiMarkdown('> 引用一行');
@@ -383,6 +368,83 @@ void main() {
         findsWidgets,
         reason: '胶囊要自带 Material，否则 InkWell 与 DefaultTextStyle 都拿不到',
       );
+    });
+  });
+
+  group('详情底部标签栏', () {
+    testWidgets('点标签行右侧空白也能打开标签弹层', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_tag_bar_');
+      final DateTime time = DateTime(2026, 11, 2, 10);
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          Note(
+            id: 'tag-bar',
+            created: time,
+            updated: time,
+            tags: const <String>['读书'],
+            body: '正文一段。',
+          ),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Finder chip = find.byType(TagChip);
+      expect(chip, findsOneWidget, reason: '标签栏要显示已有标签');
+      final Rect chipRect = tester.getRect(chip);
+      // 点 chip 右侧的空白：以前这里是死区（点不动），现在与点 chip 一样
+      // 打开标签弹层。位置取 chip 右缘 +40，保证落在标签行内（宽屏时
+      // 标签行跟随版心居中，不能直接按屏幕右缘算）。
+      await tester.tapAt(Offset(chipRect.right + 40, chipRect.center.dy));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(
+        find.text('输入新标签，回车添加'),
+        findsOneWidget,
+        reason: '标签行空白也要能打开编辑弹层',
+      );
+    });
+  });
+
+  group('文件附件', () {
+    testWidgets('点卡片直接打开；平台不支持时给出提示而不是弹操作弹层',
+        (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_attachment_');
+      const String relative = 'assets/att/1.pdf';
+      final File file = File(repository.store.absoluteAssetPath(relative));
+      await tester.runAsync(() async {
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(<int>[0x25, 0x50, 0x44, 0x46]);
+      });
+
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('attachment', '[报告.pdf]($relative)'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+      expect(find.textContaining('报告.pdf', findRichText: true), findsOneWidget);
+
+      await tester.tap(find.text('附件 · 点击查看'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      // 点卡片走「打开」流程（测试环境没有原生查看器，这一步只验证它
+      // 不再先弹操作弹层）。
+      expect(find.text('复制路径'), findsNothing);
+
+      // 长按才出操作弹层，且新增了主操作「打开」。
+      await tester.longPress(find.text('附件 · 点击查看'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('打开'), findsOneWidget);
+      expect(find.text('复制路径'), findsOneWidget);
+      expect(find.text('从正文移除'), findsOneWidget);
     });
   });
 

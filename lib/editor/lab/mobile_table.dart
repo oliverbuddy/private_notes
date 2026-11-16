@@ -1,66 +1,22 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
 import '../../theme/app_theme.dart';
 import 'selection_toolbar.dart';
 
-/// 表格单列宽度上限：正文可用宽度按列数均分，单列夹在 [min] 与 [max] 之间。
-///
-/// 2~3 列表格在手机上基本一屏放下；列特别多时单列不低于 [min]，宁可
-/// 略微横向滚动也不把字挤成一条；平板/PC 因 [availableWidth] 更大，
-/// 单列自然更宽，不需要按端写第二套分支。
-double tableColumnCap({
-  required double availableWidth,
-  required int columns,
-  double min = 96,
-  double max = 240,
-}) {
-  if (columns <= 0 || availableWidth <= 0) {
-    return max;
-  }
-  return (availableWidth / columns).clamp(min, max).toDouble();
-}
-
-/// 列宽按内容取「固有宽度」，但不超过 [maxWidth]。
-///
-/// 表格内核默认用 [IntrinsicColumnWidth]：长文本会把整张表撑到几千 dp，
-/// 手机窄屏必须横向滑很久才能看完。封顶后长内容在单元格内换行。
-class CappedIntrinsicColumnWidth extends TableColumnWidth {
-  const CappedIntrinsicColumnWidth(this.maxWidth);
-
-  final double maxWidth;
-
-  static const TableColumnWidth _intrinsic = IntrinsicColumnWidth();
-
-  @override
-  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.minIntrinsicWidth(cells, containerWidth), maxWidth);
-
-  @override
-  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) =>
-      math.min(_intrinsic.maxIntrinsicWidth(cells, containerWidth), maxWidth);
-}
-
-/// 手机端表格组件：在「列宽封顶」的基础上，让单元格文本可选中复制。
+/// 手机端表格组件：铺满正文宽度，单元格文本可选中复制。
 ///
 /// 内核的 `MarkdownTableComponent` 把整张表当成一个块来选中：
 /// `IgnorePointer + SelectableBox` 会吞掉文本手势，单元格里的字既选不中
 /// 也复制不了（手机端用户反馈的高频需求）。这里保留同样的 `Table` 布局
 /// 与样式，只把单元格换成 [Text]，并用 [SelectionArea] 接管长按选词、
-/// 拖手柄扩展与系统复制菜单。
+/// 拖手柄扩展与复制菜单。
+///
+/// 列宽用 [FlexColumnWidth] 均分：表格始终等于正文宽度，长内容在单元格内
+/// 换行，不再需要左右滑动（用户反馈：手机上横滑找列很烦）。列宽因此不再
+/// 按可用宽度封顶，`availableWidth` 已移除。
 class MobileTableComponentBuilder extends MarkdownTableComponentBuilder {
-  const MobileTableComponentBuilder({
-    required this.availableWidth,
-    this.columnMax = 240,
-  }) : super(fit: TableComponentFit.scroll);
-
-  /// 正文内容区宽度（已扣掉页面左右页边距）。
-  final double availableWidth;
-
-  /// 单列宽度上限：窄屏 240，宽屏（平板）可略宽。
-  final double columnMax;
+  const MobileTableComponentBuilder() : super();
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(
@@ -69,19 +25,11 @@ class MobileTableComponentBuilder extends MarkdownTableComponentBuilder {
   ) {
     final SingleColumnLayoutComponentViewModel? viewModel =
         super.createViewModel(document, node);
-    if (viewModel is! MarkdownTableViewModel || node is! TableBlockNode) {
+    if (viewModel is! MarkdownTableViewModel) {
       return viewModel;
     }
-    final int columns = node.columnCount;
-    if (columns > 0 && availableWidth > 0) {
-      viewModel.columnWidth = CappedIntrinsicColumnWidth(
-        tableColumnCap(
-          availableWidth: availableWidth,
-          columns: columns,
-          max: columnMax,
-        ),
-      );
-    }
+    // 等分列宽：Table 会按父级宽度（正文内容宽度）铺满，多列自动收窄换行。
+    viewModel.columnWidth = const FlexColumnWidth();
     return viewModel;
   }
 
@@ -120,8 +68,6 @@ class MobileTable extends StatefulWidget {
 }
 
 class _MobileTableState extends State<MobileTable> {
-  final ScrollController _scrollController = ScrollController();
-
   /// 本次按下期间是否由表格临时关掉了编辑器的长按选块。
   bool _suppressedEditorLongPress = false;
 
@@ -129,7 +75,6 @@ class _MobileTableState extends State<MobileTable> {
   void dispose() {
     // 页面在按住表格时被关闭的兜底：别把全局开关留在 true。
     _restoreEditorLongPress();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -181,7 +126,7 @@ class _MobileTableState extends State<MobileTable> {
             SelectableRegionState state,
           ) =>
               _TableSelectionMenu(state: state),
-          child: _buildFit(context, _buildTable(context)),
+          child: _buildTable(context),
         ),
       ),
     );
@@ -249,42 +194,6 @@ class _MobileTableState extends State<MobileTable> {
       widget.viewModel.inlineWidgetBuilders,
     );
     return span is TextSpan ? span : TextSpan(children: <InlineSpan>[span]);
-  }
-
-  Widget _buildFit(BuildContext context, Widget table) {
-    switch (widget.viewModel.fit) {
-      case TableComponentFit.scroll:
-        // 列特别多、单列窄于下限时保留横向滚动兜底；removePadding 避免
-        // 页面安全区把滚动条顶出表格底边（内核同样的处理）。
-        return MediaQuery.removePadding(
-          context: context,
-          removeTop: true,
-          removeBottom: true,
-          removeLeft: true,
-          removeRight: true,
-          child: Scrollbar(
-            controller: _scrollController,
-            scrollbarOrientation: ScrollbarOrientation.bottom,
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              scrollDirection: Axis.horizontal,
-              child: table,
-            ),
-          ),
-        );
-      case TableComponentFit.scale:
-        return LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            return FittedBox(
-              fit: BoxFit.scaleDown,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                child: table,
-              ),
-            );
-          },
-        );
-    }
   }
 }
 

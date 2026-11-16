@@ -54,18 +54,27 @@ void showSnack(
   }
 
   final double maxWidth = math.min(MediaQuery.sizeOf(context).width - 32, 360);
+  // SnackBarAction 内部是 TextButton：最小宽度 64、左右各 8 内边距，与正文
+  // 之间还有 8 的间距。之前只按「文字宽 + 32」估，宽度少了几像素，左侧
+  // 文案会被挤到换行（用户反馈「撤销弹窗文字不多却换行」）。
   final double actionWidth = action == null
       ? 0
-      : measureWidth(
-            action.label,
-            contentStyle.copyWith(fontWeight: AppWeight.medium),
+      : math.max(
+            64,
+            measureWidth(
+                  action.label,
+                  contentStyle.copyWith(fontWeight: AppWeight.medium),
+                ) +
+                24,
           ) +
-          // 操作按钮自带左右留白，额外再留 12 的间距。
-          20 +
-          12;
+          8;
+  // +2 是亚像素取整余量：TextPainter 量出来是浮点，布局再取整时可能多占 1px。
   final double textWidth = math.max(
     0,
-    math.min(measureWidth(message, contentStyle), maxWidth - 32 - actionWidth),
+    math.min(
+      measureWidth(message, contentStyle) + 2,
+      maxWidth - 32 - actionWidth,
+    ),
   );
   final double toastWidth =
       math.max(96, math.min(textWidth + 32 + actionWidth, maxWidth));

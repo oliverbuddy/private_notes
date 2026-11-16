@@ -26,6 +26,7 @@ import '../../ui/show_sheet.dart';
 import '../../ui/snack.dart';
 import '../../ui/tag_chip.dart';
 import '../../util/media_saver.dart';
+import '../../util/attachment_viewer.dart';
 import '../markdown_toolbar.dart';
 import '../markdown_view.dart';
 import '../note_image_share.dart';
@@ -2895,14 +2896,14 @@ class _NewEditorPageState extends State<NewEditorPage>
     return _document.getNodeById(selection.extent.nodeId);
   }
 
-  /// 附件卡片点击/长按：打开「复制路径 / 从正文移除」弹层。
-  void _showAttachmentActions(
+  /// 附件卡片长按：打开「打开 / 复制路径 / 从正文移除」弹层。
+  Future<void> _showAttachmentActions(
     BuildContext context,
     String nodeId,
     String name,
     String url,
-  ) {
-    showAttachmentActionsSheet(
+  ) async {
+    final String? action = await showAttachmentActionsSheet(
       context: context,
       repository: widget.repository,
       editor: _editor,
@@ -2910,6 +2911,50 @@ class _NewEditorPageState extends State<NewEditorPage>
       name: name,
       url: url,
     );
+    if (action == 'open') {
+      await _openAttachmentFile(url);
+    }
+  }
+
+  /// 点附件卡片：用系统查看器打开（PDF、Office 等）。
+  ///
+  /// 卡片自带的 context 在页面卸载后不可靠，统一走 [_openAttachmentFile]，
+  /// 那里只用页面 State 的 context。
+  void _openAttachmentFromCard(
+    BuildContext context,
+    String nodeId,
+    String name,
+    String url,
+  ) {
+    _openAttachmentFile(url);
+  }
+
+  /// 交给系统查看器打开附件。
+  ///
+  /// 设备上没有能打开该格式的应用时给出明确提示，而不是静默失败。
+  Future<void> _openAttachmentFile(String url) async {
+    final String path = widget.repository.store.absoluteAssetPath(url);
+    if (!File(path).existsSync()) {
+      showSnack(context, message: '文件已丢失');
+      return;
+    }
+    String? failure;
+    try {
+      final bool handled = await openAttachmentWithSystemViewer(path);
+      if (!handled) {
+        failure = '当前平台不支持打开附件';
+      }
+    } on PlatformException catch (error) {
+      failure = error.message ?? '没有可打开此文件的应用';
+    } on MissingPluginException {
+      failure = '当前平台不支持打开附件';
+    } catch (error) {
+      failure = '打开失败：$error';
+    }
+    if (failure == null || !mounted) {
+      return;
+    }
+    showSnack(context, message: failure);
   }
 
   /// 左下角标签栏。
@@ -2953,21 +2998,28 @@ class _NewEditorPageState extends State<NewEditorPage>
             child: SizedBox(
               width: double.infinity,
               height: 22,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: <Widget>[
-                    for (final tag in tags)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _editTags,
-                          child: TagChip(label: tag),
+              // 整行都可点：以前只有 chip 本身有热区，标签右侧的空白点了
+              // 没反应，像被一层背景挡住（用户反馈）。这里点空白与点 chip
+              // 走同一个动作（打开标签编辑），横向拖动仍归滚动视图。
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _editTags,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: <Widget>[
+                      for (final tag in tags)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _editTags,
+                            child: TagChip(label: tag),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -3163,22 +3215,19 @@ class _NewEditorPageState extends State<NewEditorPage>
           // 低约 10px（真机用户反馈），换自绘 22px 勾选框与首行视觉居中。
           XiaojiTaskComponentBuilder(_editor),
           // 文件附件：整行只有 `[文件名](assets/…)` 的段落渲染成卡片，
-          // 点击查看/复制路径，不再是一条点了没反应的下划线链接。
+          // 点一下用系统查看器打开（PDF/Office 等），长按出操作弹层。
           AttachmentComponentBuilder(
             repository: widget.repository,
             editor: _editor,
             onShowActions: _showAttachmentActions,
+            onOpen: _openAttachmentFromCard,
           ),
           // 列表项缩进收紧：官方默认 37.2dp 的记号列宽，编号离行头太远。
           const _LabListItemComponentBuilder(),
-          // 表格：列宽按「正文可用宽度 / 列数」分配，单列再做封顶，
-          // 单元格内换行 —— 手机窄屏不再被长文本撑到几千 dp
-          // （用户反馈「横向要滑很久」）。列特别多、单列窄于 96dp 时
-          // 才保留横向滚动兜底。单元格文本可长按选中、复制。
-          MobileTableComponentBuilder(
-            availableWidth: contentWidth - AppSpace.page * 2,
-            columnMax: 240,
-          ),
+          // 表格：列宽均分、铺满正文宽度，长内容在单元格内换行。
+          // 不再横向滚动（用户反馈：手机上横滑找列很烦）。
+          // 单元格文本可长按选中、复制。
+          const MobileTableComponentBuilder(),
           ...defaultComponentBuilders,
           const UnknownComponentBuilder(),
         ],

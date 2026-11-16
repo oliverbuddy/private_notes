@@ -3,6 +3,7 @@ package com.xiaoji.xiaoji
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -12,6 +13,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -96,6 +98,7 @@ class MainActivity : FlutterActivity() {
                     )
                     "saveImage" -> saveImage(call.argument<String>("path"), result)
                     "shareImage" -> shareImage(call.argument<String>("path"), result)
+                    "openFile" -> openLocalFile(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
                     "appInfo" -> appInfo(result)
                     "consumeSharedContent" -> {
@@ -290,6 +293,73 @@ class MainActivity : FlutterActivity() {
         "gif" -> "image/gif"
         "heic", "heif" -> "image/heic"
         else -> "image/jpeg"
+    }
+
+    /**
+     * 用系统 / 第三方应用查看附件（PDF、Office、文本、压缩包等）。
+     *
+     * 应用私有目录（assets/）不能直接交给别的 App：Dart 侧先把文件拷到缓存
+     * 目录，这里再通过 FileProvider 换成 content:// 授权 URI，只授予读取权限，
+     * 不需要任何存储权限。没有能处理该类型的应用时返回 `no_viewer`，由 Dart
+     * 侧提示用户去装 PDF/Office 查看器。
+     */
+    private fun openLocalFile(path: String?, result: MethodChannel.Result) {
+        if (path.isNullOrBlank()) {
+            result.error("bad_args", "缺少文件路径", null)
+            return
+        }
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            result.error("missing_file", "文件不存在", null)
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val view = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeTypeForDocument(file.extension))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(view)
+            result.success(true)
+        } catch (error: ActivityNotFoundException) {
+            result.error("no_viewer", "没有可打开此文件的应用", null)
+        } catch (error: Exception) {
+            Log.w("XiaojiFile", "打开附件失败", error)
+            result.error("open_failed", error.message ?: "打开失败", null)
+        }
+    }
+
+    /**
+     * 附件扩展名 → MIME。
+     *
+     * 先查一张常见格式表，再退回系统 [MimeTypeMap]：国产 ROM 自带的查看器
+     * （WPS、文件管理）大多能接 PDF / Office / 文本，但个别机型对
+     * `text/markdown`、`application/vnd.rar` 这些冷门类型识别不全，这里显式
+     * 写死最稳。都识别不出时给通配 MIME，让用户自己选应用。
+     */
+    private fun mimeTypeForDocument(extension: String): String {
+        val ext = extension.lowercase()
+        return when (ext) {
+            "pdf" -> "application/pdf"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "txt", "log" -> "text/plain"
+            "md", "markdown" -> "text/markdown"
+            "csv" -> "text/csv"
+            "json" -> "application/json"
+            "xml" -> "text/xml"
+            "html", "htm" -> "text/html"
+            "epub" -> "application/epub+zip"
+            "zip" -> "application/zip"
+            "rar" -> "application/vnd.rar"
+            "7z" -> "application/x-7z-compressed"
+            "" -> "*/*"
+            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+        }
     }
 
     /**

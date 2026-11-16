@@ -159,6 +159,16 @@ void main() {
     expect(snackBar.width, lessThanOrEqualTo(360));
     expect(snackBar.duration, const Duration(seconds: 4));
 
+    // 左侧文案必须单行：之前 action 宽度按「文字 + 32」估少了，
+    // 文案被挤到换行（用户反馈「文字不多却换行」）。
+    // 行盒 14×2=28，两行是 56，卡在 40 就能区分。
+    final Size messageSize = tester.getSize(find.text('已移到「回收站」'));
+    expect(
+      messageSize.height,
+      lessThan(40),
+      reason: '「撤销」提示的左侧文案必须单行',
+    );
+
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(milliseconds: 400));
   });
