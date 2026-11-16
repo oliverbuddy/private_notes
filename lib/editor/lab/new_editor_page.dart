@@ -2018,6 +2018,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       await shareNoteAsImage(
         documentLayout: layout,
         background: colors.page,
+        // 落款日期用笔记最后更新时间，不是导出时间。
+        updatedAt: _updated,
       );
     } catch (error) {
       if (mounted) {

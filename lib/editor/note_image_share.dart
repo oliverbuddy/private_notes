@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -17,15 +17,17 @@ import '../util/media_saver.dart';
 ///  - 表格、代码块卡片、引用、图片、行内样式就是详情里的同一批组件；
 ///  - 深色模式下分享图保持用户看到的深色纸面。
 ///
-/// [documentLayout] 传 super_editor 的文档布局渲染对象（只包含正文内容，
-/// 不含光标/选区浮层）。失败时抛出异常，由调用方决定提示文案。
+/// 对外分享时在长图底部追加一行极简落款（App 图标 + 「小记 · 日期」），
+/// 不修改正文宽度、不打断阅读。日期取笔记的最后更新时间。
 Future<void> shareNoteAsImage({
   required RenderObject documentLayout,
   required Color background,
+  DateTime? updatedAt,
 }) async {
   final Uint8List bytes = await renderDocumentShareImage(
     documentLayout: documentLayout,
     background: background,
+    updatedAt: updatedAt,
   );
 
   final Directory dir = await getTemporaryDirectory();
@@ -44,14 +46,27 @@ Future<void> shareNoteAsImage({
 /// 输出图片的目标宽度（像素），主流分享图的清晰度。
 const double _targetWidthPx = 1080;
 
+/// 落款区域的版式：正文上留 24、落款与正文间隔 20、落款行高 16、底部留 24。
+/// 只在上下加留白，不改正文宽度，避免换行位置与详情不一致。
+const double _shareTopPadding = 24;
+const double _shareFooterGap = 20;
+const double _shareFooterHeight = 16;
+const double _shareBottomPadding = 24;
+const double _shareFooterExtra = _shareTopPadding +
+    _shareFooterGap +
+    _shareFooterHeight +
+    _shareBottomPadding;
+
 /// 把文档布局的绘制结果渲染成 PNG 字节（不落盘、不分享，便于测试）。
 ///
 /// 用 `PaintingContext` 直接把渲染对象画进独立的 `OffsetLayer`，再对该层
 /// `toImage`：这样不受可视区域/滚动裁剪影响，整篇内容（含滚到屏外的部分）
-/// 都会出现在图里。
+/// 都会出现在图里。最后把正文图与落款合成到同一张画布，保证落款始终在
+/// 图片最底部、且在超长内容下也不会挤压正文。
 Future<Uint8List> renderDocumentShareImage({
   required RenderObject documentLayout,
   required Color background,
+  DateTime? updatedAt,
 }) async {
   final RenderBox box = _resolveDocumentBox(documentLayout);
   final Size size = box.size;
@@ -59,10 +74,11 @@ Future<Uint8List> renderDocumentShareImage({
     throw StateError('图片生成失败：内容为空');
   }
 
+  final double totalHeight = size.height + _shareFooterExtra;
   final double ratio = math.min(
     math.max(1, _targetWidthPx / size.width),
     // 超长内容降倍率，避免超出常见 GPU 纹理上限导致整张图失败。
-    math.max(0.5, 8192 / size.height),
+    math.max(0.5, 8192 / totalHeight),
   );
 
   final OffsetLayer layer = OffsetLayer();
@@ -74,18 +90,154 @@ Future<Uint8List> renderDocumentShareImage({
   // ignore: invalid_use_of_protected_member
   context.stopRecordingIfNeeded();
 
-  final ui.Image image = await layer.toImage(
-    Offset.zero & size,
-    pixelRatio: ratio,
-  );
+  ui.Image? contentImage;
+  ui.Image? brandIcon;
   try {
-    final ByteData? data = await image.toByteData(format: ui.ImageByteFormat.png);
-    if (data == null) {
-      throw StateError('图片编码失败');
+    contentImage = await layer.toImage(Offset.zero & size, pixelRatio: ratio);
+    // 图标读不到时落款退化为纯文字，不能因此让分享失败。
+    brandIcon = await _loadBrandIcon();
+
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+    canvas.scale(ratio);
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, totalHeight),
+      Paint()..color = background,
+    );
+    canvas.drawImageRect(
+      contentImage,
+      Rect.fromLTWH(
+        0,
+        0,
+        contentImage.width.toDouble(),
+        contentImage.height.toDouble(),
+      ),
+      Rect.fromLTWH(0, _shareTopPadding, size.width, size.height),
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    _paintFooter(
+      canvas,
+      contentWidth: size.width,
+      background: background,
+      icon: brandIcon,
+      updatedAt: updatedAt ?? DateTime.now(),
+      footerTop: _shareTopPadding + size.height + _shareFooterGap,
+    );
+
+    final ui.Picture picture = recorder.endRecording();
+    final ui.Image output = await picture.toImage(
+      (size.width * ratio).round(),
+      (totalHeight * ratio).round(),
+    );
+    picture.dispose();
+    try {
+      final ByteData? data =
+          await output.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) {
+        throw StateError('图片编码失败');
+      }
+      return data.buffer.asUint8List();
+    } finally {
+      output.dispose();
     }
-    return data.buffer.asUint8List();
   } finally {
-    image.dispose();
+    contentImage?.dispose();
+    brandIcon?.dispose();
+  }
+}
+
+/// 画底部落款：`[小记图标] 小记 · 2026.11.16`，整体居中。
+///
+/// 颜色由纸面明暗推导（深色纸面用浅字），不依赖页面主题，保证分享图
+/// 在浅色/深色两种纸面上都安静、可读。
+void _paintFooter(
+  Canvas canvas, {
+  required double contentWidth,
+  required Color background,
+  required ui.Image? icon,
+  required DateTime updatedAt,
+  required double footerTop,
+}) {
+  final bool dark = background.computeLuminance() < 0.5;
+  final Color brandColor =
+      dark ? const Color(0xB3FFFFFF) : const Color(0x73000000);
+  final Color dateColor =
+      dark ? const Color(0x80FFFFFF) : const Color(0x59000000);
+
+  final TextStyle brandStyle = TextStyle(
+    fontSize: 12,
+    height: 1.2,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.2,
+    color: brandColor,
+  );
+  final TextStyle dateStyle = TextStyle(
+    fontSize: 11,
+    height: 1.2,
+    fontWeight: FontWeight.w400,
+    letterSpacing: 0.2,
+    color: dateColor,
+  );
+  final TextPainter text = TextPainter(
+    text: TextSpan(
+      children: <TextSpan>[
+        TextSpan(text: '小记', style: brandStyle),
+        TextSpan(text: '  ·  ', style: dateStyle),
+        TextSpan(text: _formatShareDate(updatedAt), style: dateStyle),
+      ],
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+
+  const double iconSize = 14;
+  const double iconGap = 6;
+  final double totalWidth =
+      (icon == null ? 0 : iconSize + iconGap) + text.width;
+  double x = (contentWidth - totalWidth) / 2;
+  final double centerY = footerTop + _shareFooterHeight / 2;
+
+  if (icon != null) {
+    final Rect iconRect = Rect.fromLTWH(
+      x,
+      centerY - iconSize / 2,
+      iconSize,
+      iconSize,
+    );
+    canvas.save();
+    canvas.clipRRect(
+      RRect.fromRectAndRadius(iconRect, const Radius.circular(4)),
+    );
+    canvas.drawImageRect(
+      icon,
+      Rect.fromLTWH(0, 0, icon.width.toDouble(), icon.height.toDouble()),
+      iconRect,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    canvas.restore();
+    x += iconSize + iconGap;
+  }
+  text.paint(canvas, Offset(x, centerY - text.height / 2));
+  text.dispose();
+}
+
+String _formatShareDate(DateTime date) {
+  final String month = date.month.toString().padLeft(2, '0');
+  final String day = date.day.toString().padLeft(2, '0');
+  return '${date.year}.$month.$day';
+}
+
+/// 读取 App 图标作为落款标记；任何失败都返回 null（落款退化为纯文字）。
+Future<ui.Image?> _loadBrandIcon() async {
+  try {
+    final ByteData data = await rootBundle.load('assets/app_icon.png');
+    final ui.Codec codec = await ui.instantiateImageCodec(
+      data.buffer.asUint8List(),
+      targetWidth: 64,
+    );
+    final ui.FrameInfo frame = await codec.getNextFrame();
+    return frame.image;
+  } catch (_) {
+    return null;
   }
 }
 
