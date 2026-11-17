@@ -48,24 +48,25 @@ abstract final class TagPalette {
     final bool dark = colors.page.computeLuminance() < 0.3;
     if (dark) {
       return TagTone(
-        // 深色主题：半透明色相叠在卡片底上，文字提亮一档。
+        // 深色主题：半透明色相叠在卡片底上，文字提亮一档。底色再收一档
+        // （0.22 → 0.16），标签在深色列表里不再像发光的按钮。
         background: Color.alphaBlend(
-          hue.withValues(alpha: 0.22),
+          hue.withValues(alpha: 0.16),
           colors.page,
         ),
         foreground: Color.lerp(hue, Colors.white, 0.62)!,
-        border: hue.withValues(alpha: 0.30),
+        border: hue.withValues(alpha: 0.24),
       );
     }
     return TagTone(
-      // 浅色主题：10% 色相底 + 加深文字/描边。底色再淡一档（16% → 10%）
-      // 才像「行内标记」而不是按钮（用户反馈标签背景太抢眼）。
+      // 浅色主题：色相底 + 加深文字/描边。底色压到 7%：在白卡上只留
+      // 一层很淡的色相，像「行内标记」而不是按钮（用户反馈仍偏抢眼）。
       background: Color.alphaBlend(
-        hue.withValues(alpha: 0.10),
+        hue.withValues(alpha: 0.07),
         colors.page,
       ),
       foreground: Color.lerp(hue, Colors.black, 0.30)!,
-      border: hue.withValues(alpha: 0.18),
+      border: hue.withValues(alpha: 0.14),
     );
   }
 

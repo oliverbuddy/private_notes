@@ -500,9 +500,8 @@ class NoteStore {
           if (note != null) {
             locked = note.locked;
             tags = note.tags;
-            if (!locked) {
-              title = _firstLine(note.body);
-            }
+            // 锁定笔记用明文标题；旧数据没有标题时退回「已锁定」。
+            title = locked ? note.title : _firstLine(note.body);
           }
         } catch (_) {
           // 坏文件：仍列出来，恢复时再报错。

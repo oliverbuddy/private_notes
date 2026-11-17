@@ -526,43 +526,75 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * 处理「用其他应用打开」：微信 / 文件管理器点 .md 时把内容读出来，
-     * 存到 [pendingOpenMarkdown]；点 PDF 时拷到缓存目录，存到
-     * [pendingOpenFile]，等 Dart 侧启动或回到前台时取走。
+     * 处理「用其他应用打开 / 分享到小记」送进来的文件。
+     *
+     * **不设白名单**：任何文件都先落成一条小记（Markdown 读成正文，
+     * 其余拷到缓存后由 Dart 决定是内联图片还是附件卡片），避免用户
+     * 在「打开方式」里找不到小记。
      *
      * Markdown 优先按 URI 读成字符串而不是长期持有 content:// 授权：微信的
-     * 授权是一次性的临时读权限，进程重启后就失效了。PDF 没法当文本读，
-     * 先拷一份本地副本，交给 pdfrx 预览。
+     * 授权是一次性的临时读权限，进程重启后就失效了。其他文件先拷一份
+     * 本地副本，导入时再写进笔记的附件目录。
+     *
+     * 失败时也回传一条带 `error` 的记录，让 Dart 侧能给明确提示，而不是
+     * 点了文件却什么反应都没有。
      */
     private fun handleOpenDocumentIntent(intent: Intent?) {
+        // 分享图片走 handleShareIntent（可能同时带一段文字）；这里再处理
+        // 一次会把同一张图导入两遍。
+        if (intent?.action == Intent.ACTION_SEND &&
+            intent.type?.startsWith("image/") == true
+        ) {
+            return
+        }
         val uri = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             else -> null
         } ?: return
-        // 原有行为不变：.md / .markdown 仍导入成一条笔记。
-        readMarkdownUri(uri)?.let {
+        val mime = (intent?.type ?: contentResolver.getType(uri))?.lowercase()
+        // Markdown 仍按文本导入（正文直接成为笔记内容）。
+        readMarkdownUri(uri, mime)?.let {
             pendingOpenMarkdown = it
             return
         }
-        val name = displayNameOf(uri)
-        // 后缀和 MIME 都认：部分 provider 给的显示名没有扩展名，只靠
-        // 文件名的后缀判断会漏掉。
-        val extension = name.substringAfterLast('.', "").lowercase()
-        val mime = (intent?.type ?: contentResolver.getType(uri))?.lowercase()
-        val supported = extension in OPENABLE_EXTENSIONS ||
-            (mime != null && mime in OPENABLE_MIME_TYPES)
-        if (!supported) {
+        val rawName = displayNameOf(uri)
+        // 后缀和 MIME 都认：部分 provider 给的显示名没有扩展名。
+        val extension = rawName.substringAfterLast('.', "").lowercase()
+        val resolvedExtension =
+            if (extension.isEmpty()) extensionForMime(mime) else extension
+        // 没有扩展名时按 MIME 补一个，但保留原文件名（附件卡片显示的是它）。
+        val name = if (extension.isEmpty() && resolvedExtension != null) {
+            "$rawName.$resolvedExtension"
+        } else {
+            rawName
+        }
+        // 图片走正文内联，其余都按附件导入详情。
+        val kind = if (mime?.startsWith("image/") == true ||
+            resolvedExtension in IMAGE_EXTENSIONS
+        ) {
+            "image"
+        } else {
+            "file"
+        }
+        val declaredSize = sizeOf(uri)
+        if (declaredSize != null && declaredSize > MAX_OPEN_FILE_BYTES) {
+            Log.w("XiaojiOpen", "文件过大，未导入：$name（$declaredSize 字节）")
+            pendingOpenFile = mapOf("name" to name, "error" to "too_large")
             return
         }
-        // 没有扩展名时按 MIME 补一个：Dart 侧靠扩展名决定预览方式。
-        val displayName = if (extension in OPENABLE_EXTENSIONS) {
-            name
-        } else {
-            "附件.${extensionForMime(mime) ?: "bin"}"
+        val file = copyUriToCache(uri, name)
+        if (file == null) {
+            Log.w("XiaojiOpen", "复制外部文件失败，未导入：$name")
+            pendingOpenFile = mapOf("name" to name, "error" to "copy_failed")
+            return
         }
-        val file = copyUriToCache(uri, displayName) ?: return
-        pendingOpenFile = mapOf("name" to displayName, "path" to file.absolutePath)
+        pendingOpenFile = mapOf(
+            "name" to name,
+            "path" to file.absolutePath,
+            "mime" to (mime ?: ""),
+            "kind" to kind,
+        )
     }
 
     /**
@@ -638,11 +670,20 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** 读 Markdown 文件：扩展名必须是 .md/.markdown，返回 {name, text}。 */
-    private fun readMarkdownUri(uri: Uri): Map<String, Any?>? {
+    /**
+     * 读 Markdown 文件，返回 {name, text}。
+     *
+     * 扩展名优先；显示名没有后缀时再看 MIME（部分网盘/聊天 App 只给
+     * `text/markdown`，文件名里不带 `.md`）。
+     */
+    private fun readMarkdownUri(uri: Uri, mimeHint: String? = null): Map<String, Any?>? {
         val name = displayNameOf(uri)
         val lower = name.lowercase()
-        if (!lower.endsWith(".md") && !lower.endsWith(".markdown")) {
+        val isMarkdown = lower.endsWith(".md") ||
+            lower.endsWith(".markdown") ||
+            (name.substringAfterLast('.', "").isEmpty() &&
+                (mimeHint == "text/markdown" || mimeHint == "text/x-markdown"))
+        if (!isMarkdown) {
             return null
         }
         return try {
@@ -714,31 +755,12 @@ class MainActivity : FlutterActivity() {
         /** 单篇导入的 Markdown 体积上限：超过这个值多半是误分享的大文件。 */
         private const val MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
 
-        /** 外部 PDF 预览的体积上限：更大的文件拷贝与渲染都太慢。 */
+        /** 外部文件导入的体积上限：更大的文件拷贝与落盘都太慢。 */
         private const val MAX_OPEN_FILE_BYTES = 200L * 1024 * 1024
 
-        /** 「用其他应用打开」支持的后缀：PDF / 纯文本在应用内看，Office 等交给系统查看器。 */
-        private val OPENABLE_EXTENSIONS = setOf(
-            "pdf", "txt", "csv", "json", "xml", "html", "htm", "log",
-            "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "rtf", "odt", "ods", "odp",
-        )
-
-        /** 同上的 MIME 兜底：显示名没后缀时用它判断格式。 */
-        private val OPENABLE_MIME_TYPES = setOf(
-            "application/pdf",
-            "text/plain", "text/csv", "text/html", "text/xml",
-            "application/json", "application/xml",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/rtf",
-            "application/vnd.oasis.opendocument.text",
-            "application/vnd.oasis.opendocument.spreadsheet",
-            "application/vnd.oasis.opendocument.presentation",
+        /** 按扩展名识别图片（部分 provider 的 MIME 不可靠）。 */
+        private val IMAGE_EXTENSIONS = setOf(
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif",
         )
 
         private fun extensionForMime(mime: String?): String? = when (mime) {

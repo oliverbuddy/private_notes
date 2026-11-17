@@ -160,8 +160,9 @@ class SearchIndex {
 
   /// 全量对账：索引与磁盘笔记保持一致的唯一入口。
   ///
-  /// 只重建 `updated` 变化的条目；锁定笔记从索引里移除（正文在索引里
-  /// 是明文，不能留）。
+  /// 只重建 `updated` 变化的条目。锁定笔记的正文不进索引，但会用
+  /// frontmatter 里的明文标题 + 标签建条目 —— 用户要能靠标题找到它，
+  /// 正文内容仍然搜不出来。
   void reconcile(List<Note> notes) {
     final Map<String, String> indexed = <String, String>{};
     for (final Row row in _db.select('SELECT id, updated FROM notes_meta')) {
@@ -172,12 +173,6 @@ class SearchIndex {
     try {
       for (final Note note in notes) {
         live.add(note.id);
-        if (note.locked) {
-          if (indexed.containsKey(note.id)) {
-            _delete(note.id);
-          }
-          continue;
-        }
         final String stamp = note.updated.toIso8601String();
         if (indexed[note.id] == stamp) {
           continue;
@@ -198,10 +193,6 @@ class SearchIndex {
 
   /// 单条更新（保存/改标签时调用）。
   void upsertNote(Note note) {
-    if (note.locked) {
-      removeNote(note.id);
-      return;
-    }
     _insert(note, note.updated.toIso8601String());
   }
 
@@ -215,7 +206,8 @@ class SearchIndex {
       'INSERT INTO notes_fts(id, body, tags) VALUES (?, ?, ?)',
       <Object?>[
         note.id,
-        tokenizeDocument(note.body),
+        // 锁定笔记只有明文标题可搜，正文（密文/空串）绝不进索引。
+        tokenizeDocument(note.locked ? note.title : note.body),
         tokenizeDocument(note.tags.join(' ')),
       ],
     );

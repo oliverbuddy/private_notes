@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
@@ -55,13 +56,20 @@ void main() {
       }
     });
 
-    Note note(String id, String body, {DateTime? updated, bool locked = false}) {
+    Note note(
+      String id,
+      String body, {
+      DateTime? updated,
+      bool locked = false,
+      String title = '',
+    }) {
       return Note(
         id: id,
         created: DateTime(2026, 11, 6, 10),
         updated: updated ?? DateTime(2026, 11, 6, 10),
         body: body,
         locked: locked,
+        title: title,
       );
     }
 
@@ -94,9 +102,12 @@ void main() {
       expect(index.search('旧内容'), isEmpty);
     });
 
-    test('锁定笔记不进入索引', () {
-      index.reconcile(<Note>[note('a', '机密内容', locked: true)]);
-      expect(index.search('机密'), isEmpty);
+    test('锁定笔记只索引明文标题，不索引正文', () {
+      index.reconcile(<Note>[
+        note('a', '机密内容', locked: true, title: '会议记录'),
+      ]);
+      expect(index.search('机密'), isEmpty, reason: '正文仍然不能搜出来');
+      expect(index.search('会议'), contains('a'), reason: '标题要能搜到');
     });
 
     test('删除的笔记从索引里消失', () {
@@ -113,18 +124,35 @@ void main() {
 
     setUp(() async {
       tempDir = Directory.systemTemp.createTempSync('xiaoji_repo_search_');
+      // 锁定笔记落盘会走原生 Keystore 通道；测试环境用假实现顶替，
+      // 只验证「索引里有标题、没有正文」的搜索语义。
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('xiaoji/native'),
+        (MethodCall call) async {
+          if (call.method == 'sealText') {
+            return 'sealed';
+          }
+          if (call.method == 'openText') {
+            return '密码备忘\n\n正文';
+          }
+          return null;
+        },
+      );
       final store = await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
       repository = NoteRepository(store);
       await repository.load();
     });
 
     tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('xiaoji/native'), null);
       if (tempDir.existsSync()) {
         tempDir.deleteSync(recursive: true);
       }
     });
 
-    test('搜索命中正文与标签，锁定笔记被排除', () async {
+    test('搜索命中正文与标签', () async {
       await repository.upsert(Note(
         id: 's1',
         created: DateTime(2026, 11, 6, 9),
@@ -150,6 +178,28 @@ void main() {
 
       repository.setQuery('');
       expect(repository.visibleNotes.length, 2);
+    });
+
+    test('锁定笔记可按标题与标签搜到', () async {
+      final locked = Note(
+        id: 's4',
+        created: DateTime(2026, 11, 6, 9),
+        updated: DateTime(2026, 11, 6, 9),
+        tags: const <String>['私密'],
+        locked: true,
+        title: '密码备忘',
+        body: '',
+      );
+      await repository.upsert(locked);
+
+      repository.setQuery('密码');
+      expect(repository.visibleNotes.map((Note n) => n.id), contains('s4'));
+
+      repository.setQuery('私密');
+      expect(repository.visibleNotes.map((Note n) => n.id), contains('s4'));
+
+      repository.setQuery('不存在的词');
+      expect(repository.visibleNotes, isEmpty);
     });
 
     test('删除后搜索结果同步更新', () async {

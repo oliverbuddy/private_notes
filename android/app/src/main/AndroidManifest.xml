@@ -200,6 +200,22 @@
                     android:mimeType="application/octet-stream"
                     android:pathPattern=".*\\.pdf" />
             </intent-filter>
+            <!-- 兜底：任何文件都能「用其他应用打开」或「分享到小记」。
+                 用户要求所有文件都能被小记接住（图片内联、Markdown 作正文、
+                 其余作附件卡片），这里用 */* 覆盖前面按格式精调后仍然漏掉的
+                 类型（压缩包、音视频、设计稿等）。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
             <!-- 长按图标弹出的快捷方式 -->
             <meta-data
                 android:name="android.app.shortcuts"

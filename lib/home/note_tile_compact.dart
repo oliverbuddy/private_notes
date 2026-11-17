@@ -51,9 +51,10 @@ class NoteTileCompact extends StatelessWidget {
     final colors = AppColors.of(context);
     // 只取**首行**：把后续段落压成一行再截断，会让每条看起来
     // 都以「第一句的后半截」开头，扫读时反而更慢。
-    // 锁定笔记内存里没有正文，直接显示「已锁定」。
-    final summary =
-        note.locked ? '已锁定' : plainSummary(note.body).split('\n').first.trim();
+    // 锁定笔记内存里没有正文，只显示明文标题；旧数据回落到「已锁定」。
+    final summary = note.locked
+        ? (note.title.isEmpty ? '已锁定' : note.title)
+        : plainSummary(note.body).split('\n').first.trim();
     final style = TextStyle(
       fontSize: AppFontSize.summary,
       height: 1.4,

@@ -105,15 +105,17 @@ class NoteRepository extends ChangeNotifier {
       if (keyword.isEmpty) {
         return true;
       }
-      // 锁定笔记的正文不在内存里（列表里只剩空串），也不进索引 ——
-      // 正文内容不该被搜出来，也不该出现在结果里。
-      if (note.locked) {
-        return false;
-      }
+      // 锁定笔记的正文不在内存里（列表里只剩空串），但明文标题与标签
+      // 仍参与搜索 —— 否则用户锁得多了只能逐个解锁才能找到目标。
       if (hits != null) {
         return hits.contains(note.id);
       }
       // 索引不可用时的兜底：保持原有线性匹配语义。
+      if (note.locked) {
+        final String title = note.title.toLowerCase();
+        return (title.isNotEmpty && title.contains(keyword)) ||
+            note.tags.any((item) => item.toLowerCase().contains(keyword));
+      }
       if (note.body.toLowerCase().contains(keyword)) {
         return true;
       }
@@ -157,9 +159,35 @@ class NoteRepository extends ChangeNotifier {
     _settings = await _store.loadSettings();
     _notes = loaded;
     _notesRevision++;
+    await _backfillLockedTitles();
     _loading = false;
     _rebuildSearchIndex();
     notifyListeners();
+  }
+
+  /// 老数据迁移：给还没有明文标题的锁定笔记补一个。
+  ///
+  /// 锁定功能早期只加密正文，列表里只剩「已锁定」；这里在启动时解密一次
+  /// 首行写进 frontmatter（只写标题，明文不留在内存），之后列表和搜索都能
+  /// 认出它。密钥不可用（换机恢复）或解密失败时保持原样，不阻断启动。
+  Future<void> _backfillLockedTitles() async {
+    final List<Note> targets =
+        _notes.where((Note note) => note.locked && note.title.isEmpty).toList();
+    if (targets.isEmpty) {
+      return;
+    }
+    for (final Note note in targets) {
+      try {
+        final String plain = await _store.readNoteBody(note);
+        // 只是补元信息，不产生版本快照，避免迁移时给每条锁定笔记都留一版。
+        await upsert(
+          note.copyWith(title: Note.deriveLockedTitle(plain)),
+          keepHistory: false,
+        );
+      } catch (_) {
+        // 解不开就维持「已锁定」，等用户解锁时再补。
+      }
+    }
   }
 
   /// 确保索引存在并与内存里的笔记一致。
@@ -354,10 +382,13 @@ class NoteRepository extends ChangeNotifier {
 
   /// 新增或更新。落盘成功后才更新内存，避免出现「界面有、磁盘没有」的假象。
   Future<void> upsert(Note note, {bool keepHistory = true}) async {
-    await _store.saveNote(note, keepHistory: keepHistory);
+    // 未锁定的笔记不留明文标题副本：标题就是正文首行，多存一份反而
+    // 会在正文修改后变成过期信息。
+    final Note toSave = note.locked ? note : note.copyWith(title: '');
+    await _store.saveNote(toSave, keepHistory: keepHistory);
     // 锁定笔记的明文只留在当前编辑页：列表/搜索拿到的永远是没有正文的
     // 副本，避免首页摘要或标签云把锁定内容带出来。
-    final stored = note.locked ? note.copyWith(body: '') : note;
+    final stored = toSave.locked ? toSave.copyWith(body: '') : toSave;
     final index = _notes.indexWhere((item) => item.id == note.id);
     final next = <Note>[..._notes];
     if (index >= 0) {
@@ -367,7 +398,7 @@ class NoteRepository extends ChangeNotifier {
     }
     _notes = next;
     _notesRevision++;
-    // 索引里存的是正文分词，锁定笔记会被移除。
+    // 索引里存的是正文分词；锁定笔记只索引明文标题与标签。
     _index?.upsertNote(stored);
     _invalidateSearchCache();
     notifyListeners();

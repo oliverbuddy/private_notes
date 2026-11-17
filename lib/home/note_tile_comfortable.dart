@@ -63,7 +63,7 @@ class NoteTileComfortable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    // 锁定笔记：正文不在内存里，列表里只显示「已锁定」，不渲染摘要。
+    // 锁定笔记：正文不在内存里，列表只显示明文标题与标签，不渲染摘要。
     // 正文按「文字段 / 表格段」切开后顺序渲染：有几张表格就画几张，
     // 不会出现「第一张表格之后、第二张表格被跳过」的错乱。
     final List<NotePreviewSegment> segments = note.locked
@@ -117,17 +117,28 @@ class NoteTileComfortable extends StatelessWidget {
                 children: <Widget>[
                   if (note.locked)
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Icon(Icons.lock_outline_rounded,
                             size: AppIcon.badge, color: colors.tertiary),
                         const SizedBox(width: 6),
-                        Text(
-                          '已锁定',
-                          style: TextStyle(
-                            fontSize: AppFontSize.labelLg,
-                            height: 1.4,
-                            color: colors.tertiary,
+                        // 锁定笔记只露明文标题（锁定瞬间从首行生成），
+                        // 正文与缩略图都不显示；旧数据没有标题时回落到「已锁定」。
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              children: highlightSpans(
+                                text: note.title.isEmpty ? '已锁定' : note.title,
+                                query: query,
+                                style: TextStyle(
+                                  fontSize: AppFontSize.labelLg,
+                                  height: 1.4,
+                                  color: colors.tertiary,
+                                ),
+                                highlightColor: colors.searchHit,
+                              ),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -747,8 +758,10 @@ class _MetaRow extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Wrap(
-              spacing: 8,
-              runSpacing: 6,
+              // 标签变小后间距也收一档：仍然一两个标签就收进一行，
+              // 不再把摘要往下挤。
+              spacing: 6,
+              runSpacing: 4,
               children: <Widget>[
                 for (final tag in visibleTags) TagChip(label: tag),
                 if (overflow > 0)

@@ -1911,7 +1911,7 @@ class _NewEditorPageState extends State<NewEditorPage>
       context: context,
       title: '锁定这条笔记？',
       message: '锁定后正文加密保存，每次打开都要验证身份。'
-          '图片和附件不加密。',
+          '首行会作为标题保留在列表里，方便查找；图片和附件不加密。',
       confirmLabel: '锁定',
     );
     if (confirmed != true || !mounted) {
@@ -1970,6 +1970,9 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     _currentNote = _currentNote.copyWith(
       locked: locked,
+      // 锁定时把正文首行留成明文标题（列表靠它认出是哪条）；解锁后
+      // 正文本身已明文，标题副本清掉。
+      title: locked ? Note.deriveLockedTitle(_currentNote.body) : '',
       updated: DateTime.now(),
     );
     await widget.repository.upsert(_currentNote);

@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show HapticFeedback, MissingPluginException, PlatformException;
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -20,13 +18,11 @@ import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
 import '../ui/app_empty_state.dart';
 import '../ui/app_icon_button.dart';
-import '../ui/attachment_preview_page.dart';
 import '../ui/content_frame.dart';
 import '../ui/note_actions.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
-import '../util/attachment_viewer.dart';
 import '../util/share.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
@@ -122,29 +118,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
         return;
       }
-      // 其他 App「用其他应用打开」的文件：PDF / 纯文本在应用内预览；
-      // Office 等交给系统查看器，没有查看器时给分享兜底。
+      // 其他 App「用其他应用打开 / 分享到小记」的文件：一律落成一条新小记
+      // 并直接打开详情，方便边看边记 —— 图片内联，其余（含 PDF）作附件卡片。
       final OpenedFile? openedFile = await consumeOpenedFile();
       if (openedFile != null) {
         if (!mounted) {
           return;
         }
-        if (AttachmentPreviewPage.supports(openedFile.path)) {
-          // 不 await：预览是独立页面，没必要把本次导入流程挂到它关闭为止，
-          // 否则预览期间再从别的 App 打开文件会消费不到。
-          unawaited(
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (BuildContext context) => AttachmentPreviewPage(
-                  fileName: openedFile.name,
-                  path: openedFile.path,
-                ),
-              ),
-            ),
-          );
-        } else {
-          await _openExternalFile(openedFile);
+        if (openedFile.error != null) {
+          showSnack(context, message: _importErrorMessage(openedFile));
+          return;
         }
+        await _importOpenedFile(openedFile);
         return;
       }
       final SharedContent? content = await consumeSharedContent();
@@ -179,68 +164,51 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 应用内预览不了的格式（Office / RTF / ODF 等）：交给系统查看器。
+  /// 把外部文件导入成一条新小记：图片内联，其余写进附件卡片。
   ///
-  /// 没有查看器时不静默失败：提示并给「分享」，让用户能把文件发到别的
-  /// 设备或应用里看。
-  Future<void> _openExternalFile(OpenedFile file) async {
-    String? failure;
-    try {
-      final bool handled = await openAttachmentWithSystemViewer(file.path);
-      if (!handled) {
-        _shareOpenedFile(file);
-        return;
-      }
-    } on PlatformException catch (error) {
-      if (error.code == 'no_viewer') {
-        _shareOpenedFile(file);
-        return;
-      }
-      failure = error.message ?? '没有可打开此文件的应用';
-    } on MissingPluginException {
-      _shareOpenedFile(file);
-      return;
-    } catch (error) {
-      failure = '打开失败：$error';
-    }
-    if (failure == null || !mounted) {
-      return;
-    }
-    showSnack(context, message: failure);
-  }
-
-  /// 没有查看器时的兜底：把刚打开的文件分享到其他应用。
-  void _shareOpenedFile(OpenedFile file) {
+  /// 附件卡片用 `[原文件名](assets/…)`：详情页会渲染成文件卡片，点开时
+  /// PDF / 文本走应用内预览，其余交给系统查看器（见新编辑页的附件处理）。
+  /// 文件名只作为展示文本，去掉会破坏 markdown 链接结构的方括号与换行。
+  Future<void> _importOpenedFile(OpenedFile file) async {
+    final DateTime now = DateTime.now();
+    final String id = Note.generateId(now);
+    final String relative = await _repo.store.importAttachment(
+      noteId: id,
+      sourcePath: file.path,
+    );
+    final String body = file.isImage
+        ? '![]($relative)'
+        : '[${_attachmentLabel(file.name)}]($relative)';
+    final Note note = Note(id: id, created: now, updated: now, body: body);
+    await _repo.upsert(note);
     if (!mounted) {
       return;
     }
-    showSnack(
-      context,
-      message: '没有可打开此文件的应用',
-      action: SnackBarAction(
-        label: '分享',
-        onPressed: () async {
-          try {
-            final bool handled = await shareAttachmentWithSystem(file.path);
-            if (!handled) {
-              throw PlatformException(code: 'unsupported');
-            }
-          } on PlatformException catch (error) {
-            if (mounted) {
-              showSnack(context, message: error.message ?? '分享失败');
-            }
-          } on MissingPluginException {
-            if (mounted) {
-              showSnack(context, message: '当前平台不支持分享附件');
-            }
-          } catch (error) {
-            if (mounted) {
-              showSnack(context, message: '分享失败：$error');
-            }
-          }
-        },
-      ),
-    );
+    await _openEditor(note);
+    if (mounted) {
+      showSnack(
+        context,
+        message: file.isImage ? '已导入图片到新小记' : '已作为附件保存到新小记',
+      );
+    }
+  }
+
+  /// 附件卡片的展示名：去掉 markdown 链接里的保留字符与换行。
+  String _attachmentLabel(String name) {
+    final String cleaned = name.replaceAll(RegExp(r'[\[\]\r\n]'), ' ').trim();
+    return cleaned.isEmpty ? '附件' : cleaned;
+  }
+
+  /// 原生侧导入失败时的提示文案。
+  String _importErrorMessage(OpenedFile file) {
+    switch (file.error) {
+      case 'too_large':
+        return '「${file.name}」超过 200 MB，未导入';
+      case 'copy_failed':
+        return '「${file.name}」读取失败，未导入';
+      default:
+        return '「${file.name}」导入失败';
+    }
   }
 
   void _onShortcutNewNote() {
@@ -341,8 +309,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 列表侧只是少了需要正文的「复制文本 / 历史版本」。
     final String firstLine =
         note.locked ? '' : plainSummary(note.body).split('\n').first.trim();
-    final String menuTitle =
-        note.locked ? '已锁定' : (firstLine.isEmpty ? '（无正文）' : firstLine);
+    // 锁定笔记用明文标题，找到目标后不必先解锁才知道是哪条。
+    final String menuTitle = note.locked
+        ? (note.title.isEmpty ? '已锁定' : note.title)
+        : (firstLine.isEmpty ? '（无正文）' : firstLine);
     final action = await showXiaojiActionSheet<String>(
       context: context,
       title: menuTitle,
@@ -386,11 +356,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /// 从列表直接锁定：与编辑页「锁定」同一套语义（正文加密，附件不加密）。
+  ///
+  /// 同时把正文首行留成明文标题：列表只显示标题与标签，正文和缩略图
+  /// 都不出现，既保留私密性，又不用逐个解锁才能认出是哪条。
   Future<void> _lockNote(Note note) async {
     final bool? confirmed = await showXiaojiConfirmSheet(
       context: context,
       title: '锁定这条笔记？',
-      message: '锁定后正文加密保存，每次打开都要验证身份。图片和附件不加密。',
+      message: '锁定后正文加密保存，每次打开都要验证身份。'
+          '首行会作为标题保留在列表里，方便查找；图片和附件不加密。',
       confirmLabel: '锁定',
     );
     if (confirmed != true || !mounted) {
@@ -401,7 +375,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
     try {
-      await _repo.upsert(note.copyWith(locked: true, updated: DateTime.now()));
+      await _repo.upsert(note.copyWith(
+        locked: true,
+        title: Note.deriveLockedTitle(note.body),
+        updated: DateTime.now(),
+      ));
       if (mounted) {
         showSnack(context, message: '已锁定，正文已加密保存');
       }
@@ -425,7 +403,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       final String plain = await _repo.store.readNoteBody(note);
       await _repo.upsert(
-        note.copyWith(body: plain, locked: false, updated: DateTime.now()),
+        // 正文已明文落盘，明文标题不再需要，清掉避免残留副本。
+        note.copyWith(
+          body: plain,
+          locked: false,
+          title: '',
+          updated: DateTime.now(),
+        ),
       );
       if (mounted) {
         showSnack(context, message: '已取消锁定');

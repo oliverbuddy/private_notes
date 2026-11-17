@@ -662,7 +662,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         item(
                           Icons.lock_outline_rounded,
                           '锁定笔记',
-                          '密文只在本机可解密；导出 zip 默认不含锁定笔记与「回收站」。',
+                          '正文密文只在本机可解密，标题与标签为明文以便查找；'
+                              '导出 zip 默认不含锁定笔记与「回收站」。',
                         ),
                       ],
                     ),

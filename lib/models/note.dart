@@ -14,6 +14,7 @@ class Note {
     this.tags = const <String>[],
     this.pinned = false,
     this.locked = false,
+    this.title = '',
     this.body = '',
   });
 
@@ -34,6 +35,14 @@ class Note {
   /// 正文是否加密（单篇锁定）。
   final bool locked;
 
+  /// 锁定笔记的**明文标题**（正文首行，锁定时生成）。
+  ///
+  /// 正文整体加密后列表里只剩空串，用户没法认出是哪一条；这里把首行
+  /// 单独留在 frontmatter 里（与标签、时间一样属于元信息），列表显示
+  /// 「标题 + 锁图标」，正文仍然完全不可见。未锁定的笔记恒为空串，
+  /// 取消锁定时会清掉，避免正文已经明文了还留一份副本。
+  final String title;
+
   /// 原始 markdown 正文（不含 frontmatter）。
   final String body;
 
@@ -44,6 +53,7 @@ class Note {
     List<String>? tags,
     bool? pinned,
     bool? locked,
+    String? title,
     String? body,
   }) {
     return Note(
@@ -53,6 +63,7 @@ class Note {
       tags: tags ?? this.tags,
       pinned: pinned ?? this.pinned,
       locked: locked ?? this.locked,
+      title: title ?? this.title,
       body: body ?? this.body,
     );
   }
@@ -73,6 +84,8 @@ class Note {
       ..write('updated: ${formatIsoLocal(updated)}\n')
       ..write('tags: ${tags.join(', ')}\n')
       ..write(pinned ? 'pinned: true\n' : 'pinned: false\n')
+      // 只有锁定笔记才写明文标题：普通笔记的标题就是首行，不需要副本。
+      ..write(title.isNotEmpty ? 'title: $title\n' : '')
       // 只在锁定笔记上写锁定字段：普通笔记的文件保持原样，不制造
       // 无意义的 diff（用户可能在「文件」App 里同步/比对）。
       ..write(locked ? 'locked: true\n' : '')
@@ -147,8 +160,55 @@ class Note {
       tags: parseTags(fields['tags'] ?? ''),
       pinned: (fields['pinned'] ?? 'false').toLowerCase() == 'true',
       locked: (fields['locked'] ?? 'false').toLowerCase() == 'true',
+      // 锁定笔记的明文标题；旧数据没有这个字段时为空，列表回落到「已锁定」。
+      title: (fields['title'] ?? '').trim(),
       body: body,
     );
+  }
+
+  /// 从正文首行生成锁定笔记的明文标题。
+  ///
+  /// 剥掉标题/列表/引用/图片等 markdown 记号，只留可读文字，最多 60 字。
+  /// 整篇没有文字（例如只有一张图）时给「锁定笔记」，避免列表出现空白。
+  static String deriveLockedTitle(String body) {
+    for (final String raw in body.split('\n')) {
+      final String line = _plainTitleLine(raw);
+      if (line.isNotEmpty) {
+        return line.length > 60 ? '${line.substring(0, 60)}…' : line;
+      }
+    }
+    return '锁定笔记';
+  }
+
+  /// 把一行 markdown 压成纯文本；没有可读文字时返回空串。
+  static String _plainTitleLine(String raw) {
+    var line = raw.trim();
+    if (line.isEmpty) {
+      return '';
+    }
+    // 代码围栏、分隔线、表格分隔行都不算正文。
+    if (line.startsWith('```') || RegExp(r'^[-*_]{3,}$').hasMatch(line)) {
+      return '';
+    }
+    line = line.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
+    line = line.replaceFirst(RegExp(r'^>\s*'), '');
+    line = line.replaceFirst(RegExp(r'^[-*+]\s+(\[[ xX]\]\s*)?'), '');
+    line = line.replaceFirst(RegExp(r'^\d+[.)]\s+'), '');
+    // 图片先于链接处理，否则 `![](…)` 会剩下一个 `!`。
+    line = line.replaceAllMapped(
+      RegExp(r'!\[([^\]]*)\]\([^)]*\)'),
+      (Match match) {
+        final String alt = match.group(1)!.trim();
+        return alt.isEmpty ? '[图片]' : alt;
+      },
+    );
+    line = line.replaceAllMapped(
+      RegExp(r'\[([^\]]*)\]\([^)]*\)'),
+      (Match match) => match.group(1) ?? '',
+    );
+    // 行内强调记号（**、_、~~、`、==）对标题没有意义。
+    line = line.replaceAll(RegExp(r'[*_~`=]+'), '');
+    return line.trim();
   }
 
   /// 标签规范化：所有入口（编辑、重命名、合并、读盘）共用同一套规则，

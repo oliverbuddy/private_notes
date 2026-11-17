@@ -393,6 +393,9 @@ abstract final class AppFontSize {
   static const double badge = 12;
   static const double badgeLg = 12;
   static const double caption = 12;
+
+  /// 标签胶囊：比说明文字再小一档，读成「行内标记」而不是按钮。
+  static const double tag = 11;
   static const double meta = 12;
   static const double label = 14;
   static const double labelLg = 14;

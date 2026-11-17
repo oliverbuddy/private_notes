@@ -6,12 +6,12 @@ import 'tag_palette.dart';
 /// 标签胶囊（`#标签`）。
 ///
 /// 列表卡片、详情页底部标签栏共用这一个规格：4 圆角、0.5 描边、
-/// 12 号中等字重。颜色由 [TagPalette] 按标签名稳定生成 —— 同一个标签
+/// 11 号中等字重。颜色由 [TagPalette] 按标签名稳定生成 —— 同一个标签
 /// 在列表和详情里颜色一致，不同标签颜色不同。
 ///
-/// 尺寸按主流笔记（语雀/滴答）的「行内标记」规格收窄：高 20、左右 6、
-/// 底色只留很淡的一层色相 —— 之前 22 高 + 16% 色底在白卡上像按钮，
-/// 比正文还抢眼（用户反馈「标签背景太大太突兀」）。
+/// 尺寸按主流笔记（语雀/滴答）的「行内标记」规格收窄：高 18、左右 5、
+/// 底色只留很淡的一层色相 —— 之前 22 高 / 20 高 + 16% / 10% 色底在白卡上
+/// 仍像按钮，比正文还抢眼（用户反馈「标签背景太大太突兀」）。
 class TagChip extends StatelessWidget {
   const TagChip({super.key, required this.label, this.isOverflow = false});
 
@@ -25,10 +25,10 @@ class TagChip extends StatelessWidget {
     final colors = AppColors.of(context);
     final TagTone tone = TagPalette.toneFor(label, colors);
     return Container(
-      // 用最小高度而不是固定 20：系统字体放大到 1.5 以上时，固定高会把
+      // 用最小高度而不是固定 18：系统字体放大到 1.5 以上时，固定高会把
       // 文字裁掉；这里让 chip 跟着字号长高，正常字号下观感不变。
-      constraints: const BoxConstraints(minHeight: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      constraints: const BoxConstraints(minHeight: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
         color: isOverflow ? colors.accentBg : tone.background,
         borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -48,9 +48,9 @@ class TagChip extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: AppFontSize.caption,
+            fontSize: AppFontSize.tag,
             height: 1,
-            letterSpacing: 0.1,
+            letterSpacing: 0,
             fontWeight: AppWeight.medium,
             color: isOverflow ? colors.secondary : tone.foreground,
           ),

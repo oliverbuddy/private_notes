@@ -114,6 +114,64 @@ void main() {
     expect(await consumeOpenedFile(), isNull);
   });
 
+  test('打开图片：标记为内联图片', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeOpenedFile') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'name': '照片.jpg',
+        'path': '/cache/open-2-照片.jpg',
+        'mime': 'image/jpeg',
+        'kind': 'image',
+      };
+    });
+
+    final OpenedFile? opened = await consumeOpenedFile();
+
+    expect(opened, isNotNull);
+    expect(opened!.isImage, isTrue);
+    expect(opened.path, contains('cache/open-'));
+  });
+
+  test('打开文件：其他类型按附件处理', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeOpenedFile') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'name': '素材.zip',
+        'path': '/cache/open-3-素材.zip',
+        'mime': 'application/zip',
+        'kind': 'file',
+      };
+    });
+
+    final OpenedFile? opened = await consumeOpenedFile();
+
+    expect(opened, isNotNull);
+    expect(opened!.isImage, isFalse);
+    expect(opened.name, '素材.zip');
+  });
+
+  test('打开文件：体积超限的原因透传给界面', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeOpenedFile') {
+        return null;
+      }
+      return <Object?, Object?>{'name': '大视频.mp4', 'error': 'too_large'};
+    });
+
+    final OpenedFile? opened = await consumeOpenedFile();
+
+    expect(opened, isNotNull);
+    expect(opened!.error, 'too_large');
+    expect(opened.path, isEmpty);
+  });
+
   test('分享文本：仍按原有通道解析', () async {
     runAsAndroid();
     mockChannel((MethodCall call) async {

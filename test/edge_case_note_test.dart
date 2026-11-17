@@ -276,5 +276,43 @@ void main() {
       expect(next.body, note.body);
       expect(next.pinned, isFalse);
     });
+
+    test('锁定笔记的明文标题能往返', () {
+      final note = Note(
+        id: '20261031-0912-a1b2',
+        created: DateTime(2026, 10, 31, 9, 12),
+        updated: DateTime(2026, 10, 31, 9, 12),
+        locked: true,
+        title: '会议记录',
+        body: 'XIAOJI-LOCK-1:abc',
+      );
+      final decoded = Note.decode(note.encode())!;
+      expect(decoded.locked, isTrue);
+      expect(decoded.title, '会议记录');
+    });
+
+    test('未锁定的笔记不写 title 字段', () {
+      final note = Note(
+        id: '20261031-0912-a1b2',
+        created: DateTime(2026, 10, 31, 9, 12),
+        updated: DateTime(2026, 10, 31, 9, 12),
+        body: '普通正文',
+      );
+      expect(note.encode(), isNot(contains('title:')));
+    });
+
+    test('锁定标题剥离 markdown 记号并取首个有文字的行', () {
+      expect(
+        Note.deriveLockedTitle('# 周五复盘\n\n- [x] 完成发布\n其余'),
+        '周五复盘',
+      );
+      expect(Note.deriveLockedTitle('![](assets/a/1.jpg)'), '[图片]');
+      expect(Note.deriveLockedTitle('   \n\n'), '锁定笔记');
+      expect(
+        Note.deriveLockedTitle('**加粗**的 `代码` 与 [链接](https://a.b)'),
+        '加粗的 代码 与 链接',
+      );
+      expect(Note.deriveLockedTitle('长' * 80).length, 61, reason: '60 字 + 省略号');
+    });
   });
 }

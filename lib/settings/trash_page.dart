@@ -229,8 +229,9 @@ class _TrashTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
-    final title =
-        entry.locked ? '已锁定' : (entry.title.isEmpty ? '（无内容）' : entry.title);
+    final title = entry.locked
+        ? (entry.title.isEmpty ? '已锁定' : entry.title)
+        : (entry.title.isEmpty ? '（无内容）' : entry.title);
     final detail = <String>[
       formatListTime(entry.deletedAt),
       if (entry.legacyFile) '附件已丢失' else if (entry.hasAssets) '含附件',
