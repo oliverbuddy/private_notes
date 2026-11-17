@@ -3335,11 +3335,23 @@ class _NewEditorPageState extends State<NewEditorPage>
   }
 
   Stylesheet _buildStylesheet(AppColors colors, double contentWidth) {
-    // 手机端沿用精读字阶（24/20/16）。
-    const double h1Size = AppFontSize.titleLg;
-    const double h2Size = AppFontSize.heading;
-    const double h3Size = AppFontSize.bodyLg;
+    // 详情页标题字阶：26 / 21 / 18 / 16.5 / 16 / 16，字重 700/700/600/600/600/500。
+    //
+    // 之前 H3 与正文同为 16 号，中文正文又是 16/1.6，H3 只剩一点字重差，
+    // 暗色主题下几乎和正文分不出来（用户反馈）。参考语雀 / Typora 的
+    // 「标题靠字号跳档，正文靠行距」：H3 至少比正文大一档，H1/H2 用 700，
+    // H4–H6 才退到字重与颜色区分。字号不再从 AppFontSize 取：正文 16 是
+    // 全局字阶，标题需要文档级的独立比例。
+    const double h1Size = 26;
+    const double h2Size = 21;
+    const double h3Size = 18;
+    const double h4Size = 16.5;
     const double paragraphHeight = 1.6;
+    // 深色主题下正文是 #E5E5E5，标题再亮一档：中文粗体在深底上的「厚度差」
+    // 不如浅底明显，靠亮度补一层层级（Typora 深色主题同做法）。
+    final bool darkMode = colors.page.computeLuminance() < 0.3;
+    final Color headingColor =
+        darkMode ? const Color(0xFFF2F3F5) : colors.text;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -3467,6 +3479,24 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.padding: const CascadingPadding.only(top: 0),
           },
         ),
+        StyleRule(
+          const BlockSelector('paragraph').after('header4'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 0),
+          },
+        ),
+        StyleRule(
+          const BlockSelector('paragraph').after('header5'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 0),
+          },
+        ),
+        StyleRule(
+          const BlockSelector('paragraph').after('header6'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 0),
+          },
+        ),
         // 列表项/待办：小间距，像语雀一样紧凑。
         // 有序列表标记对齐已核对：OrderedListItemComponent 用行文本同款
         // styleBuilder（inherit: false）+ 右对齐 OverflowBox 渲染编号，
@@ -3490,25 +3520,39 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.padding: const CascadingPadding.symmetric(vertical: 3),
           },
         ),
-        // 标题三档：21/18.5/16.5，行高 1.3。比正文 15.5 高 1.35/1.19/1.06 倍，
-        // 层级清楚但不占掉半屏。段前留白 24/18/14 逐级递减 —— 参考
-        // GitHub/语雀的「标题前留白明显大于段后」，一章开始时有呼吸感，
-        // 且不会把半屏吃掉。leadingDistribution.even 与正文保持一致。
+        // 段落后面紧跟列表/待办时补 4：段落本身没有底部段距，而列表
+        // 回到段落时又有 12 的顶部段距，不补会让「正文→列表」贴在一起，
+        // 前后不对称（语雀/Typora 都会在列表上方留一小段）。
+        StyleRule(
+          const BlockSelector('listItem').after('paragraph'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 4),
+          },
+        ),
+        StyleRule(
+          const BlockSelector('task').after('paragraph'),
+          (Document doc, DocumentNode node) => <String, dynamic>{
+            Styles.padding: const CascadingPadding.only(top: 4),
+          },
+        ),
+        // 标题六档：26/21/18/16.5/16/16，行高 1.28–1.45。
+        // 段前留白 30/24/20/16/14/12 逐级递减 —— 参考 GitHub/语雀的
+        // 「标题前留白明显大于段后」，一章开始时有呼吸感，又不会把半屏吃掉。
+        // leadingDistribution.even 与正文保持一致。
         StyleRule(
           const BlockSelector('header1'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontSize: h1Size,
-              fontWeight: AppWeight.semibold,
-              height: 1.3,
-              // 中文标题加字距会显得松散：收紧到 0.1，标题更「整」。
+              fontWeight: FontWeight.w700,
+              height: 1.28,
               letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text,
+              color: headingColor,
             ),
             Styles.padding: const CascadingPadding.only(
-              top: 24,
-              bottom: 8,
+              top: 30,
+              bottom: 10,
             ),
           },
         ),
@@ -3517,15 +3561,15 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontSize: h2Size,
-              fontWeight: AppWeight.semibold,
-              height: 1.3,
+              fontWeight: FontWeight.w700,
+              height: 1.32,
               letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text,
+              color: headingColor,
             ),
             Styles.padding: const CascadingPadding.only(
-              top: 18,
-              bottom: 6,
+              top: 24,
+              bottom: 8,
             ),
           },
         ),
@@ -3535,31 +3579,32 @@ class _NewEditorPageState extends State<NewEditorPage>
             Styles.textStyle: TextStyle(
               fontSize: h3Size,
               fontWeight: AppWeight.semibold,
-              height: 1.3,
+              height: 1.4,
               letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text,
+              color: headingColor,
             ),
             Styles.padding: const CascadingPadding.only(
-              top: 14,
-              bottom: 4,
+              top: 20,
+              bottom: 6,
             ),
           },
         ),
         // H4–H6：内核默认样式表只写到 H3，不补的话这三档在详情页与正文
         // 完全一样（列表摘要却按层级递减，两处看起来不是同一篇文档）。
-        // 字号已到正文下限，靠字重与颜色继续区分层级。
+        // H4 仍比正文大半档，H5/H6 已到正文下限，靠字重与颜色继续分层。
         StyleRule(
           const BlockSelector('header4'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
-              fontSize: AppFontSize.summary,
+              fontSize: h4Size,
               fontWeight: AppWeight.semibold,
-              height: 1.35,
+              height: 1.45,
+              letterSpacing: 0.1,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text,
+              color: headingColor,
             ),
-            Styles.padding: const CascadingPadding.only(top: 12, bottom: 4),
+            Styles.padding: const CascadingPadding.only(top: 16, bottom: 4),
           },
         ),
         StyleRule(
@@ -3567,12 +3612,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontSize: AppFontSize.summary,
-              fontWeight: AppWeight.medium,
-              height: 1.35,
+              fontWeight: AppWeight.semibold,
+              height: 1.45,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text,
+              color: headingColor.withValues(alpha: 0.88),
             ),
-            Styles.padding: const CascadingPadding.only(top: 10, bottom: 2),
+            Styles.padding: const CascadingPadding.only(top: 14, bottom: 4),
           },
         ),
         StyleRule(
@@ -3580,12 +3625,12 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: TextStyle(
               fontSize: AppFontSize.summary,
-              fontWeight: AppWeight.regular,
-              height: 1.35,
+              fontWeight: AppWeight.medium,
+              height: 1.45,
               leadingDistribution: TextLeadingDistribution.even,
-              color: colors.text.withValues(alpha: 0.72),
+              color: colors.secondary,
             ),
-            Styles.padding: const CascadingPadding.only(top: 8, bottom: 2),
+            Styles.padding: const CascadingPadding.only(top: 12, bottom: 4),
           },
         ),
         // 引用块：底色/圆角/竖条/内边距都由 [QuoteBlock] 画（见
@@ -3623,8 +3668,9 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: colors.divider,
               width: 0.8,
             ),
-            TableStyles.headerTextStyle: const TextStyle(
+            TableStyles.headerTextStyle: TextStyle(
               fontWeight: AppWeight.semibold,
+              color: colors.text,
             ),
             TableStyles.cellPadding: const CascadingPadding.symmetric(
               horizontal: 10,

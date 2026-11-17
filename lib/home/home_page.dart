@@ -144,7 +144,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           noteId: id,
           sourcePath: content.imagePath!,
         );
-        body = body.isEmpty ? '![]($relative)' : '$body\n\n![]($relative)';
+        // 与「打开方式」导入、编辑器内插图保持同一条规则：默认小图。
+        final String image = imageUrlWithSize(relative, ImageDisplaySize.small);
+        body = body.isEmpty ? '![]($image)' : '$body\n\n![]($image)';
       }
       final Note note = Note(id: id, created: now, updated: now, body: body);
       await _repo.upsert(note);
@@ -176,8 +178,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       noteId: id,
       sourcePath: file.path,
     );
+    // 图片按现有规则默认小图（与编辑器内插入图片一致）：新导入的图片
+    // 不该一上来就占满整屏，需要看细节时长按图片切「大图」。
     final String body = file.isImage
-        ? '![]($relative)'
+        ? '![](${imageUrlWithSize(relative, ImageDisplaySize.small)})'
         : '[${_attachmentLabel(file.name)}]($relative)';
     final Note note = Note(id: id, created: now, updated: now, body: body);
     await _repo.upsert(note);

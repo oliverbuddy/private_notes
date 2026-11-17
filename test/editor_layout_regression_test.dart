@@ -672,6 +672,44 @@ void main() {
       expect(body.style?.fontWeight, isNot(AppWeight.semibold));
     });
 
+    testWidgets('H1–H3 逐级递减且 H3 明显大于正文', (WidgetTester tester) async {
+      final NoteRepository repository =
+          await _createRepository(tester, 'xiaoji_heading_scale_');
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note(
+            'heading_scale',
+            '# 一级标题\n\n## 二级标题\n\n### 三级标题\n\n正文内容',
+          ),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final List<TextSpan> spans = collectSpans(tester);
+      double sizeOf(String text) {
+        return spans
+                .firstWhere(
+                  (TextSpan s) => s.text == text,
+                  orElse: () => const TextSpan(),
+                )
+                .style
+                ?.fontSize ??
+            0;
+      }
+
+      final double h1 = sizeOf('一级标题');
+      final double h2 = sizeOf('二级标题');
+      final double h3 = sizeOf('三级标题');
+      final double body = sizeOf('正文内容');
+      expect(h1, greaterThan(h2));
+      expect(h2, greaterThan(h3));
+      expect(h3, greaterThan(body), reason: 'H3 与正文同字号是这轮反馈的根因');
+      expect(h3 - body, greaterThanOrEqualTo(2),
+          reason: 'H3 至少比正文大一档，暗色主题下才分得出来');
+    });
+
     testWidgets('代码块：字号/行高/等宽与列表摘要同源', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_code_style_');

@@ -542,10 +542,18 @@ class MainActivity : FlutterActivity() {
     private fun handleOpenDocumentIntent(intent: Intent?) {
         // 分享图片走 handleShareIntent（可能同时带一段文字）；这里再处理
         // 一次会把同一张图导入两遍。
-        if (intent?.action == Intent.ACTION_SEND &&
-            intent.type?.startsWith("image/") == true
-        ) {
-            return
+        if (intent?.action == Intent.ACTION_SEND) {
+            val type = intent.type ?: ""
+            if (type.startsWith("image/")) {
+                return
+            }
+            // 带正文的文本分享同样由 handleShareIntent 建笔记；只有「纯文件」
+            // 分享（没有 EXTRA_TEXT）才在这里按附件导入，避免一条内容两条笔记。
+            val sharedText =
+                intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            if (type.startsWith("text/") && !sharedText.isNullOrBlank()) {
+                return
+            }
         }
         val uri = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
