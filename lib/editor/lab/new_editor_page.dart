@@ -2668,8 +2668,6 @@ class _NewEditorPageState extends State<NewEditorPage>
               children: <Widget>[
                 _buildHeader(colors, contentWidth),
                 Container(height: 0.5, color: colors.dividerStrong),
-                // 标签是笔记属性：放在顶栏下方，不占底部正文区。
-                _buildTagRow(contentWidth),
                 Expanded(
                   // 工具条是浮层，会盖住正文底部。工具条可见时给视口
                   // 让出它的高度（含安全区），键盘弹出时正文就停在工具条
@@ -2792,6 +2790,10 @@ class _NewEditorPageState extends State<NewEditorPage>
                     ),
                   ),
                 ),
+                // 标签是笔记属性：放在正文下方左侧，不覆盖正文。
+                // 键盘/子面板出现时整行收起，编辑时把高度全部还给正文。
+                if (imeInset == 0 && !_panelOpen)
+                  _buildTagFooter(colors, contentWidth),
               ],
             ),
             // 子菜单：铺在工具条下方（原键盘区域），工具条位置不动。
@@ -3048,58 +3050,75 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
   }
 
-  /// 标签属性行：放在顶栏下方，随页面固定，不压正文。
+  /// 标签属性行：贴在正文下方左侧。
   ///
-  /// 之前挂在页面底部：常驻占掉正文底部一条的高度，滚到文末时最后一行
-  /// 贴着标签，底部那一块也点不进光标（用户反馈「标签背后的区域遮挡了
-  /// 正文」）。标签本质是笔记属性（语雀/Notion 同款做法），放到顶栏下方
-  /// 既始终可见，又把整个底部还给正文与工具条。
+  /// 它是 [Expanded] 之外的独立一行，正文视口在它上方结束，所以不会再出现
+  /// 「标签压住正文」的问题；键盘/子面板出现时整行收起（见 build），编辑时
+  /// 不占任何高度。无标签时也不占位。
   ///
-  /// 展示规格与列表卡片一致（[TagChip]）；点整行任意位置（含标签右侧
-  /// 空白）都打开「编辑标签」弹层。
-  Widget _buildTagRow(double contentWidth) {
+  /// 视觉上沿用列表卡片同款 [TagChip]（同一标签颜色一致），左侧加一枚
+  /// 主题里标签入口同族的 `sell_outlined` 小图标，让这一行读成「笔记属性」
+  /// 而不是散落的胶囊；底部让出手势条安全区，不贴屏幕边。
+  ///
+  /// 点整行任意位置（含标签右侧空白）都打开「编辑标签」弹层。
+  Widget _buildTagFooter(AppColors colors, double contentWidth) {
     final List<String> tags = _currentNote.tags;
-    // 无标签时不占位：新增入口在工具栏的标签按钮，这里只展示已有标签。
     if (tags.isEmpty) {
       return const SizedBox.shrink();
     }
-    return ContentFrame(
-      maxWidth: contentWidth,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpace.page,
-          6,
-          AppSpace.page,
-          2,
-        ),
-        // 固定一行高：标签多了横向滚动，不换行把正文往下顶。
-        // width: infinity 必须给：Column 的 crossAxisAlignment 默认居中，
-        // 内容宽度只按标签占位时，只有一个标签会被整条居中（用户反馈）。
-        child: SizedBox(
-          width: double.infinity,
-          height: 22,
-          // 整行都可点：点空白与点 chip 走同一个动作（打开标签编辑），
-          // 横向拖动仍归滚动视图。
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _editTags,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: <Widget>[
-                  for (final tag in tags)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _editTags,
-                        child: TagChip(label: tag),
+    return Padding(
+      // SafeArea 是 bottom: false（底部高度供工具条/键盘使用），
+      // 手势条的安全区要这一行自己让出来。
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.viewPaddingOf(context).bottom,
+      ),
+      child: ContentFrame(
+        maxWidth: contentWidth,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.page,
+            8,
+            AppSpace.page,
+            10,
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.sell_outlined,
+                size: AppIcon.chip,
+                color: colors.tertiary,
+              ),
+              const SizedBox(width: AppSpace.sm),
+              // 固定一行高：标签多了横向滚动，不换行把正文往上顶。
+              Expanded(
+                child: SizedBox(
+                  height: 24,
+                  // 整行都可点：点空白与点 chip 走同一个动作（打开标签编辑），
+                  // 横向拖动仍归滚动视图。
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _editTags,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: <Widget>[
+                          for (final tag in tags)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: _editTags,
+                                child: TagChip(label: tag),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),

@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart'
+    show HapticFeedback, MissingPluginException, PlatformException;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -19,11 +20,13 @@ import '../theme/app_theme.dart';
 import '../ui/action_sheet.dart';
 import '../ui/app_empty_state.dart';
 import '../ui/app_icon_button.dart';
+import '../ui/attachment_preview_page.dart';
 import '../ui/content_frame.dart';
 import '../ui/note_actions.dart';
 import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
+import '../util/attachment_viewer.dart';
 import '../util/share.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
@@ -119,6 +122,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
         return;
       }
+      // 其他 App「用其他应用打开」的文件：PDF / 纯文本在应用内预览；
+      // Office 等交给系统查看器，没有查看器时给分享兜底。
+      final OpenedFile? openedFile = await consumeOpenedFile();
+      if (openedFile != null) {
+        if (!mounted) {
+          return;
+        }
+        if (AttachmentPreviewPage.supports(openedFile.path)) {
+          // 不 await：预览是独立页面，没必要把本次导入流程挂到它关闭为止，
+          // 否则预览期间再从别的 App 打开文件会消费不到。
+          unawaited(
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (BuildContext context) => AttachmentPreviewPage(
+                  fileName: openedFile.name,
+                  path: openedFile.path,
+                ),
+              ),
+            ),
+          );
+        } else {
+          await _openExternalFile(openedFile);
+        }
+        return;
+      }
       final SharedContent? content = await consumeSharedContent();
       if (content == null || !mounted) {
         return;
@@ -149,6 +177,70 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } finally {
       _importingShare = false;
     }
+  }
+
+  /// 应用内预览不了的格式（Office / RTF / ODF 等）：交给系统查看器。
+  ///
+  /// 没有查看器时不静默失败：提示并给「分享」，让用户能把文件发到别的
+  /// 设备或应用里看。
+  Future<void> _openExternalFile(OpenedFile file) async {
+    String? failure;
+    try {
+      final bool handled = await openAttachmentWithSystemViewer(file.path);
+      if (!handled) {
+        _shareOpenedFile(file);
+        return;
+      }
+    } on PlatformException catch (error) {
+      if (error.code == 'no_viewer') {
+        _shareOpenedFile(file);
+        return;
+      }
+      failure = error.message ?? '没有可打开此文件的应用';
+    } on MissingPluginException {
+      _shareOpenedFile(file);
+      return;
+    } catch (error) {
+      failure = '打开失败：$error';
+    }
+    if (failure == null || !mounted) {
+      return;
+    }
+    showSnack(context, message: failure);
+  }
+
+  /// 没有查看器时的兜底：把刚打开的文件分享到其他应用。
+  void _shareOpenedFile(OpenedFile file) {
+    if (!mounted) {
+      return;
+    }
+    showSnack(
+      context,
+      message: '没有可打开此文件的应用',
+      action: SnackBarAction(
+        label: '分享',
+        onPressed: () async {
+          try {
+            final bool handled = await shareAttachmentWithSystem(file.path);
+            if (!handled) {
+              throw PlatformException(code: 'unsupported');
+            }
+          } on PlatformException catch (error) {
+            if (mounted) {
+              showSnack(context, message: error.message ?? '分享失败');
+            }
+          } on MissingPluginException {
+            if (mounted) {
+              showSnack(context, message: '当前平台不支持分享附件');
+            }
+          } catch (error) {
+            if (mounted) {
+              showSnack(context, message: '分享失败：$error');
+            }
+          }
+        },
+      ),
+    );
   }
 
   void _onShortcutNewNote() {

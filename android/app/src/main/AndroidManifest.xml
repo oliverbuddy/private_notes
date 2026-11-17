@@ -109,6 +109,97 @@
                     android:mimeType="application/octet-stream"
                     android:pathPattern=".*\\.md" />
             </intent-filter>
+            <!-- 「用其他应用打开」常见文档：PDF 与纯文本在应用内预览（PDF 用
+                 pdfrx，文本直接读），Office 等交给系统查看器，没有查看器时
+                 在应用内给分享兜底（详见 AttachmentPreviewPage）。
+                 各家 App 给的 MIME 不统一，这里按「标准 MIME + 后缀」两套声明：
+                 标准 MIME 直接匹配；文件管理器/微信给 octet-stream 甚至 */* 时，
+                 再按路径后缀兜底。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/msword" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.ms-excel" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="application/vnd.ms-powerpoint" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+                <data android:mimeType="application/rtf" />
+                <data android:mimeType="application/vnd.oasis.opendocument.text" />
+                <data android:mimeType="application/vnd.oasis.opendocument.spreadsheet" />
+                <data android:mimeType="application/vnd.oasis.opendocument.presentation" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.pdf" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.txt" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.csv" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.json" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.xml" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.html" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.htm" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.log" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.doc" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.docx" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.xls" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.xlsx" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.ppt" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.pptx" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.rtf" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.odt" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.ods" />
+                <data android:mimeType="application/octet-stream" android:pathPattern=".*\\.odp" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.pdf" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.txt" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.csv" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.json" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.xml" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.html" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.htm" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.log" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.doc" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.docx" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.xls" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.xlsx" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.ppt" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.pptx" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.rtf" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.odt" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.ods" />
+                <data android:mimeType="*/*" android:pathPattern=".*\\.odp" />
+            </intent-filter>
+            <!-- 少部分 App 用「分享」而不是「打开」传 PDF。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data
+                    android:scheme="content"
+                    android:mimeType="application/octet-stream"
+                    android:pathPattern=".*\\.pdf" />
+            </intent-filter>
             <!-- 长按图标弹出的快捷方式 -->
             <meta-data
                 android:name="android.app.shortcuts"

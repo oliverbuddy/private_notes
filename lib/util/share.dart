@@ -59,6 +59,48 @@ Future<OpenedMarkdown?> consumeOpenedMarkdown() async {
   }
 }
 
+/// 其他 App 「用其他应用打开」送进来、需要应用内预览的文件。
+///
+/// 目前只有 PDF：原生侧已把文件拷到应用缓存目录，[path] 是可直接读的
+/// 本地绝对路径，不依赖外部 content:// 的临时授权。
+class OpenedFile {
+  const OpenedFile({required this.name, required this.path});
+
+  /// 文件名（含扩展名）。
+  final String name;
+
+  /// 缓存目录下的本地绝对路径。
+  final String path;
+}
+
+/// 读取一次「用其他应用打开」的文件（读后即清空）。
+///
+/// 冷启动与回到前台各调用一次；没有待打开文件时返回 null。
+Future<OpenedFile?> consumeOpenedFile() async {
+  if (!PlatformFeatures.isAndroid) {
+    return null;
+  }
+  try {
+    final Map<Object?, Object?>? map = await _channel
+        .invokeMethod<Map<Object?, Object?>>('consumeOpenedFile');
+    if (map == null) {
+      return null;
+    }
+    final String? path = map['path'] as String?;
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+    return OpenedFile(
+      name: (map['name'] as String?) ?? '附件.pdf',
+      path: path,
+    );
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
+
 /// 读取一次「分享到小记」的内容（读后即清空）。
 ///
 /// 冷启动与回到前台时各调用一次：系统只会把内容放在启动 Intent 里，

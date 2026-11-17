@@ -36,6 +36,9 @@ class MainActivity : FlutterActivity() {
     /** 其他 App「用其他应用打开」送进来的 Markdown：{name, text}，等 Dart 取走。 */
     private var pendingOpenMarkdown: Map<String, Any?>? = null
 
+    /** 其他 App「用其他应用打开」送进来的 PDF：{name, path}（已拷到缓存），等 Dart 取走。 */
+    private var pendingOpenFile: Map<String, String>? = null
+
     private lateinit var backupBridge: BackupBridge
     private lateinit var securityBridge: SecurityBridge
 
@@ -44,7 +47,7 @@ class MainActivity : FlutterActivity() {
         pendingAction = intent?.getStringExtra(EXTRA_ACTION)
         super.onCreate(savedInstanceState)
         handleShareIntent(intent)
-        handleOpenMarkdownIntent(intent)
+        handleOpenDocumentIntent(intent)
         // 手势导航：页面已铺到系统栏后面，但导航栏底色默认是主题黑，
         // 底部会露出一条黑边。这里把导航栏背景设为透明，让页面底色透上来；
         // 同时关掉系统给导航栏加的对比度遮罩（否则仍是半透明灰条）。
@@ -109,6 +112,10 @@ class MainActivity : FlutterActivity() {
                     "consumeOpenedMarkdown" -> {
                         result.success(pendingOpenMarkdown)
                         pendingOpenMarkdown = null
+                    }
+                    "consumeOpenedFile" -> {
+                        result.success(pendingOpenFile)
+                        pendingOpenFile = null
                     }
                     "zipTree" -> backupBridge.zipTree(
                         call.argument<String>("sourceRoot") ?: "",
@@ -462,7 +469,7 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleShareIntent(intent)
-        handleOpenMarkdownIntent(intent)
+        handleOpenDocumentIntent(intent)
         val action = intent.getStringExtra(EXTRA_ACTION) ?: return
         val target = channel
         if (target != null) {
@@ -520,18 +527,115 @@ class MainActivity : FlutterActivity() {
 
     /**
      * 处理「用其他应用打开」：微信 / 文件管理器点 .md 时把内容读出来，
-     * 存到 [pendingOpenMarkdown]，等 Dart 侧启动或回到前台时取走。
+     * 存到 [pendingOpenMarkdown]；点 PDF 时拷到缓存目录，存到
+     * [pendingOpenFile]，等 Dart 侧启动或回到前台时取走。
      *
-     * 优先按 URI 读成字符串而不是长期持有 content:// 授权：微信的授权
-     * 是一次性的临时读权限，进程重启后就失效了。
+     * Markdown 优先按 URI 读成字符串而不是长期持有 content:// 授权：微信的
+     * 授权是一次性的临时读权限，进程重启后就失效了。PDF 没法当文本读，
+     * 先拷一份本地副本，交给 pdfrx 预览。
      */
-    private fun handleOpenMarkdownIntent(intent: Intent?) {
+    private fun handleOpenDocumentIntent(intent: Intent?) {
         val uri = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             else -> null
         } ?: return
-        readMarkdownUri(uri)?.let { pendingOpenMarkdown = it }
+        // 原有行为不变：.md / .markdown 仍导入成一条笔记。
+        readMarkdownUri(uri)?.let {
+            pendingOpenMarkdown = it
+            return
+        }
+        val name = displayNameOf(uri)
+        // 后缀和 MIME 都认：部分 provider 给的显示名没有扩展名，只靠
+        // 文件名的后缀判断会漏掉。
+        val extension = name.substringAfterLast('.', "").lowercase()
+        val mime = (intent?.type ?: contentResolver.getType(uri))?.lowercase()
+        val supported = extension in OPENABLE_EXTENSIONS ||
+            (mime != null && mime in OPENABLE_MIME_TYPES)
+        if (!supported) {
+            return
+        }
+        // 没有扩展名时按 MIME 补一个：Dart 侧靠扩展名决定预览方式。
+        val displayName = if (extension in OPENABLE_EXTENSIONS) {
+            name
+        } else {
+            "附件.${extensionForMime(mime) ?: "bin"}"
+        }
+        val file = copyUriToCache(uri, displayName) ?: return
+        pendingOpenFile = mapOf("name" to displayName, "path" to file.absolutePath)
+    }
+
+    /**
+     * 把外部文档拷进应用缓存，返回可长期读取的本地文件。
+     *
+     * 不直接把 content:// 交给预览页/系统查看器：微信等 App 给的是一次性
+     * 临时读权限，进程重启或页面重建后就失效；缓存副本也避免长期持有外部授权。
+     */
+    private fun copyUriToCache(uri: Uri, name: String): File? {
+        val declaredSize = sizeOf(uri)
+        if (declaredSize != null && declaredSize > MAX_OPEN_FILE_BYTES) {
+            Log.w("XiaojiOpen", "文件过大，跳过预览：$name（$declaredSize 字节）")
+            return null
+        }
+        return try {
+            val safeName = name.substringAfterLast('/').ifBlank { "attachment.pdf" }
+            val target = File(cacheDir, "open-${System.currentTimeMillis()}-$safeName")
+            val input = (
+                if (uri.scheme == "file") {
+                    uri.path?.let { path ->
+                        File(path).takeIf { it.exists() }?.inputStream()
+                    }
+                } else {
+                    contentResolver.openInputStream(uri)
+                }
+                ) ?: return null
+            input.use { source ->
+                target.outputStream().use { sink -> source.copyTo(sink) }
+            }
+            if (target.length() == 0L || target.length() > MAX_OPEN_FILE_BYTES) {
+                target.delete()
+                Log.w("XiaojiOpen", "文件为空或过大：$name")
+                null
+            } else {
+                target
+            }
+        } catch (error: Exception) {
+            Log.w("XiaojiOpen", "复制外部文件失败：$name", error)
+            null
+        }
+    }
+
+    /** 查询外部文件大小；部分 provider 不提供 SIZE 时返回 null。 */
+    private fun sizeOf(uri: Uri): Long? {
+        return try {
+            if (uri.scheme == "file") {
+                uri.path?.let { path ->
+                    File(path).takeIf { it.exists() }?.length()
+                }
+            } else {
+                contentResolver.query(
+                    uri,
+                    arrayOf(OpenableColumns.SIZE),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (index >= 0 && !cursor.isNull(index)) {
+                            cursor.getLong(index)
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            Log.w("XiaojiOpen", "读取文件大小失败", error)
+            null
+        }
     }
 
     /** 读 Markdown 文件：扩展名必须是 .md/.markdown，返回 {name, text}。 */
@@ -609,6 +713,53 @@ class MainActivity : FlutterActivity() {
 
         /** 单篇导入的 Markdown 体积上限：超过这个值多半是误分享的大文件。 */
         private const val MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
+
+        /** 外部 PDF 预览的体积上限：更大的文件拷贝与渲染都太慢。 */
+        private const val MAX_OPEN_FILE_BYTES = 200L * 1024 * 1024
+
+        /** 「用其他应用打开」支持的后缀：PDF / 纯文本在应用内看，Office 等交给系统查看器。 */
+        private val OPENABLE_EXTENSIONS = setOf(
+            "pdf", "txt", "csv", "json", "xml", "html", "htm", "log",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "rtf", "odt", "ods", "odp",
+        )
+
+        /** 同上的 MIME 兜底：显示名没后缀时用它判断格式。 */
+        private val OPENABLE_MIME_TYPES = setOf(
+            "application/pdf",
+            "text/plain", "text/csv", "text/html", "text/xml",
+            "application/json", "application/xml",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/rtf",
+            "application/vnd.oasis.opendocument.text",
+            "application/vnd.oasis.opendocument.spreadsheet",
+            "application/vnd.oasis.opendocument.presentation",
+        )
+
+        private fun extensionForMime(mime: String?): String? = when (mime) {
+            "application/pdf" -> "pdf"
+            "text/plain" -> "txt"
+            "text/csv" -> "csv"
+            "text/html" -> "html"
+            "text/xml", "application/xml" -> "xml"
+            "application/json" -> "json"
+            "application/msword" -> "doc"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx"
+            "application/vnd.ms-excel" -> "xls"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> "xlsx"
+            "application/vnd.ms-powerpoint" -> "ppt"
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> "pptx"
+            "application/rtf" -> "rtf"
+            "application/vnd.oasis.opendocument.text" -> "odt"
+            "application/vnd.oasis.opendocument.spreadsheet" -> "ods"
+            "application/vnd.oasis.opendocument.presentation" -> "odp"
+            else -> null
+        }
 
         /** 取不到文件名时的兜底名字。 */
         private const val FALLBACK_MARKDOWN_NAME = "导入的笔记.md"

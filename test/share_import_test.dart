@@ -83,6 +83,37 @@ void main() {
     expect(called, isFalse);
   });
 
+  test('打开 PDF：解析出缓存路径与文件名', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeOpenedFile') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'name': '报告.pdf',
+        'path': '/data/user/0/com.xiaoji.xiaoji/cache/open-1-报告.pdf',
+      };
+    });
+
+    final OpenedFile? opened = await consumeOpenedFile();
+
+    expect(opened, isNotNull);
+    expect(opened!.name, '报告.pdf');
+    expect(opened.path, contains('cache/open-'));
+  });
+
+  test('打开 PDF：path 为空时不打开预览', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeOpenedFile') {
+        return null;
+      }
+      return <Object?, Object?>{'name': '报告.pdf', 'path': ''};
+    });
+
+    expect(await consumeOpenedFile(), isNull);
+  });
+
   test('分享文本：仍按原有通道解析', () async {
     runAsAndroid();
     mockChannel((MethodCall call) async {

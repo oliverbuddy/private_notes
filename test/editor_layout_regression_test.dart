@@ -374,7 +374,7 @@ void main() {
   });
 
   group('标签行', () {
-    testWidgets('标签在顶栏下方、不占正文底部；点标签行空白也能打开弹层',
+    testWidgets('标签在正文下方左侧；点标签行空白也能打开弹层',
         (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_tag_bar_');
@@ -397,15 +397,29 @@ void main() {
       final Finder chip = find.byType(TagChip);
       expect(chip, findsOneWidget, reason: '标签行要显示已有标签');
       final Rect chipRect = tester.getRect(chip);
-      // 标签挪到顶栏下方：它不再是页面底部的一条，正文可以一直用到屏幕
-      // 底部（用户反馈「底部标签占空间、遮挡正文」）。
+      // 标签回到底部左侧：正文视口在标签上方结束，不再占正文区域。
       final Rect bodyRect = tester.getRect(
         find.textContaining('正文一段', findRichText: true),
       );
       expect(
-        chipRect.bottom,
-        lessThan(bodyRect.top),
-        reason: '标签行必须在正文上方，不能压在正文底部',
+        chipRect.top,
+        greaterThan(bodyRect.bottom),
+        reason: '标签行要在正文下方，不能压住正文',
+      );
+      // 左侧的标签入口图标在 chip 之前，说明整行从左边开始排。
+      // 顶栏也有一个 sell 图标（22），这里按尺寸取标签行里那一枚（14）。
+      final Finder tagIcon = find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is Icon &&
+            widget.icon == Icons.sell_outlined &&
+            widget.size == AppIcon.chip,
+      );
+      expect(tagIcon, findsOneWidget);
+      final Rect iconRect = tester.getRect(tagIcon);
+      expect(
+        iconRect.right,
+        lessThanOrEqualTo(chipRect.left),
+        reason: '标签行要从左侧排起，图标在胶囊前面',
       );
       // 点 chip 右侧的空白：以前这里是死区（点不动），现在与点 chip 一样
       // 打开标签弹层。位置取 chip 右缘 +40，保证落在标签行内（宽屏时
@@ -508,11 +522,47 @@ void main() {
   });
 
   group('附件预览路由', () {
-    test('只有 PDF 走应用内预览', () {
+    test('PDF 与纯文本走应用内预览，Office 交给系统', () {
       expect(AttachmentPreviewPage.supports('/tmp/a.PDF'), isTrue);
       expect(AttachmentPreviewPage.supports('/tmp/a.pdf'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.txt'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.csv'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.json'), isTrue);
+      expect(AttachmentPreviewPage.supports('/tmp/a.log'), isTrue);
+      // 没有内置渲染能力：仍走系统查看器 / 分享兜底。
       expect(AttachmentPreviewPage.supports('/tmp/a.docx'), isFalse);
+      expect(AttachmentPreviewPage.supports('/tmp/a.xlsx'), isFalse);
       expect(AttachmentPreviewPage.supports('/tmp/a'), isFalse);
+    });
+
+    testWidgets('纯文本文件在应用内直接显示', (WidgetTester tester) async {
+      final Directory directory = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('xiaoji_preview_'),
+      ))!;
+      final File file = File('${directory.path}/a.txt');
+      await tester.runAsync(() => file.writeAsString('第一行\n第二行'));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: AttachmentPreviewPage(fileName: 'a.txt', path: file.path),
+        ),
+      );
+      // 文件读取走真实 IO：在 runAsync 里给事件循环机会完成，再 pump 重建。
+      for (int i = 0; i < 20; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+        if (find.byType(SelectableText).evaluate().isNotEmpty) {
+          break;
+        }
+      }
+
+      final SelectableText text = tester.widget<SelectableText>(
+        find.byType(SelectableText),
+      );
+      expect(text.data, '第一行\n第二行');
     });
   });
 
@@ -1127,6 +1177,9 @@ void main() {
         tester.widget<AppBar>(find.byType(AppBar)).backgroundColor,
         AppColors.dark.page,
       );
+      final AppBar appBar = tester.widget<AppBar>(find.byType(AppBar));
+      expect(appBar.title, isNull, reason: '预览页只查看，不再显示文件名标题');
+      expect(appBar.actions, isNull, reason: '右上角不放分享/外跳入口');
     });
   });
 }
