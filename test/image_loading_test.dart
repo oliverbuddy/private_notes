@@ -19,12 +19,14 @@ Future<void> _pumpFrames(WidgetTester tester, {int frames = 10}) async {
   }
 }
 
-/// 取出 ResizeImage 的解码宽度。
+/// 取出 ResizeImage 的解码宽度，并确认没有强制高度（否则会压扁比例）。
 int _resizeWidthOf(WidgetTester tester) {
   final Image image = tester.widget<Image>(find.byType(Image).first);
   final ImageProvider provider = image.image;
   expect(provider, isA<ResizeImage>(), reason: '本地图片必须带 cacheWidth 解码');
-  return (provider as ResizeImage).width!;
+  final ResizeImage resized = provider as ResizeImage;
+  expect(resized.height, isNull, reason: '缩略图只能限制宽度，保持原始宽高比');
+  return resized.width!;
 }
 
 void main() {

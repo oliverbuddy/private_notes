@@ -684,8 +684,8 @@ class _Thumbnail extends StatelessWidget {
         File(path),
         width: size,
         height: size,
+        // 只限制宽度，保持解码后的原始宽高比；同时限制高度会压扁图片。
         cacheWidth: decodeExtent,
-        cacheHeight: decodeExtent,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Container(
           width: size,

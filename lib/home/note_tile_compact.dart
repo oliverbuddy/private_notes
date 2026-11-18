@@ -164,8 +164,9 @@ class _CompactThumbnail extends StatelessWidget {
         File(path),
         width: size,
         height: size,
+        // 只限制宽度：同时给 cacheHeight 会把解码结果压成正方形，
+        // 再 cover 到方格就出现拉伸变形（用户反馈）。
         cacheWidth: decodeExtent,
-        cacheHeight: decodeExtent,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Container(
           width: size,
