@@ -30,7 +30,10 @@ class MainActivity : FlutterActivity() {
     private var pendingAction: String? = null
     private var channel: MethodChannel? = null
 
-    /** 其他 App 分享进来的内容，等 Dart 侧取走。 */
+    /**
+     * 其他 App 分享进来的内容，等 Dart 侧取走：
+     * `{text, items:[{kind,path,name}], skipped}`。
+     */
     private var pendingShare: Map<String, Any?>? = null
 
     /** 其他 App「用其他应用打开」送进来的 Markdown：{name, text}，等 Dart 取走。 */
@@ -480,15 +483,21 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * 系统分享导入：只接 ACTION_SEND 的文本与单张图片。
+     * 系统分享导入：文本、单张/多张图片，以及多选的文件。
      *
-     * 图片先 copy 到应用缓存目录，再交给 Dart 落到 `assets/<noteId>/`，
-     * 避免长期持有外部 content:// 授权。多图（SEND_MULTIPLE）暂不支持。
+     * 原生只负责把外部 URI 拷成本地缓存副本（避免长期持有外部 content://
+     * 临时授权），具体写成正文还是附件由 Dart 决定。ACTION_SEND_MULTIPLE
+     * 保持用户选择的顺序返回，Dart 按同样顺序排版。
      */
     private fun handleShareIntent(intent: Intent?) {
-        if (intent?.action != Intent.ACTION_SEND) {
-            return
+        when (intent?.action) {
+            Intent.ACTION_SEND -> handleSingleShare(intent)
+            Intent.ACTION_SEND_MULTIPLE -> handleMultipleShare(intent)
         }
+    }
+
+    /** 单条分享：文本 / 图片（图片可同时带一段文案）。 */
+    private fun handleSingleShare(intent: Intent) {
         // 少数 App 用 SEND + EXTRA_STREAM 传文件：命中 .md 就当「打开 Markdown」
         // 处理（图片分享的 stream 不是 md，这里会返回 null 继续走原逻辑）。
         val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
@@ -499,28 +508,118 @@ class MainActivity : FlutterActivity() {
             }
         }
         val type = intent.type ?: return
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            ?.toString()
+            ?.trim()
+            .orEmpty()
         if (type.startsWith("text/")) {
-            val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
-            if (!text.isNullOrBlank()) {
-                pendingShare = mapOf("type" to "text", "text" to text)
+            if (text.isNotEmpty()) {
+                pendingShare = sharePayload(text, emptyList(), 0)
             }
             return
         }
         if (type.startsWith("image/")) {
-            val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: return
-            val file = copySharedImageToCache(uri) ?: return
-            pendingShare = mapOf("type" to "image", "path" to file.absolutePath)
+            val uri = stream ?: return
+            val file = copySharedImageToCache(uri)
+            if (file == null) {
+                // 图片读取失败但还有文案：文案仍然要落成笔记，不能整条丢掉。
+                if (text.isNotEmpty()) {
+                    pendingShare = sharePayload(text, emptyList(), 1)
+                }
+                return
+            }
+            pendingShare = sharePayload(
+                text,
+                listOf(mapOf("kind" to "image", "path" to file.absolutePath)),
+                0,
+            )
         }
     }
 
-    private fun copySharedImageToCache(uri: Uri): File? {
+    /** 多选分享：图片内联、其他文件作附件，顺序与用户选择一致。 */
+    private fun handleMultipleShare(intent: Intent) {
+        val uris: List<Uri> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                .orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+        }
+        if (uris.isEmpty()) {
+            return
+        }
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            ?.toString()
+            ?.trim()
+            .orEmpty()
+        val items = mutableListOf<Map<String, String>>()
+        var skipped = 0
+        for (uri in uris) {
+            val name = displayNameOf(uri)
+            val mime = (contentResolver.getType(uri) ?: "").lowercase()
+            val extension = name.substringAfterLast('.', "").lowercase()
+            val isImage = mime.startsWith("image/") || extension in IMAGE_EXTENSIONS
+            if (isImage) {
+                val file = copySharedImageToCache(uri, name)
+                if (file == null) {
+                    skipped++
+                } else {
+                    items.add(mapOf("kind" to "image", "path" to file.absolutePath))
+                }
+            } else {
+                val file = copyUriToCache(uri, name)
+                if (file == null) {
+                    skipped++
+                } else {
+                    items.add(
+                        mapOf(
+                            "kind" to "file",
+                            "path" to file.absolutePath,
+                            "name" to name,
+                        ),
+                    )
+                }
+            }
+        }
+        if (items.isEmpty() && text.isEmpty()) {
+            return
+        }
+        pendingShare = sharePayload(text, items, skipped)
+    }
+
+    /** 统一分享结果结构，Dart 侧按同一个协议解析。 */
+    private fun sharePayload(
+        text: String,
+        items: List<Map<String, String>>,
+        skipped: Int,
+    ): Map<String, Any?> = mapOf(
+        "text" to text.ifEmpty { null },
+        "items" to items,
+        "skipped" to skipped,
+    )
+
+    /**
+     * 把分享进来的图片拷进缓存。
+     *
+     * [name] 用来保留真实扩展名（分享 PNG 时不要一律存成 .jpg）；
+     * 文件名带纳秒时间戳，连续多张也不会互相覆盖。
+     */
+    private fun copySharedImageToCache(uri: Uri, name: String? = null): File? {
         return try {
-            val target = File(cacheDir, "share-${System.currentTimeMillis()}.jpg")
+            val rawExtension =
+                name?.substringAfterLast('.', "")?.lowercase().orEmpty()
+            val extension = if (rawExtension in IMAGE_EXTENSIONS) rawExtension else "jpg"
+            val target = File(cacheDir, "share-${System.nanoTime()}.$extension")
             contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
-            target.takeIf { it.length() > 0 }
+            val copied = target.takeIf { it.length() > 0 }
+            if (copied == null) {
+                target.delete()
+            }
+            copied
         } catch (error: Exception) {
+            Log.w("XiaojiShare", "复制分享图片失败", error)
             null
         }
     }
@@ -755,6 +854,9 @@ class MainActivity : FlutterActivity() {
 
         /** 动作值：新建一条小记。 */
         const val ACTION_NEW_NOTE = "new_note"
+
+        /** 动作值：新建一条待办（正文预填 `- [ ] `，由 Dart 侧写入）。 */
+        const val ACTION_NEW_TODO = "new_todo"
 
         /** 允许交给系统浏览器/拨号/SMS 的协议。 */
         private val ALLOWED_URL_SCHEMES =

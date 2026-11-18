@@ -2,6 +2,8 @@
 <resources>
     <string name="shortcut_new_note_short">新建小记</string>
     <string name="shortcut_new_note_long">新建小记</string>
+    <string name="shortcut_new_todo_short">新建待办</string>
+    <string name="shortcut_new_todo_long">新建待办</string>
 
     <!-- 桌面小组件 -->
     <string name="widget_new_note_desc_text">写点什么…</string>

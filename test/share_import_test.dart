@@ -188,5 +188,96 @@ void main() {
 
     expect(content, isNotNull);
     expect(content!.text, '来自其他 App 的一段话');
+    expect(content.items, isEmpty);
+  });
+
+  test('分享多张图片：按用户选择的顺序解析', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeSharedContent') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'text': null,
+        'items': <Object?>[
+          <Object?, Object?>{'kind': 'image', 'path': '/cache/share-1.jpg'},
+          <Object?, Object?>{'kind': 'image', 'path': '/cache/share-2.png'},
+        ],
+        'skipped': 0,
+      };
+    });
+
+    final SharedContent? content = await consumeSharedContent();
+
+    expect(content, isNotNull);
+    expect(content!.items, hasLength(2));
+    expect(content.items.first.path, '/cache/share-1.jpg');
+    expect(content.items.first.kind, SharedItemKind.image);
+    expect(content.items.last.path, '/cache/share-2.png');
+  });
+
+  test('分享图文：文案与图片同时保留', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeSharedContent') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'text': '今天的晚霞',
+        'items': <Object?>[
+          <Object?, Object?>{'kind': 'image', 'path': '/cache/share-3.jpg'},
+        ],
+        'skipped': 0,
+      };
+    });
+
+    final SharedContent? content = await consumeSharedContent();
+
+    expect(content, isNotNull);
+    expect(content!.text, '今天的晚霞');
+    expect(content.items.single.kind, SharedItemKind.image);
+  });
+
+  test('分享多个文件：附件保留文件名，并透传跳过数量', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeSharedContent') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'text': null,
+        'items': <Object?>[
+          <Object?, Object?>{
+            'kind': 'file',
+            'path': '/cache/share-4.pdf',
+            'name': '报告.pdf',
+          },
+        ],
+        'skipped': 2,
+      };
+    });
+
+    final SharedContent? content = await consumeSharedContent();
+
+    expect(content, isNotNull);
+    expect(content!.skipped, 2);
+    expect(content.items.single.kind, SharedItemKind.file);
+    expect(content.items.single.name, '报告.pdf');
+  });
+
+  test('分享内容为空（没有文案也没有文件）时返回 null', () async {
+    runAsAndroid();
+    mockChannel((MethodCall call) async {
+      if (call.method != 'consumeSharedContent') {
+        return null;
+      }
+      return <Object?, Object?>{
+        'text': '   ',
+        'items': <Object?>[],
+        'skipped': 0,
+      };
+    });
+
+    expect(await consumeSharedContent(), isNull);
   });
 }

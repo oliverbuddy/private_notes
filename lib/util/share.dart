@@ -4,17 +4,42 @@ import '../platform/platform_features.dart';
 
 const MethodChannel _channel = MethodChannel('xiaoji/native');
 
-/// 其他 App 分享进来的内容。
-class SharedContent {
-  const SharedContent({this.text, this.imagePath});
+/// 分享内容中的一项：图片内联，其他文件作附件卡片。
+enum SharedItemKind { image, file }
 
-  /// 分享的纯文本（可能为空）。
+/// 其他 App 分享进来的一项内容。
+class SharedItem {
+  const SharedItem({required this.kind, required this.path, this.name = ''});
+
+  final SharedItemKind kind;
+
+  /// 已拷贝到应用缓存目录的本地路径。
+  final String path;
+
+  /// 原始文件名（附件卡片用它作展示名）。
+  final String name;
+}
+
+/// 其他 App 分享进来的内容。
+///
+/// 支持一次分享多张图片 / 多个文件（ACTION_SEND_MULTIPLE）：原生侧已把
+/// 每一项拷进缓存目录，[items] 保持用户选择的顺序，正文按同样顺序排列。
+class SharedContent {
+  const SharedContent({
+    this.text,
+    this.items = const <SharedItem>[],
+    this.skipped = 0,
+  });
+
+  /// 分享的纯文本（图文一起分享时就是图片上方的文案，可能为空）。
   final String? text;
 
-  /// 已拷贝到应用缓存目录的图片路径（可能为空）。
-  final String? imagePath;
+  final List<SharedItem> items;
 
-  bool get isEmpty => (text ?? '').isEmpty && imagePath == null;
+  /// 原生侧因体积超限或读取失败而跳过的文件数。
+  final int skipped;
+
+  bool get isEmpty => (text ?? '').trim().isEmpty && items.isEmpty;
 }
 
 /// 其他 App 「用其他应用打开」送进来的 Markdown 文件。
@@ -148,9 +173,33 @@ Future<SharedContent?> consumeSharedContent() async {
     if (map == null) {
       return null;
     }
+    final List<SharedItem> items = <SharedItem>[];
+    final Object? rawItems = map['items'];
+    if (rawItems is List) {
+      for (final Object? raw in rawItems) {
+        if (raw is! Map) {
+          continue;
+        }
+        final String path = (raw['path'] as String?) ?? '';
+        if (path.isEmpty) {
+          continue;
+        }
+        items.add(
+          SharedItem(
+            kind: raw['kind'] == 'image'
+                ? SharedItemKind.image
+                : SharedItemKind.file,
+            path: path,
+            name: (raw['name'] as String?) ?? '',
+          ),
+        );
+      }
+    }
+    final Object? rawSkipped = map['skipped'];
     final content = SharedContent(
       text: map['text'] as String?,
-      imagePath: map['path'] as String?,
+      items: items,
+      skipped: rawSkipped is int ? rawSkipped : 0,
     );
     return content.isEmpty ? null : content;
   } on PlatformException {

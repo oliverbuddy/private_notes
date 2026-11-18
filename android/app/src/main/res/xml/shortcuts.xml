@@ -18,4 +18,21 @@
                 android:value="new_note" />
         </intent>
     </shortcut>
+    <!-- 「记一件要做的事」同样是高频入口：直接给出一个待办块，
+         用户点完就能输入，不用先新建再切格式。 -->
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="new_todo"
+        android:shortcutLongLabel="@string/shortcut_new_todo_long"
+        android:shortcutShortLabel="@string/shortcut_new_todo_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.xiaoji.xiaoji.MainActivity"
+            android:targetPackage="com.xiaoji.xiaoji">
+            <extra
+                android:name="xiaoji.action"
+                android:value="new_todo" />
+        </intent>
+    </shortcut>
 </shortcuts>

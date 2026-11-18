@@ -414,12 +414,17 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (first == null) {
       return;
     }
+    // 「新建待办」会预填 `- [ ] `：新建时光标落到文末，用户点完直接打字。
+    // 普通新建是空段落，offset 0 与文末等价。
+    final int offset = widget.autoFocus
+        ? first.text.toPlainText().length
+        : 0;
     _editor.execute(<EditRequest>[
       ChangeSelectionRequest(
         DocumentSelection.collapsed(
           position: DocumentPosition(
             nodeId: first.id,
-            nodePosition: const TextNodePosition(offset: 0),
+            nodePosition: TextNodePosition(offset: offset),
           ),
         ),
         SelectionChangeType.placeCaret,
@@ -2718,6 +2723,11 @@ class _NewEditorPageState extends State<NewEditorPage>
                       // 没有样式键可配——在编辑器子树局部覆盖主题，主色统一
                       // 成 accent，不动全局 app_theme。
                       data: Theme.of(context).copyWith(
+                        // 选择手柄（水滴）取色：super_editor 默认回落到
+                        // Theme.primaryColor，而深色主题下 primaryColor 默认
+                        // 等于 surface（页面底色，近黑），手柄会「隐形」。
+                        // 固定为 accent 后收起/展开手柄随主题正确显示。
+                        primaryColor: colors.accent,
                         checkboxTheme: CheckboxThemeData(
                           fillColor: WidgetStateProperty.resolveWith(
                             (states) => states.contains(WidgetState.selected)

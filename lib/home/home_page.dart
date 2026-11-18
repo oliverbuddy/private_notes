@@ -36,12 +36,16 @@ class HomePage extends StatefulWidget {
     super.key,
     required this.repository,
     this.startWithNewNote = false,
+    this.startWithNewTodo = false,
   });
 
   final NoteRepository repository;
 
-  /// 由桌面图标长按快捷方式冷启动时为 true。
+  /// 由桌面图标长按「新建小记」冷启动时为 true。
   final bool startWithNewNote;
+
+  /// 由桌面图标长按「新建待办」冷启动时为 true。
+  final bool startWithNewTodo;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -54,6 +58,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 防止「冷启动 + 回到前台」两次消费到同一份分享内容。
   bool _importingShare = false;
+
+  /// 「新建待办」快捷方式预填的正文：解析后就是一个待办块，
+  /// 首帧光标再落到末尾，用户点完直接打字。
+  static const String _newTodoBody = '- [ ] ';
 
   /// 本次会话是否已经提示过备份失败（每个会话最多一次，不落盘）。
   bool _backupFailureNotified = false;
@@ -70,8 +78,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     newNoteRequests.addListener(_onShortcutNewNote);
+    newTodoRequests.addListener(_onShortcutNewTodo);
     if (widget.startWithNewNote) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openEditor(null));
+    } else if (widget.startWithNewTodo) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openEditor(null, initialBody: _newTodoBody),
+      );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumeShared());
   }
@@ -138,16 +151,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       final DateTime now = DateTime.now();
       final String id = Note.generateId(now);
-      String body = (content.text ?? '').trim();
-      if (content.imagePath != null) {
-        final String relative = await _repo.store.importAttachment(
-          noteId: id,
-          sourcePath: content.imagePath!,
-        );
-        // 与「打开方式」导入、编辑器内插图保持同一条规则：默认小图。
-        final String image = imageUrlWithSize(relative, ImageDisplaySize.small);
-        body = body.isEmpty ? '![]($image)' : '$body\n\n![]($image)';
-      }
+      final String body = await _sharedBody(id, content);
       final Note note = Note(id: id, created: now, updated: now, body: body);
       await _repo.upsert(note);
       if (!mounted) {
@@ -155,7 +159,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       await _openEditor(note);
       if (mounted) {
-        showSnack(context, message: '已从其他 App 导入');
+        showSnack(
+          context,
+          message: content.skipped > 0
+              ? '已从其他 App 导入，${content.skipped} 个文件读取失败已跳过'
+              : '已从其他 App 导入',
+        );
       }
     } catch (error) {
       if (mounted) {
@@ -164,6 +173,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } finally {
       _importingShare = false;
     }
+  }
+
+  /// 把一次分享的内容拼成正文：先文案，再按用户选择的顺序排列图片与附件。
+  ///
+  /// 支持一次分享多张图片 / 多个文件（ACTION_SEND_MULTIPLE）；图片沿用
+  /// 小图规则内联，其余文件写成附件卡片。
+  Future<String> _sharedBody(String noteId, SharedContent content) async {
+    final List<String> blocks = <String>[];
+    final String text = (content.text ?? '').trim();
+    if (text.isNotEmpty) {
+      blocks.add(text);
+    }
+    for (final SharedItem item in content.items) {
+      final String relative = await _repo.store.importAttachment(
+        noteId: noteId,
+        sourcePath: item.path,
+      );
+      if (item.kind == SharedItemKind.image) {
+        // 与「打开方式」导入、编辑器内插图保持同一条规则：默认小图。
+        final String image = imageUrlWithSize(relative, ImageDisplaySize.small);
+        blocks.add('![]($image)');
+      } else {
+        blocks.add('[${_attachmentLabel(item.name)}]($relative)');
+      }
+    }
+    return blocks.join('\n\n');
   }
 
   /// 把外部文件导入成一条新小记：图片内联，其余写进附件卡片。
@@ -222,10 +257,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _openEditor(null);
   }
 
+  void _onShortcutNewTodo() {
+    if (!mounted) {
+      return;
+    }
+    _openEditor(null, initialBody: _newTodoBody);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     newNoteRequests.removeListener(_onShortcutNewNote);
+    newTodoRequests.removeListener(_onShortcutNewTodo);
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -249,7 +292,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openEditor(Note? note, {bool shareOnOpen = false}) async {
+  Future<void> _openEditor(
+    Note? note, {
+    bool shareOnOpen = false,
+    String? initialBody,
+  }) async {
     // 内核迁移收尾：全量切换到新内核编辑页（点卡片/新建/桌面快捷方式
     // 都汇聚在这里）。新建时先造好笔记对象，没有任何编辑就不会落盘，
     // 不会堆出空白笔记。
@@ -283,6 +330,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           id: Note.generateId(DateTime.now()),
           created: DateTime.now(),
           updated: DateTime.now(),
+          // 新建待办会预填一个空待办块；普通新建保持空白，不落空笔记。
+          body: initialBody ?? '',
         );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(

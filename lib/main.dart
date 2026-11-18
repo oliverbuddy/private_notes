@@ -53,13 +53,14 @@ Future<void> main() async {
     final repository = NoteRepository(store);
     await repository.load();
 
-    // 长按桌面图标选「新建小记」时，冷启动要直接进编辑页，不经过列表。
+    // 长按桌面图标选「新建小记 / 新建待办」时，冷启动要直接进编辑页，
+    // 不经过列表。
     listenShortcutEvents();
-    final startWithNewNote = await consumeInitialNewNote();
+    final QuickAction? initialAction = await consumeInitialQuickAction();
 
     runApp(XiaojiApp(
       repository: repository,
-      startWithNewNote: startWithNewNote,
+      initialAction: initialAction,
     ));
 
     // UI 起来之后再跑：清理超期回收站、当天首份自动备份。
@@ -77,11 +78,13 @@ class XiaojiApp extends StatefulWidget {
   const XiaojiApp({
     super.key,
     required this.repository,
-    this.startWithNewNote = false,
+    this.initialAction,
   });
 
   final NoteRepository repository;
-  final bool startWithNewNote;
+
+  /// 冷启动时由桌面快捷方式带来的动作；null 表示从列表正常进入。
+  final QuickAction? initialAction;
 
   @override
   State<XiaojiApp> createState() => _XiaojiAppState();
@@ -180,7 +183,8 @@ class _XiaojiAppState extends State<XiaojiApp> with WidgetsBindingObserver {
             },
             home: HomePage(
               repository: widget.repository,
-              startWithNewNote: widget.startWithNewNote,
+              startWithNewNote: widget.initialAction == QuickAction.newNote,
+              startWithNewTodo: widget.initialAction == QuickAction.newTodo,
             ),
           ),
         );

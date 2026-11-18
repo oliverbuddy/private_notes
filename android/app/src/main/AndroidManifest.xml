@@ -46,6 +46,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- 多选分享（相册一次选多张、文件管理器一次选多个）：
+                 统一收成一条小记，图片内联、其余作附件卡片。
+                 `*/*` 已覆盖 image/*，这里保留 image/* 让相册的
+                 「分享到」候选命中得更直接。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
             <!-- 「用其他应用打开」Markdown 文件（微信 / 文件管理器 / 网盘）：
                  点 .md 时让「小记」出现在应用选择列表，导入成一条笔记。
 

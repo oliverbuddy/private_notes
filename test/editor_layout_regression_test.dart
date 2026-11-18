@@ -79,6 +79,16 @@ Note _note(String id, String body) {
 }
 
 void main() {
+  group('新建待办预填', () {
+    test('`- [ ] ` 解析成一个未完成的待办块', () {
+      final MutableDocument document = deserializeXiaojiMarkdown('- [ ] ');
+
+      final DocumentNode first = document.getNodeAt(0)!;
+      expect(first, isA<TaskNode>(), reason: '预填内容必须直接成型为待办，不能是普通段落');
+      expect((first as TaskNode).isComplete, isFalse);
+    });
+  });
+
   group('引用块回车续行', () {
     test('有内容的引用行末尾回车，新行仍然是引用', () {
       final MutableDocument document = deserializeXiaojiMarkdown('> 引用一行');
