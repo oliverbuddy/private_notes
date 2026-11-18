@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../editor/block.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
 import '../ui/local_image.dart';
 import '../ui/pressable.dart';
+import 'note_preview_cache.dart';
 import '../util/date_format.dart';
 import '../util/text_highlight.dart';
 
@@ -55,7 +55,7 @@ class NoteTileCompact extends StatelessWidget {
     // 锁定笔记内存里没有正文，只显示明文标题；旧数据回落到「已锁定」。
     final summary = note.locked
         ? (note.title.isEmpty ? '已锁定' : note.title)
-        : plainSummary(note.body).split('\n').first.trim();
+        : notePreviewCache.of(note).firstLine;
     final style = TextStyle(
       fontSize: AppFontSize.summary,
       height: 1.4,

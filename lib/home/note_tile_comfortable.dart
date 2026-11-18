@@ -7,6 +7,7 @@ import '../editor/block.dart';
 import '../editor/markdown_view.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import 'note_preview_cache.dart';
 import '../ui/local_image.dart';
 import '../ui/pressable.dart';
 import '../ui/note_table_preview.dart';
@@ -64,15 +65,17 @@ class NoteTileComfortable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    // 正文解析走缓存：同一篇笔记在列表通知 / 滚回视口时不再重复切段。
     // 锁定笔记：正文不在内存里，列表只显示明文标题与标签，不渲染摘要。
+    final NotePreviewData preview =
+        note.locked ? NotePreviewData.empty() : notePreviewCache.of(note);
     // 正文按「文字段 / 表格段」切开后顺序渲染：有几张表格就画几张，
     // 不会出现「第一张表格之后、第二张表格被跳过」的错乱。
-    final List<NotePreviewSegment> segments = note.locked
-        ? const <NotePreviewSegment>[]
-        : previewSegmentsOf(note.body);
-    // 搜索高亮退回纯文本摘要（表格不参与关键字高亮）。
-    final String plainText =
-        note.locked ? '' : plainSummary(bodyWithoutTables(note.body));
+    final List<NotePreviewSegment> segments = preview.segments;
+    // 搜索高亮退回纯文本摘要（表格不参与关键字高亮）；浏览态不计算。
+    final String plainText = note.locked || query.isEmpty
+        ? ''
+        : preview.plainText;
 
     // iOS 正文 17pt / 行高 1.5。
     final summaryStyle = TextStyle(
@@ -159,6 +162,7 @@ class NoteTileComfortable extends StatelessWidget {
                               summaryStyle,
                               colors,
                               c.maxWidth,
+                              preview,
                             ),
                           );
                         },
@@ -229,10 +233,12 @@ class NoteTileComfortable extends StatelessWidget {
     TextStyle style,
     AppColors colors,
     double maxWidth,
+    NotePreviewData preview,
   ) {
     final List<Widget> widgets = <Widget>[];
     var remaining = math.max(0, maxSummaryLines);
-    for (final NotePreviewSegment segment in segments) {
+    for (var index = 0; index < segments.length; index++) {
+      final NotePreviewSegment segment = segments[index];
       if (remaining <= 0) {
         break;
       }
@@ -255,6 +261,8 @@ class NoteTileComfortable extends StatelessWidget {
           style,
           maxWidth,
           remaining,
+          preview,
+          index,
         );
         if (lines <= 0) {
           continue;
@@ -266,6 +274,8 @@ class NoteTileComfortable extends StatelessWidget {
           colors: colors,
           headingBoost: 0.86,
           maxLines: lines,
+          lineCache: preview,
+          cachePrefix: 'seg$index',
         );
       }
       if (widgets.isNotEmpty) {
@@ -286,6 +296,8 @@ class NoteTileComfortable extends StatelessWidget {
     TextStyle style,
     double maxWidth,
     int cap,
+    NotePreviewData cache,
+    int segmentIndex,
   ) {
     final List<String> lines = text.split('\n');
     while (lines.isNotEmpty && lines.last.trim().isEmpty) {
@@ -297,15 +309,25 @@ class NoteTileComfortable extends StatelessWidget {
     if (maxWidth <= 0) {
       return math.min(lines.length, cap);
     }
+    final TextDirection direction = Directionality.of(context);
+    final TextScaler scaler = MediaQuery.textScalerOf(context);
+    final String cacheKey = '$segmentIndex|${maxWidth.round()}|$cap'
+        '|${scaler.scale(1).toStringAsFixed(2)}|${direction.index}';
+    final int? cached = cache.lineCountOf(cacheKey);
+    if (cached != null) {
+      return cached;
+    }
     final TextPainter painter = TextPainter(
       text: TextSpan(text: lines.join('\n'), style: style),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: direction,
+      textScaler: scaler,
       maxLines: cap,
     )..layout(maxWidth: maxWidth);
     final int measured = painter.computeLineMetrics().length;
     painter.dispose();
-    return math.max(1, math.min(measured, cap));
+    final int result = math.max(1, math.min(measured, cap));
+    cache.rememberLineCount(cacheKey, result);
+    return result;
   }
 }
 
@@ -321,6 +343,8 @@ class _SummaryMarkdown extends StatelessWidget {
     required this.colors,
     required this.headingBoost,
     required this.maxLines,
+    this.lineCache,
+    this.cachePrefix = '',
   });
 
   final String source;
@@ -328,6 +352,12 @@ class _SummaryMarkdown extends StatelessWidget {
   final AppColors colors;
   final double headingBoost;
   final int maxLines;
+
+  /// 行数测量缓存；由列表卡片传入，避免每次 build 重复跑 TextPainter。
+  final NotePreviewData? lineCache;
+
+  /// 同一张卡片内多个摘要块的命名空间（段下标）。
+  final String cachePrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -431,6 +461,14 @@ class _SummaryMarkdown extends StatelessWidget {
     if (maxWidth <= 0) {
       return 1;
     }
+    final TextDirection direction = Directionality.of(context);
+    final String cacheKey = '$cachePrefix|${text.length}|${text.hashCode}'
+        '|${headingBoost.toStringAsFixed(2)}|${maxWidth.round()}|$cap'
+        '|${textScaler.scale(1).toStringAsFixed(2)}|${direction.index}';
+    final int? cached = lineCache?.lineCountOf(cacheKey);
+    if (cached != null) {
+      return cached;
+    }
     final List<InlineSpan> spans = markdownSpans(
       text,
       textStyle,
@@ -439,13 +477,15 @@ class _SummaryMarkdown extends StatelessWidget {
     ).map(_measurableSpan).toList(growable: false);
     final TextPainter painter = TextPainter(
       text: TextSpan(children: spans),
-      textDirection: Directionality.of(context),
+      textDirection: direction,
       textScaler: textScaler,
       maxLines: cap,
     )..layout(maxWidth: maxWidth);
     final int lines = painter.computeLineMetrics().length;
     painter.dispose();
-    return math.max(1, lines);
+    final int result = math.max(1, lines);
+    lineCache?.rememberLineCount(cacheKey, result);
+    return result;
   }
 
   /// 测量专用：把 [WidgetSpan]（标签胶囊、待办勾选框）换成文本占位。

@@ -187,6 +187,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   List<_OutlineEntry> _outline = const <_OutlineEntry>[];
   String _outlineSignature = '';
 
+  /// 大纲重算防抖：长文连续输入时，避免每个按键都遍历全文。
+  Timer? _outlineDebounce;
+
   /// 最近一次有效选区。打开 Aa/插入面板会让编辑器失焦、选区被清空，
   /// 面板里的命令随后就找不到操作对象（实测点 H2 只有面板关闭、标题没变）。
   /// 这里留一份快照，面板关闭后先恢复选区再执行命令。
@@ -368,12 +371,14 @@ class _NewEditorPageState extends State<NewEditorPage>
         _refreshActiveCommands();
         _syncHistoryButtons();
         _syncDocumentEmpty();
+        _scheduleOutlineSync();
         _scheduleInlineMarkdown();
       }),
     );
     // 选区变化：块级激活态跟着光标所在行走，只需要监听 composer。
     _composer.addListener(_refreshActiveCommands);
     _syncDocumentEmpty();
+    _syncOutlineNow();
     // 输入法弹出/收起会改变可用视口：等布局结算后再校正一次光标可见性。
     WidgetsBinding.instance.addObserver(this);
     // 锁定笔记：编辑期间禁止截屏 / 多任务预览（设置里可关）。
@@ -494,12 +499,26 @@ class _NewEditorPageState extends State<NewEditorPage>
     if (_documentEmpty.value != empty) {
       _documentEmpty.value = empty;
     }
-    _syncOutline();
+  }
+
+  /// 停止输入 250ms 后再重算大纲。
+  ///
+  /// 大纲只影响目录面的标题列表，不需要每个按键都刷新；连续输入时
+  /// 反复遍历全文会造成长文卡顿。打开目录前会强制刷新一次兜底。
+  void _scheduleOutlineSync() {
+    _outlineDebounce?.cancel();
+    _outlineDebounce = Timer(const Duration(milliseconds: 250), () {
+      _outlineDebounce = null;
+      if (!mounted || _disposed) {
+        return;
+      }
+      _syncOutlineNow();
+    });
   }
 
   /// 刷新大纲。标题按 H1/H2/H3 的 blockType 识别（与工具条转换标题
   /// 使用同一套 attribution），不额外存一份结构。
-  void _syncOutline() {
+  void _syncOutlineNow() {
     final List<_OutlineEntry> entries = <_OutlineEntry>[];
     for (final DocumentNode node in _document) {
       if (node is! ParagraphNode) {
@@ -542,6 +561,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     WidgetsBinding.instance.removeObserver(this);
     // 立即落盘，不留给防抖计时器（页面可能在计时器到期前销毁）。
     _saveDebounce?.cancel();
+    _outlineDebounce?.cancel();
     _caretFollowTimer?.cancel();
     _anchorReleaseTimer?.cancel();
     _imeCollapseTimer?.cancel();
@@ -1653,6 +1673,10 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 只在标题数 ≥ 2 时出现（见 [_buildHeader]）：两行以内的小记不需要导航，
   /// 多出来的图标只会增加「这块是干什么的」的困惑。
   Future<void> _showOutline() async {
+    // 打开目录前强制同步一次，避免看到防抖窗口内的旧标题。
+    _outlineDebounce?.cancel();
+    _outlineDebounce = null;
+    _syncOutlineNow();
     if (_outline.isEmpty) {
       return;
     }

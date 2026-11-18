@@ -24,6 +24,7 @@ import '../ui/pressable.dart';
 import '../ui/show_sheet.dart';
 import '../ui/snack.dart';
 import '../util/share.dart';
+import 'note_preview_cache.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
 
@@ -1129,8 +1130,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         final note = notes[noteIndex];
         // 锁定笔记：正文不在内存里，也不展示缩略图（附件未加密，
         // 但列表里露出图片等于绕过正文锁定）。
-        final images =
-            note.locked ? const <ImageBlock>[] : imageBlocksOf(note.body);
+        // 正文解析走缓存：图片与附件标记共用同一次 parseBlocks，
+        // 不再在每次列表 build 时各解析一遍。
+        final NotePreviewData preview =
+            note.locked ? NotePreviewData.empty() : notePreviewCache.of(note);
+        final List<ImageBlock> images = preview.images;
         // URL 末尾可能带「小图」标记（`#xiaoji-small`）：缩略图必须按
         // 去标记后的真实文件路径取图，否则 Image.file 找不到文件，
         // 列表里只剩一个「破图」图标（详情页正常、首页全坏）。
@@ -1150,7 +1154,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             // 紧凑档同样带图：右侧 40dp 小图 + 计数，有附件时退回回形针。
             thumbnailPaths: paths,
             imageCount: images.length,
-            hasAttachment: !note.locked && hasLocalAttachment(note.body),
+            hasAttachment: !note.locked && preview.hasAttachment,
             onTap: () => _openEditor(note),
             onLongPress: () => _showNoteActions(note),
           );
