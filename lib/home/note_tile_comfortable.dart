@@ -7,6 +7,7 @@ import '../editor/block.dart';
 import '../editor/markdown_view.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/local_image.dart';
 import '../ui/pressable.dart';
 import '../ui/note_table_preview.dart';
 import '../ui/quote_block.dart';
@@ -675,12 +676,16 @@ class _Thumbnail extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     final double radius = size >= 80 ? AppRadius.block : AppRadius.thumb;
+    // 56 / 88dp 缩略图按实际显示尺寸解码，避免整张原图常驻 ImageCache。
+    final int decodeExtent = localImageDecodeExtent(context, size, max: 1024);
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: Image.file(
         File(path),
         width: size,
         height: size,
+        cacheWidth: decodeExtent,
+        cacheHeight: decodeExtent,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Container(
           width: size,

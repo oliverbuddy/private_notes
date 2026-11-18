@@ -19,6 +19,7 @@ import '../../theme/app_theme.dart';
 import '../../ui/action_sheet.dart';
 import '../../ui/note_actions.dart';
 import '../../ui/adaptive_image.dart';
+import '../../ui/local_image.dart';
 import '../../ui/app_icon_button.dart';
 import '../../ui/attachment_preview_page.dart';
 import '../../ui/content_frame.dart';
@@ -3988,10 +3989,12 @@ class _LabImageComponentBuilder implements ComponentBuilder {
         // 会直接卡帧。上限 1440 物理像素，肉眼已看不出差别。
         final double logicalWidth = MediaQuery.sizeOf(context).width *
             (size == ImageDisplaySize.small ? 0.4 : 1);
-        final int cacheWidth =
-            (logicalWidth * MediaQuery.devicePixelRatioOf(context))
-                .round()
-                .clamp(320, 1440);
+        final int cacheWidth = localImageDecodeExtent(
+          context,
+          logicalWidth,
+          min: 320,
+          max: 1440,
+        );
         return Image.file(
           File(path),
           // 由外层的 AdaptiveImageFrame 决定盒子尺寸：

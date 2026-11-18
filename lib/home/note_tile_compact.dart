@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../editor/block.dart';
 import '../models/note.dart';
 import '../theme/app_theme.dart';
+import '../ui/local_image.dart';
 import '../ui/pressable.dart';
 import '../util/date_format.dart';
 import '../util/text_highlight.dart';
@@ -155,12 +156,16 @@ class _CompactThumbnail extends StatelessWidget {
     final colors = AppColors.of(context);
     // 40 而不是 44：行高 = 40 + 上下各 12 = 64，正好落在双行列表刻度上。
     const double size = 40;
+    // 缩略图只按 40dp × dpr 解码，不再把整张原图读进内存。
+    final int decodeExtent = localImageDecodeExtent(context, size, max: 1024);
     final Widget image = ClipRRect(
       borderRadius: BorderRadius.circular(AppRadius.thumb),
       child: Image.file(
         File(path),
         width: size,
         height: size,
+        cacheWidth: decodeExtent,
+        cacheHeight: decodeExtent,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => Container(
           width: size,

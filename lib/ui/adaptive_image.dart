@@ -1,27 +1,9 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
-
-/// 已解析过的原图像素尺寸（绝对路径 → 像素宽高）。
-///
-/// super_editor 会在组件离开视口后回收、回来时重建；没有缓存的话每张图
-/// 都会先按 4:3 占位、解码后再 setState 成真实比例 —— 长文里滚回去看
-/// 同一张图时，下方正文会突然跳一下。缓存命中后第一帧就是正确高度。
-final Map<String, Size> _pixelSizeCache = <String, Size>{};
-
-void _rememberPixelSize(String path, Size size) {
-  if (size.width <= 0 || size.height <= 0) {
-    return;
-  }
-  // 长文图片数量有限，给一个简单上限防止无限增长。
-  if (_pixelSizeCache.length >= 128 && !_pixelSizeCache.containsKey(path)) {
-    _pixelSizeCache.remove(_pixelSizeCache.keys.first);
-  }
-  _pixelSizeCache[path] = size;
-}
+import 'local_image.dart';
 
 /// 微信式图片框：先按原比例缩放，只有「极端长图」才裁切并打「长图」角标。
 ///
@@ -31,9 +13,8 @@ void _rememberPixelSize(String path, Size size) {
 ///     只有缩完会窄成一条（超长截图）时才改为「定宽 + 裁切」；
 ///  3. **裁切有提示**：被裁切的图右下角标「长图」，点开查看器看完整原图。
 ///
-/// 之前两版的错误都和这三条有关：固定 `宽 55% + 全高` 会让超长截图铺满
-/// 屏幕；`宽 40% + 全高` 只是把铺满改成了半屏。真正的问题不是比例，
-/// 而是**超长图必须限高**，而普通竖图（3:4 / 9:16）需要整体缩小而不是裁掉。
+/// 宽高比通过 [readLocalImagePixelSize] 只解析文件头获得，不再为了拿
+/// 尺寸把整张原图解码进内存。
 class AdaptiveImageFrame extends StatefulWidget {
   const AdaptiveImageFrame({
     super.key,
@@ -61,141 +42,57 @@ class AdaptiveImageFrame extends StatefulWidget {
 }
 
 class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
-  /// 原图宽高比（宽 / 高）。
-  double? _aspect;
+  /// 原图原始像素尺寸；null 表示还在解析。
+  Size? _pixelSize;
 
-  /// 原图的逻辑宽度（像素宽 / devicePixelRatio），用于「不放大」。
-  double? _naturalWidth;
+  /// 解析失败（文件丢失 / 格式不支持）：按 4:3 兜底，交给图片组件的
+  /// errorBuilder 显示占位。
+  bool _failed = false;
 
-  /// 设备像素比。只能在 [didChangeDependencies] 之后读：图像流命中
-  /// ImageCache 时（列表缩略图已经把同一张图解码过），监听器会在
-  /// `initState` 里**同步**回调，此时读 MediaQuery 会抛
-  /// `dependOnInheritedWidgetOfExactType ... before initState completed`，
-  /// 图片直接掉进调用方的 errorBuilder（真机必现：列表有图、点进详情变占位）。
-  double? _devicePixelRatio;
-
-  /// `initState` 期间同步拿到的原始像素尺寸，等依赖就绪后再结算。
-  Size? _pendingPixelSize;
-
-  ImageStream? _stream;
-  ImageStreamListener? _listener;
+  /// 异步解析的请求序号：切图或销毁后丢弃旧结果。
+  int _sizeRequest = 0;
 
   @override
   void initState() {
     super.initState();
-    _seedFromCache();
-    _resolveImage();
-  }
-
-  /// 缓存命中时首帧就用真实比例，避免「占位 → 真实高度」的跳动。
-  void _seedFromCache() {
-    final Size? cached = _pixelSizeCache[widget.path];
-    if (cached == null) {
-      return;
-    }
-    _pendingPixelSize = cached;
-    _aspect = cached.width / math.max(1, cached.height);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final Size? pending = _pendingPixelSize;
-    if (pending != null) {
-      _pendingPixelSize = null;
-      _applyPixelSize(pending.width, pending.height);
-    }
+    _loadPixelSize();
   }
 
   @override
   void didUpdateWidget(AdaptiveImageFrame oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path) {
-      _aspect = null;
-      _naturalWidth = null;
-      _pendingPixelSize = null;
-      _seedFromCache();
-      _resolveImage();
+      _pixelSize = null;
+      _failed = false;
+      _loadPixelSize();
     }
   }
 
-  @override
-  void dispose() {
-    _detach();
-    super.dispose();
-  }
-
-  void _detach() {
-    final ImageStreamListener? listener = _listener;
-    if (_stream != null && listener != null) {
-      _stream!.removeListener(listener);
-    }
-    _stream = null;
-    _listener = null;
-  }
-
-  void _resolveImage() {
-    _detach();
-    final ImageStream stream =
-        FileImage(File(widget.path)).resolve(const ImageConfiguration());
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo info, bool _) {
-        if (!mounted) {
-          return;
-        }
-        final double width = info.image.width.toDouble();
-        final double height = info.image.height.toDouble();
-        // 依赖还没就绪（同步回调）：先记住像素尺寸，等 didChangeDependencies。
-        if (_devicePixelRatio == null) {
-          _pendingPixelSize = Size(width, height);
-          return;
-        }
-        _applyPixelSize(width, height);
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        // 解码失败交给调用方的 errorBuilder 占位，这里保持默认比例。
-        if (!mounted || _aspect != null) {
-          return;
-        }
-        if (_devicePixelRatio == null) {
-          // 同步失败：不能 setState，直接写值，紧接着的 build 会用到。
-          _aspect = 4 / 3;
-          return;
-        }
-        setState(() => _aspect = 4 / 3);
-      },
-    );
-    stream.addListener(listener);
-    _stream = stream;
-    _listener = listener;
-  }
-
-  /// 用原始像素尺寸结算宽高比与逻辑宽度（需要在依赖就绪后调用）。
-  void _applyPixelSize(double pixelWidth, double pixelHeight) {
-    final double aspect = pixelWidth / math.max(1, pixelHeight);
-    if (!aspect.isFinite || aspect <= 0) {
+  Future<void> _loadPixelSize() async {
+    final int request = ++_sizeRequest;
+    final Size? size = await readLocalImagePixelSize(widget.path);
+    if (!mounted || request != _sizeRequest) {
       return;
     }
-    // 记下来：组件被回收后再次滚回视口时，首帧就能按真实比例布局。
-    _rememberPixelSize(widget.path, Size(pixelWidth, pixelHeight));
-    final double dpr = _devicePixelRatio ?? 1;
     setState(() {
-      _aspect = aspect;
-      _naturalWidth = pixelWidth / (dpr > 0 ? dpr : 1);
+      if (size == null) {
+        _failed = true;
+      } else {
+        _pixelSize = size;
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
+    final AppColors colors = AppColors.of(context);
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double targetWidth = constraints.maxWidth * widget.widthFactor;
-        final double? aspect = _aspect;
+        final Size? pixel = _pixelSize;
 
         // 尺寸没解析出来前先给一个稳定占位，避免图片加载时正文跳动。
-        if (aspect == null) {
+        if (pixel == null && !_failed) {
           return Align(
             alignment: Alignment.centerLeft,
             child: Container(
@@ -209,8 +106,15 @@ class _AdaptiveImageFrameState extends State<AdaptiveImageFrame> {
           );
         }
 
+        final double aspect =
+            pixel == null ? 4 / 3 : pixel.width / math.max(1, pixel.height);
+        final double dpr = MediaQuery.devicePixelRatioOf(context);
+        // 原图的逻辑宽度（像素宽 / devicePixelRatio），用于「不放大」。
+        final double naturalWidth = pixel == null
+            ? targetWidth
+            : pixel.width / (dpr > 0 ? dpr : 1);
+
         // 规则 1：不放大。原图逻辑宽度更小就按原尺寸显示。
-        final double naturalWidth = _naturalWidth ?? targetWidth;
         double width = math.min(targetWidth, naturalWidth);
         double height = width / aspect;
         // 裁切阈值以「目标宽度」为基准，横图补宽后不再回头影响竖图判断。
