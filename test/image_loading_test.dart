@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xiaoji/editor/widgets/image_block_view.dart';
 import 'package:xiaoji/home/note_tile_compact.dart';
 import 'package:xiaoji/models/note.dart';
 import 'package:xiaoji/theme/app_theme.dart';
@@ -66,6 +67,60 @@ void main() {
 
     // 40dp × dpr 3 = 120，按 8 对齐后仍是 120。
     expect(_resizeWidthOf(tester), 120);
+  });
+
+  testWidgets('大图转场复用正文解码宽度，首次打开也有缓存', (
+    WidgetTester tester,
+  ) async {
+    final Directory temp = Directory.systemTemp.createTempSync('xiaoji_flight_');
+    addTearDown(() {
+      if (temp.existsSync()) {
+        temp.deleteSync(recursive: true);
+      }
+    });
+    final File file = File('${temp.path}/tiny.png')
+      ..writeAsBytesSync(base64Decode(_tinyPngBase64));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Builder(
+          builder: (BuildContext context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    buildImageViewerRoute(
+                      sourceRect: const Rect.fromLTWH(20, 20, 120, 120),
+                      absolutePath: file.path,
+                      flightCacheWidth: 800,
+                    ),
+                  );
+                },
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('打开'));
+    // 第一帧推路由，第二帧才开始跑转场、构建飞行图层。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final ResizeImage flight = tester
+        .widgetList<Image>(find.byType(Image))
+        .map((Image image) => image.image)
+        .whereType<ResizeImage>()
+        .first;
+    expect(flight.width, 800);
+    expect(flight.height, isNull);
+
+    // 走完转场并清空路由，避免残留动画影响测试收尾。
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('详情图片框：用文件头拿真实比例（不再整图解码）', (

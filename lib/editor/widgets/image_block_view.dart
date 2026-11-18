@@ -635,6 +635,7 @@ Route<void> buildImageViewerRoute({
   required String absolutePath,
   String alt = '',
   VoidCallback? onDelete,
+  int? flightCacheWidth,
 }) {
   final ValueNotifier<Offset> dragOffset = ValueNotifier<Offset>(Offset.zero);
   final ValueNotifier<double> dragScale = ValueNotifier<double>(1.0);
@@ -667,6 +668,7 @@ Route<void> buildImageViewerRoute({
         dragOffset: dragOffset,
         dragScale: dragScale,
         absolutePath: absolutePath,
+        flightCacheWidth: flightCacheWidth,
         child: child,
       );
     },
@@ -683,6 +685,7 @@ class _FlightTransition extends StatefulWidget {
     required this.dragScale,
     required this.absolutePath,
     required this.child,
+    this.flightCacheWidth,
   });
 
   final Animation<double> animation;
@@ -691,6 +694,13 @@ class _FlightTransition extends StatefulWidget {
   final ValueNotifier<double> dragScale;
   final String absolutePath;
   final Widget child;
+
+  /// 飞行动画用的解码宽度。
+  ///
+  /// 必须与详情页正文图片的 cacheWidth 一致：那个 provider 已经在
+  /// ImageCache 里，点击后首帧就能拿到像素。不传则会用全尺寸 FileImage，
+  /// 第一次打开时整张原图才开始解码，转场直接卡成「瞬间切换」。
+  final int? flightCacheWidth;
 
   @override
   State<_FlightTransition> createState() => _FlightTransitionState();
@@ -763,6 +773,7 @@ class _FlightTransitionState extends State<_FlightTransition> {
                 child: Image.file(
                   File(widget.absolutePath),
                   fit: BoxFit.contain,
+                  cacheWidth: widget.flightCacheWidth,
                 ),
               ),
             ),

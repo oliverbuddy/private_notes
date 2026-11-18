@@ -4022,6 +4022,7 @@ class _LabImageComponentBuilder implements ComponentBuilder {
           componentContext,
           path,
           componentViewModel.altText,
+          size: size,
         );
       },
       onLongPress: () => onImageLongPress(
@@ -4054,8 +4055,9 @@ class _LabImageComponentBuilder implements ComponentBuilder {
   void _openViewer(
     SingleColumnDocumentComponentContext componentContext,
     String absolutePath,
-    String alt,
-  ) {
+    String alt, {
+    required ImageDisplaySize size,
+  }) {
     Rect sourceRect = Rect.zero;
     final renderObject =
         componentContext.componentKey.currentContext?.findRenderObject();
@@ -4064,11 +4066,22 @@ class _LabImageComponentBuilder implements ComponentBuilder {
         renderObject.hasSize) {
       sourceRect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
     }
+    // 飞行图层复用正文图片的解码宽度：这个 provider 已经在 ImageCache 里，
+    // 第一次点开也能立刻拿到像素，不会因为现解全尺寸原图而「跳过动画」。
+    final double logicalWidth = MediaQuery.sizeOf(componentContext.context).width *
+        (size == ImageDisplaySize.small ? 0.4 : 1);
+    final int flightCacheWidth = localImageDecodeExtent(
+      componentContext.context,
+      logicalWidth,
+      min: 320,
+      max: 1440,
+    );
     Navigator.of(componentContext.context).push(
       buildImageViewerRoute(
         sourceRect: sourceRect,
         absolutePath: absolutePath,
         alt: alt,
+        flightCacheWidth: flightCacheWidth,
       ),
     );
   }
