@@ -7,10 +7,12 @@
     android:description="@string/widget_new_note_desc"
     android:initialLayout="@layout/widget_new_note"
     android:minHeight="40dp"
+    android:minResizeHeight="40dp"
+    android:minResizeWidth="110dp"
     android:minWidth="110dp"
     android:previewLayout="@layout/widget_new_note"
-    android:resizeMode="none"
+    android:resizeMode="horizontal|vertical"
     android:targetCellHeight="1"
     android:targetCellWidth="2"
     android:updatePeriodMillis="1800000"
-    android:widgetCategory="home_screen" />
+    android:widgetCategory="home_screen|keyguard" />
