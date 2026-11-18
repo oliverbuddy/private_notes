@@ -68,12 +68,15 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    /// 宿主高度未知（0）时按「能显示」处理；内容本身约 54dp，
-    /// 留 2dp 余量，低于 56dp 的宿主直接隐藏标题。
+    /// 宿主高度未知（0）时按「能显示」处理。
+    ///
+    /// 标题约占 16dp；卡片要留住和桌面图标相当的高度（约 48dp），
+    /// 所以低于 64dp 的一行宿主直接隐藏标题，让卡片吃满整行，
+    /// 避免「卡片比旁边图标矮一截」。
     private fun shouldShowTitle(appWidgetManager: AppWidgetManager, widgetId: Int): Boolean {
         val minHeight = appWidgetManager.getAppWidgetOptions(widgetId)
             .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
-        return minHeight <= 0 || minHeight >= 56
+        return minHeight <= 0 || minHeight >= 64
     }
 
     /**
