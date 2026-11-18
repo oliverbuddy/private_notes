@@ -5,10 +5,10 @@
      视觉上就等同于图标下面那行 App 名称。
 
      高度策略（对齐桌面图标）：
-     不写死卡片高度，也不写死顶部偏移。卡片用 weight 吃掉可用高度，
-     上下各留一段同比例的「呼吸位」（weight≈0.12）：不同启动器给 1 行
-     的高度约 40–100dp，呼吸位会随宿主高度自动伸缩，顶部始终比图标
-     的自然内缩多一点，不会出现「比旁边图标高/矮一截」。
+     卡片用 weight 吃满「宿主行高 - 标题高度」，底部贴住单元格底边，
+     整体高度与桌面图标一致；只在顶部留一个固定的视觉内缩
+     （@dimen/widget_top_inset），让卡片顶边和图标顶边对齐。
+     底部绝不能加内边距——那会把卡片整体压短（用户反馈）。
      宿主太矮时由 Provider 读取 OPTION_APPWIDGET_MIN_HEIGHT 隐藏标题，
      卡片自动占满剩余空间。 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -20,13 +20,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center_horizontal"
-        android:orientation="vertical">
-
-        <!-- 顶部呼吸位：与卡片高度成固定比例，随宿主行高自适应。 -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.12" />
+        android:orientation="vertical"
+        android:paddingTop="@dimen/widget_top_inset">
 
         <LinearLayout
             android:id="@+id/widget_card"
@@ -81,12 +76,6 @@
             android:text="@string/shortcut_new_note_long"
             android:textColor="@color/widget_sub"
             android:textSize="11sp" />
-
-        <!-- 底部呼吸位：与顶部同权重，保证卡片在单元格内垂直居中。 -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="0.12" />
 
     </LinearLayout>
 

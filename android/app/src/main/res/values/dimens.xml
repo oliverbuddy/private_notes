@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面小组件顶部视觉内缩。
+         启动器不会把「图标顶边到单元格顶边」的距离暴露给 App，
+         主流做法就是用固定 token 微调；6dp 与常见启动器的图标内缩一致。
+         只作用于顶部，底部保持贴边，否则卡片会被整体压短。 -->
+    <dimen name="widget_top_inset">6dp</dimen>
+</resources>
