@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xiaoji/data/note_repository.dart';
 import 'package:xiaoji/data/note_store.dart';
@@ -155,8 +156,7 @@ void main() {
         find.byWidgetPredicate(
           (Widget widget) =>
               widget is Text &&
-              (widget.textSpan?.toPlainText() ?? widget.data ?? '') ==
-                  '今天的想法',
+              (widget.textSpan?.toPlainText() ?? widget.data ?? '') == '今天的想法',
         ),
         findsOneWidget,
       );
@@ -173,6 +173,72 @@ void main() {
       expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
     });
 
+    testWidgets('系统返回：主页只退到后台，不销毁页面；搜索态先退出搜索', (
+      WidgetTester tester,
+    ) async {
+      final tempDir = Directory.systemTemp.createTempSync('xiaoji_back_');
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      late NoteRepository repository;
+      await tester.runAsync(() async {
+        final store =
+            await NoteStore.openAt(Directory('${tempDir.path}/Xiaoji'));
+        repository = NoteRepository(store);
+        await repository.load();
+      });
+
+      // 记录原生调用：根路由返回应走 moveTaskToBack（退到后台），
+      // 而不是 finish Activity 导致下次冷启动。
+      final List<String> nativeCalls = <String>[];
+      const MethodChannel nativeChannel = MethodChannel('xiaoji/native');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        nativeChannel,
+        (MethodCall call) async {
+          nativeCalls.add(call.method);
+          // 只给返回相关的方法一个结果；其余（取分享内容等）返回 null，
+          // 免得主页误判成导入失败并弹提示条（会留下 pending timer）。
+          return call.method == 'moveTaskToBack' ? true : null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          nativeChannel,
+          null,
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: HomePage(repository: repository),
+        ),
+      );
+      await _pumpFrames(tester);
+
+      // 搜索态下第一次返回只收起搜索，不把 App 丢到后台。
+      await tester.tap(find.byIcon(Icons.search_rounded).first);
+      await _pumpFrames(tester);
+      expect(find.byType(TextField), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await _pumpFrames(tester);
+      // 首帧还会调 consumeOpenedMarkdown 等，这里只看返回相关的调用。
+      expect(nativeCalls, isNot(contains('moveTaskToBack')));
+      expect(find.byType(TextField), findsNothing);
+
+      // 再返回一次：退到后台，根路由仍然在栈上（页面没被销毁）。
+      await tester.binding.handlePopRoute();
+      await _pumpFrames(tester);
+      expect(
+        nativeCalls.where((String method) => method == 'moveTaskToBack').length,
+        1,
+      );
+      expect(find.byType(HomePage), findsOneWidget);
+    });
   });
 
   group('存储与仓库（真实文件 I/O）', () {

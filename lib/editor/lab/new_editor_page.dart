@@ -422,9 +422,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     }
     // 「新建待办」会预填 `- [ ] `：新建时光标落到文末，用户点完直接打字。
     // 普通新建是空段落，offset 0 与文末等价。
-    final int offset = widget.autoFocus
-        ? first.text.toPlainText().length
-        : 0;
+    final int offset = widget.autoFocus ? first.text.toPlainText().length : 0;
     _editor.execute(<EditRequest>[
       ChangeSelectionRequest(
         DocumentSelection.collapsed(
@@ -2785,11 +2783,11 @@ class _NewEditorPageState extends State<NewEditorPage>
                               ),
                               // 空文档占位提示（新建小记时的 tip）。
                               // 不拦截点击：点它应该像点正文一样把光标放进来。
-                              // top 12 与段落规则里的 `padding top: 12` 一致，
-                              // 文字行盒与光标起点因此完全重合。
+                              // 空段落的段前留白为 0（空行不再叠段距），
+                              // 所以这里也贴到 0，文字行盒与光标起点完全重合。
                               Positioned(
                                 left: gutter,
-                                top: 12,
+                                top: 0,
                                 right: gutter,
                                 child: IgnorePointer(
                                   child: ValueListenableBuilder<bool>(
@@ -3385,8 +3383,7 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 深色主题下正文是 #E5E5E5，标题再亮一档：中文粗体在深底上的「厚度差」
     // 不如浅底明显，靠亮度补一层层级（Typora 深色主题同做法）。
     final bool darkMode = colors.page.computeLuminance() < 0.3;
-    final Color headingColor =
-        darkMode ? const Color(0xFFF2F3F5) : colors.text;
+    final Color headingColor = darkMode ? const Color(0xFFF2F3F5) : colors.text;
     // 文档级默认：15.5/1.7 主文字、左右 18 页边距；底部 96 是常量
     // （工具条 52 + 呼吸），不随键盘变化——旧版的坑。
     //
@@ -3488,8 +3485,10 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
             Styles.textStyle: const TextStyle(height: paragraphHeight),
-            Styles.padding: const CascadingPadding.only(
-              top: 12,
+            // 空行（外部 md 导入的空段落）本身已经占一整行，再叠加 12 的
+            // 段距会让「标题 / 正文之间」多出一大块空白（用户反馈）。
+            Styles.padding: CascadingPadding.only(
+              top: _paragraphTopSpacing(doc, node, 12),
             ),
           },
         ),
@@ -3585,8 +3584,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: const CascadingPadding.only(
-              top: 30,
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 26),
               bottom: 10,
             ),
           },
@@ -3602,8 +3601,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: const CascadingPadding.only(
-              top: 24,
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 22),
               bottom: 8,
             ),
           },
@@ -3619,8 +3618,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: const CascadingPadding.only(
-              top: 20,
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 18),
               bottom: 6,
             ),
           },
@@ -3639,7 +3638,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: const CascadingPadding.only(top: 16, bottom: 4),
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 14),
+              bottom: 4,
+            ),
           },
         ),
         StyleRule(
@@ -3652,7 +3654,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor.withValues(alpha: 0.88),
             ),
-            Styles.padding: const CascadingPadding.only(top: 14, bottom: 4),
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 12),
+              bottom: 4,
+            ),
           },
         ),
         StyleRule(
@@ -3665,7 +3670,10 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.secondary,
             ),
-            Styles.padding: const CascadingPadding.only(top: 12, bottom: 4),
+            Styles.padding: CascadingPadding.only(
+              top: _headerTopSpacing(doc, node, 10),
+              bottom: 4,
+            ),
           },
         ),
         // 引用块：底色/圆角/竖条/内边距都由 [QuoteBlock] 画（见
@@ -4092,8 +4100,9 @@ class _LabImageComponentBuilder implements ComponentBuilder {
     }
     // 飞行图层复用正文图片的解码宽度：这个 provider 已经在 ImageCache 里，
     // 第一次点开也能立刻拿到像素，不会因为现解全尺寸原图而「跳过动画」。
-    final double logicalWidth = MediaQuery.sizeOf(componentContext.context).width *
-        (size == ImageDisplaySize.small ? 0.4 : 1);
+    final double logicalWidth =
+        MediaQuery.sizeOf(componentContext.context).width *
+            (size == ImageDisplaySize.small ? 0.4 : 1);
     final int flightCacheWidth = localImageDecodeExtent(
       componentContext.context,
       logicalWidth,
@@ -4306,6 +4315,65 @@ class _XiaojiAndroidControlsController
 bool _isQuoteNode(DocumentNode? node) {
   return node is ParagraphNode &&
       node.getMetadataValue(NodeMetadata.blockType) == blockquoteAttribution;
+}
+
+/// 空段落：markdown 里的「空行」在编辑器里就是一个没有文字的空段落。
+bool _isEmptyParagraph(DocumentNode? node) {
+  return node is ParagraphNode &&
+      node.text.isEmpty &&
+      (node.getMetadataValue(NodeMetadata.blockType) ?? paragraphAttribution) ==
+          paragraphAttribution;
+}
+
+/// 段落的段前留白：空行自己不需要段距，紧接空行后面的块也不再叠段距。
+///
+/// 外部 md 的 `正文\n\n## 标题` 会解析成「正文 + 空段落 + 标题」，
+/// 之前空行仍按普通段落留 12，读起来像空了两行。
+double _paragraphTopSpacing(Document doc, DocumentNode node, double top) {
+  if (_isEmptyParagraph(node) ||
+      _isEmptyParagraph(doc.getNodeBeforeById(node.id))) {
+    return 0;
+  }
+  return top;
+}
+
+/// 标题的段后留白，与 [_buildStylesheet] 里各档 `bottom` 一一对应。
+double _headerBottomSpacing(DocumentNode? node) {
+  final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
+  if (blockType == header1Attribution) {
+    return 10;
+  }
+  if (blockType == header2Attribution) {
+    return 8;
+  }
+  if (blockType == header3Attribution) {
+    return 6;
+  }
+  if (blockType == header4Attribution ||
+      blockType == header5Attribution ||
+      blockType == header6Attribution) {
+    return 4;
+  }
+  return 0;
+}
+
+/// 标题的段前留白：紧跟上一条标题时按 CSS 的「外边距折叠」折算。
+///
+/// super_editor 的 `CascadingPadding` 是逐块内边距，相邻两块直接相加：
+/// H1 段后 10 + H2 段前 22 = 32dp，几个标题挨在一起时中间会空出一大块
+/// （用户反馈）。CSS 里相邻 margin 取较大值，这里等价地扣掉上一条标题
+/// 的段后留白，最终间距就等于本标题的段前值。
+double _headerTopSpacing(Document doc, DocumentNode node, double top) {
+  final DocumentNode? previous = doc.getNodeBeforeById(node.id);
+  // 空行本身已经提供一整行的间隔，标题不再叠加段前留白。
+  if (_isEmptyParagraph(previous)) {
+    return 0;
+  }
+  final double previousBottom = _headerBottomSpacing(previous);
+  if (previousBottom <= 0) {
+    return top;
+  }
+  return top > previousBottom ? top - previousBottom : 0;
 }
 
 /// 上方紧邻的是否也是引用段。

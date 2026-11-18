@@ -356,7 +356,8 @@ void main() {
 
       // 菜单必须贴着选区的小胶囊，不能被拉满整屏（SelectableRegion 的自定义
       // 菜单被直接塞进根 Overlay，裸 Widget 会撑满屏幕）。
-      final Size screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final Size screen =
+          tester.view.physicalSize / tester.view.devicePixelRatio;
       final Rect menuRect = tester.getRect(menu);
       expect(menuRect.width, lessThan(screen.width * 0.8));
       expect(menuRect.height, lessThan(120));
@@ -384,8 +385,7 @@ void main() {
   });
 
   group('标签行', () {
-    testWidgets('标签在正文下方左侧；点标签行空白也能打开弹层',
-        (WidgetTester tester) async {
+    testWidgets('标签在正文下方左侧；点标签行空白也能打开弹层', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_tag_bar_');
       final DateTime time = DateTime(2026, 11, 2, 10);
@@ -447,8 +447,7 @@ void main() {
   });
 
   group('文件附件', () {
-    testWidgets('点卡片直接打开；平台不支持时给出提示而不是弹操作弹层',
-        (WidgetTester tester) async {
+    testWidgets('点卡片直接打开；平台不支持时给出提示而不是弹操作弹层', (WidgetTester tester) async {
       final NoteRepository repository =
           await _createRepository(tester, 'xiaoji_attachment_');
       const String relative = 'assets/att/1.pdf';
@@ -488,8 +487,7 @@ void main() {
       expect(find.text('从正文移除'), findsOneWidget);
     });
 
-    testWidgets('没有查看器时给「分享 / 复制路径」兜底，而不是一句干提示',
-        (WidgetTester tester) async {
+    testWidgets('没有查看器时给「分享 / 复制路径」兜底，而不是一句干提示', (WidgetTester tester) async {
       // 测试环境没有原生查看器；用非 Android 平台让打开链路同步失败，
       // 避免真实文件 IO 卡在 fake-async 里（那条路只能真机验证）。
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
@@ -564,13 +562,18 @@ void main() {
           () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
         await tester.pump();
-        if (find.byType(SelectableText).evaluate().isNotEmpty) {
+        if (find.byType(SelectionArea).evaluate().isNotEmpty) {
           break;
         }
       }
 
-      final SelectableText text = tester.widget<SelectableText>(
-        find.byType(SelectableText),
+      // 预览正文用 SelectionArea + Text：SelectableText 会被全局的
+      // BouncingScrollPhysics 吞掉拖动手势，长文本无法滚动。
+      final Text text = tester.widget<Text>(
+        find.descendant(
+          of: find.byType(SelectionArea),
+          matching: find.byType(Text),
+        ),
       );
       expect(text.data, '第一行\n第二行');
     });
@@ -718,6 +721,51 @@ void main() {
       expect(h3, greaterThan(body), reason: 'H3 与正文同字号是这轮反馈的根因');
       expect(h3 - body, greaterThanOrEqualTo(2),
           reason: 'H3 至少比正文大一档，暗色主题下才分得出来');
+    });
+
+    testWidgets('相邻标题按外边距折叠，空行不再叠出大空洞', (WidgetTester tester) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_heading_gap_',
+      );
+
+      // 没有空行（App 自己存盘的紧凑格式）：折叠后间距 = 下一档标题段前。
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('heading_tight', '# 一级标题\n## 二级标题\n### 三级标题'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Rect t1 = tester.getRect(find.text('一级标题', findRichText: true));
+      final Rect t2 = tester.getRect(find.text('二级标题', findRichText: true));
+      final Rect t3 = tester.getRect(find.text('三级标题', findRichText: true));
+      expect(t2.top - t1.bottom, closeTo(22, 2));
+      expect(t3.top - t2.bottom, closeTo(18, 2));
+
+      // 换一份笔记时必须先卸载旧页面，否则状态复用不会重新解析正文。
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // 带空行（外部 md）：空行只占自己一行，不再叠加标题段前段后。
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('heading_gap', '# 一级标题\n\n## 二级标题\n\n### 三级标题'),
+          autoFocus: false,
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Rect h1 = tester.getRect(find.text('一级标题', findRichText: true));
+      final Rect h2 = tester.getRect(find.text('二级标题', findRichText: true));
+      final Rect h3 = tester.getRect(find.text('三级标题', findRichText: true));
+      // 旧实现：10 + 12 + 空行行盒 + 22 ≈ 58，三个标题连排像空了好几行。
+      expect(h2.top - h1.bottom, lessThan(42));
+      expect(h3.top - h2.bottom, lessThan(40));
+      // 空行仍在，不能贴死。
+      expect(h2.top - h1.bottom, greaterThan(24));
     });
 
     testWidgets('代码块：字号/行高/等宽与列表摘要同源', (WidgetTester tester) async {
@@ -1163,7 +1211,8 @@ void main() {
       // 附件卡片：深色下用深色表面，不能沿用浅色底 + 深色字。
       final bool hasDarkCard = tester
           .widgetList<Material>(find.byType(Material))
-          .any((Material material) => material.color == AppColors.dark.surface2);
+          .any(
+              (Material material) => material.color == AppColors.dark.surface2);
       expect(hasDarkCard, isTrue, reason: '附件卡片底色必须跟随深色主题');
     });
 
@@ -1200,8 +1249,7 @@ void main() {
       );
       expect(label.style?.color, Colors.black87);
     });
-    testWidgets('PDF 预览页跟随深色主题：页面与阅读区都是深色底',
-        (WidgetTester tester) async {
+    testWidgets('PDF 预览页跟随深色主题：页面与阅读区都是深色底', (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.dark(),

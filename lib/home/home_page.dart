@@ -1,7 +1,13 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart'
+    show
+        HapticFeedback,
+        MethodChannel,
+        MissingPluginException,
+        PlatformException,
+        SystemNavigator;
 
 import '../app/shortcuts.dart';
 import '../data/note_repository.dart';
@@ -27,6 +33,9 @@ import '../util/share.dart';
 import 'note_preview_cache.dart';
 import 'note_tile_comfortable.dart';
 import 'note_tile_compact.dart';
+
+/// 系统动作通道（与 MainActivity 的 `xiaoji/native` 对应）。
+const MethodChannel _nativeChannel = MethodChannel('xiaoji/native');
 
 /// 主页：时间流式的笔记列表。
 ///
@@ -291,6 +300,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _searchMode = false;
     });
+  }
+
+  /// 主页返回：只把任务退到后台，不结束进程。
+  ///
+  /// 交给系统默认处理会 finish Activity、销毁 Flutter 引擎，用户下次点图标
+  /// 就是冷启动（列表重建、滚动位置与搜索状态全丢）。主流 App 的做法是
+  /// 退到桌面但保留页面状态，这里走原生的 `moveTaskToBack`。
+  Future<void> _moveTaskToBack() async {
+    try {
+      final bool moved =
+          await _nativeChannel.invokeMethod<bool>('moveTaskToBack') ?? false;
+      if (moved) {
+        return;
+      }
+    } on MissingPluginException {
+      // 桌面 / 测试环境没有原生实现：退回系统默认返回。
+    } on PlatformException {
+      // 原生侧失败时同样不把用户卡在页面里。
+    }
+    await SystemNavigator.pop();
   }
 
   Future<void> _openEditor(
@@ -678,103 +707,119 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final double contentWidth = AppBreakpoints.contentMaxWidth(screenWidth);
     final double fabEndInset = math.max(0, (screenWidth - contentWidth) / 2);
 
-    return Scaffold(
-      // 两档密度两种底色语义：紧凑 = 纯色列表（文字对比优先），
-      // 舒适 = 卡片浮在次级底色上。
-      backgroundColor:
-          density == ListDensity.compact ? colors.page : comfortableBg,
-      body: SafeArea(
-        bottom: false,
-        child: ListenableBuilder(
-          listenable: _repo,
-          builder: (BuildContext context, Widget? child) {
-            final notes = _repo.visibleNotes;
-            _maybeNotifyBackupFailure(notes.isNotEmpty);
-            return Column(
-              children: <Widget>[
-                // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
-                // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
-                ContentFrame(
-                  child: _searchMode
-                      ? _buildSearchBar(colors)
-                      : _buildTitleBar(colors),
-                ),
-                if (_repo.isSearching && !_repo.isLoading)
+    // 根路由拦截系统返回（侧滑手势 / 返回键）：
+    // 搜索态先退出搜索，否则退到后台而不是销毁进程，体验与主流 App 一致。
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, void result) {
+        if (didPop) {
+          return;
+        }
+        if (_searchMode) {
+          _exitSearch();
+          return;
+        }
+        _moveTaskToBack();
+      },
+      child: Scaffold(
+        // 两档密度两种底色语义：紧凑 = 纯色列表（文字对比优先），
+        // 舒适 = 卡片浮在次级底色上。
+        backgroundColor:
+            density == ListDensity.compact ? colors.page : comfortableBg,
+        body: SafeArea(
+          bottom: false,
+          child: ListenableBuilder(
+            listenable: _repo,
+            builder: (BuildContext context, Widget? child) {
+              final notes = _repo.visibleNotes;
+              _maybeNotifyBackupFailure(notes.isNotEmpty);
+              return Column(
+                children: <Widget>[
+                  // 顶栏与列表用同一条内容宽度：宽屏下列表被 ContentFrame
+                  // 收窄居中，标题/搜索框若还贴着屏幕边，两者会左右错位。
                   ContentFrame(
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        _pageInset,
-                        AppSpace.xs,
-                        _pageInset,
-                        AppSpace.sm,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '共 ${notes.length} 条',
-                          style: TextStyle(
-                            fontSize: AppFontSize.caption,
-                            letterSpacing: 0.2,
-                            color: colors.tertiary,
+                    child: _searchMode
+                        ? _buildSearchBar(colors)
+                        : _buildTitleBar(colors),
+                  ),
+                  if (_repo.isSearching && !_repo.isLoading)
+                    ContentFrame(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          _pageInset,
+                          AppSpace.xs,
+                          _pageInset,
+                          AppSpace.sm,
+                        ),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '共 ${notes.length} 条',
+                            style: TextStyle(
+                              fontSize: AppFontSize.caption,
+                              letterSpacing: 0.2,
+                              color: colors.tertiary,
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  Expanded(
+                    child: _repo.isLoading
+                        ? const Center(
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 1.6),
+                            ),
+                          )
+                        : (notes.isEmpty
+                            ? _EmptyState(searching: _repo.isSearching)
+                            // 平板：内容限宽居中，长列表不拉满整屏。
+                            : ContentFrame(
+                                child: _buildList(colors, notes, density),
+                              )),
                   ),
-                Expanded(
-                  child: _repo.isLoading
-                      ? const Center(
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 1.6),
-                          ),
-                        )
-                      : (notes.isEmpty
-                          ? _EmptyState(searching: _repo.isSearching)
-                          // 平板：内容限宽居中，长列表不拉满整屏。
-                          : ContentFrame(
-                              child: _buildList(colors, notes, density),
-                            )),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
-      ),
-      // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
-      // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
-      floatingActionButton: _searchMode
-          ? null
-          // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
-          : Padding(
-              padding: EdgeInsets.only(right: fabEndInset),
-              child: Tooltip(
-                message: '新建小记',
-                child: AppPressable(
-                  onTap: () => _openEditor(null),
-                  pressedScale: 0.95,
-                  pressedOpacity: 0.9,
-                  child: Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: colors.fabBackground,
-                      shape: BoxShape.circle,
-                      boxShadow: AppShadow.floating,
-                    ),
-                    child: Icon(
-                      // 实色圆底上用实心笔（与 Gmail 新建按钮同一处理）：
-                      // 描边笔在饱和蓝上笔画偏细，远看容易糊成一团。
-                      Icons.edit_rounded,
-                      size: AppIcon.fab,
-                      color: colors.fabForeground,
+        // 右下角悬浮球：与 Keep / 备忘录一致，只有一个新建入口，
+        // 不占用列表高度；搜索态隐藏，避免和键盘抢位置。
+        floatingActionButton: _searchMode
+            ? null
+            // iOS 圆形浮动按钮：蓝色填充 + 轻投影，按下缩到 92%。
+            : Padding(
+                padding: EdgeInsets.only(right: fabEndInset),
+                child: Tooltip(
+                  message: '新建小记',
+                  child: AppPressable(
+                    onTap: () => _openEditor(null),
+                    pressedScale: 0.95,
+                    pressedOpacity: 0.9,
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: colors.fabBackground,
+                        shape: BoxShape.circle,
+                        boxShadow: AppShadow.floating,
+                      ),
+                      child: Icon(
+                        // 实色圆底上用实心笔（与 Gmail 新建按钮同一处理）：
+                        // 描边笔在饱和蓝上笔画偏细，远看容易糊成一团。
+                        Icons.edit_rounded,
+                        size: AppIcon.fab,
+                        color: colors.fabForeground,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      ),
     );
   }
 

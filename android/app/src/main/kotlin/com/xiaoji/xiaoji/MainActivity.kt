@@ -108,6 +108,12 @@ class MainActivity : FlutterActivity() {
                     "shareFile" -> shareAttachment(call.argument<String>("path"), result)
                     "openUrl" -> openExternalUrl(call.argument<String>("url"), result)
                     "appInfo" -> appInfo(result)
+                    // 主页返回：只把任务退到后台，不 finish() Activity。
+                    // finish() 会卸载 Flutter 引擎，下次点图标就是冷启动；
+                    // 退到后台则保留进程与页面状态，和主流 App 一致。
+                    "moveTaskToBack" -> {
+                        result.success(moveTaskToBack(true))
+                    }
                     "consumeSharedContent" -> {
                         result.success(pendingShare)
                         pendingShare = null

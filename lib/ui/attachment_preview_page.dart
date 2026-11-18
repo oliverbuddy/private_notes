@@ -210,9 +210,7 @@ class _TextPreviewState extends State<_TextPreview> {
           return _PreviewError(
             colors: widget.colors,
             fileName: widget.fileName,
-            message: tooLarge
-                ? '文件过大，试试用其他应用打开。'
-                : '文件可能已损坏，试试用其他应用打开。',
+            message: tooLarge ? '文件过大，试试用其他应用打开。' : '文件可能已损坏，试试用其他应用打开。',
             onOpenExternally: widget.onOpenExternally,
           );
         }
@@ -221,12 +219,19 @@ class _TextPreviewState extends State<_TextPreview> {
           child: SingleChildScrollView(
             controller: _scrollController,
             padding: const EdgeInsets.all(AppSpace.page),
-            child: SelectableText(
-              snapshot.data ?? '',
-              style: TextStyle(
-                fontSize: AppFontSize.body,
-                height: 1.6,
-                color: widget.colors.text,
+            // 不要用 SelectableText：它和全局的 BouncingScrollPhysics
+            // 抢手势，真机上拖动正文完全不滚动（长文本只能看到第一屏，
+            // 用户反馈「xml 超过一页看不到下一页」）。
+            // SelectionArea + Text 是 Material 3 推荐的组合：长按仍可选中
+            // 复制，普通拖动则交给外层滚动。
+            child: SelectionArea(
+              child: Text(
+                snapshot.data ?? '',
+                style: TextStyle(
+                  fontSize: AppFontSize.body,
+                  height: 1.6,
+                  color: widget.colors.text,
+                ),
               ),
             ),
           ),
