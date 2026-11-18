@@ -66,6 +66,11 @@ android {
             // lib/x86_64/libdartjni.so 一起剔掉，避免 APK 声明「支持 x86_64」
             // 实际装上去却缺引擎。
             excludes += "lib/x86_64/**"
+            // 压缩 native 库：AGP 默认把 .so 原样存进 APK（31 MB 的包里约
+            // 30 MB 都是 libflutter / libapp / libpdfium / libsqlite3），
+            // 改成 deflate 后下载体积大约减半。代价是安装时解压到应用目录，
+            // 磁盘占用会比「直接映射 APK 内 .so」更大。
+            useLegacyPackaging = true
         }
     }
 
