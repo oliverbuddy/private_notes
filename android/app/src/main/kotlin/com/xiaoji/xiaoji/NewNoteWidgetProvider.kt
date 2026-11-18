@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.app.WallpaperManager
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -19,6 +20,11 @@ import android.widget.RemoteViews
  * 产品上这是最短路径 —— 解锁手机后点一下，直接落到空白编辑页并弹出键盘，
  * 中间不经过列表、不经过任何菜单。点击复用 `xiaoji.action=new_note`
  * 这条已有通道（与长按图标快捷方式同一套），所以冷启动和热启动都走现成逻辑。
+ *
+ * 锁屏适配：Android 16 QPR2 起，手机锁屏可以直接添加「主屏幕上已有」的
+ * 小组件，不需要 App 额外声明。锁屏宿主会通过
+ * `OPTION_APPWIDGET_HOST_CATEGORY` 告知自己是 keyguard，这里据此隐藏
+ * 「新建小记」标题，让卡片在锁屏里保持干净、不与系统组件名重复。
  */
 class NewNoteWidgetProvider : AppWidgetProvider() {
 
@@ -60,9 +66,16 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
             // 卡片下方的标题直接画在壁纸上，颜色必须跟着壁纸深浅走，
             // 否则浅色壁纸配白字会「看起来没有标题」（真机上出现过）。
             views.setTextColor(R.id.widget_title, titleColor(context))
+            // 锁屏上不显示标题：锁屏小组件容器自带视觉边界，再叠一行
+            // App 名会显得重复；宿主没上报分类时按桌面处理，行为不变。
+            val onKeyguard = isKeyguardHost(appWidgetManager.getAppWidgetOptions(widgetId))
             views.setViewVisibility(
                 R.id.widget_title,
-                if (shouldShowTitle(appWidgetManager, widgetId)) View.VISIBLE else View.GONE,
+                if (!onKeyguard && shouldShowTitle(appWidgetManager, widgetId)) {
+                    View.VISIBLE
+                } else {
+                    View.GONE
+                },
             )
             appWidgetManager.updateAppWidget(widgetId, views)
         }
@@ -77,6 +90,20 @@ class NewNoteWidgetProvider : AppWidgetProvider() {
         val minHeight = appWidgetManager.getAppWidgetOptions(widgetId)
             .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
         return minHeight <= 0 || minHeight >= 64
+    }
+
+    /**
+     * 当前实例是否被锁屏宿主托管。
+     *
+     * `OPTION_APPWIDGET_HOST_CATEGORY` 由宿主写入，未提供时等价于桌面。
+     * 只在 Android 16 QPR2+ 的锁屏小组件面板里会拿到 keyguard；旧系统
+     * 不会走到这个分支，不影响原有桌面表现。
+     */
+    private fun isKeyguardHost(options: Bundle): Boolean {
+        return options.getInt(
+            AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
+            AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN,
+        ) == AppWidgetProviderInfo.WIDGET_CATEGORY_KEYGUARD
     }
 
     /**
