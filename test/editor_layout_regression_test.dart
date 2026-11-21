@@ -300,6 +300,61 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 6));
     });
+
+    testWidgets('行首收到「删一个字符」请求时同样并入上一行，不吞手势', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_char_backspace_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('char_backspace', '# 标题\n正文')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final SuperEditor widget = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final Editor editor = widget.editor;
+      final DocumentNode body = editor.document.getNodeAt(1)!;
+
+      editor.execute(<EditRequest>[
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: body.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+        const DeleteUpstreamCharacterRequest(),
+      ]);
+      await _pumpFrames(tester, frames: 6);
+
+      final ParagraphNode merged =
+          editor.document.getNodeAt(0)! as ParagraphNode;
+      expect(
+        merged.getMetadataValue(NodeMetadata.blockType),
+        header1Attribution,
+        reason: '行首退格应并入上一行并沿用其标题格式',
+      );
+      expect(merged.text.toPlainText(), '标题正文');
+      final DocumentSelection? selection = editor.composer.selection;
+      expect(selection, isNotNull);
+      expect(selection!.extent.nodeId, merged.id);
+      expect(
+        (selection.extent.nodePosition as TextNodePosition).offset,
+        2,
+        reason: '光标停在拼接处',
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
   });
 
   group('标题回车换行', () {

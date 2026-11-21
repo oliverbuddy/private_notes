@@ -14,10 +14,88 @@ import 'xiaoji_markdown.dart';
 final List<EditRequestHandler> xiaojiRequestHandlers =
     List<EditRequestHandler>.unmodifiable(<EditRequestHandler>[
   _horizontalRuleHandler,
+  _backspaceAtLineStartHandler,
   _codeFenceOpeningHandler,
   _codeBlockNewlineHandler,
   _blockquoteContinuationHandler,
 ]);
+
+/// 行首退格统一按「并入上一行」处理。
+///
+/// 常规逻辑：光标在行首按退格 = 把这一行并到上一行，整行沿用上一行格式，
+/// 光标停在拼接处（Word / Notion / 语雀一致）。
+/// 内核的 `DeleteUpstreamCharacterCommand` 在 offset 0 会直接抛异常，
+/// 部分输入法在行首发的正是「删一个字符」请求，结果是这下手势被吞掉、
+/// 甚至删到上一行末尾的字符（用户反馈「正文行首退格和标题一样」）。
+/// 这里在行首把它换成标准的「向上合并」，其余位置原样交回内核。
+EditCommand? _backspaceAtLineStartHandler(Editor editor, EditRequest request) {
+  if (request is! DeleteUpstreamCharacterRequest) {
+    return null;
+  }
+  final DocumentSelection? selection = editor.composer.selection;
+  if (selection == null || !selection.isCollapsed) {
+    return null;
+  }
+  final NodePosition position = selection.extent.nodePosition;
+  if (position is! TextNodePosition || position.offset != 0) {
+    return null;
+  }
+  final DocumentNode? node =
+      editor.document.getNodeById(selection.extent.nodeId);
+  if (node is! ParagraphNode) {
+    return null;
+  }
+  final DocumentNode? previous = editor.document.getNodeBeforeById(node.id);
+  if (previous is! ParagraphNode) {
+    return null;
+  }
+  return _MergeIntoPreviousLineCommand(node.id);
+}
+
+/// 把当前段落并入上一段（沿用上一段格式），光标停在拼接处。
+///
+/// 与内核「行首退格」的语义完全一致，只是不依赖 `DeleteUpstreamCharacter`
+/// 那条在 offset 0 会抛异常的路径。
+class _MergeIntoPreviousLineCommand extends EditCommand {
+  const _MergeIntoPreviousLineCommand(this.nodeId);
+
+  final String nodeId;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final MutableDocument document = context.document;
+    final DocumentNode? node = document.getNodeById(nodeId);
+    final DocumentNode? previous =
+        node == null ? null : document.getNodeBeforeById(node.id);
+    if (node is! ParagraphNode || previous is! ParagraphNode) {
+      return;
+    }
+    final int caretOffset = previous.text.length;
+    executor
+      ..executeCommand(
+        CombineParagraphsCommand(
+          firstNodeId: previous.id,
+          secondNodeId: node.id,
+        ),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: previous.id,
+              nodePosition: TextNodePosition(offset: caretOffset),
+            ),
+          ),
+          SelectionChangeType.deleteContent,
+          SelectionReason.userInteraction,
+        ),
+      )
+      ..executeCommand(ChangeComposingRegionCommand(null));
+  }
+}
 
 /// 组装小记内核。
 ///
