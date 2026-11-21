@@ -3618,8 +3618,8 @@ class _NewEditorPageState extends State<NewEditorPage>
           },
         ),
         // 标题六档：26/21/18/16.5/16/16，行高 1.28–1.45。
-        // 段前留白 30/24/20/16/14/12 逐级递减 —— 参考 GitHub/语雀的
-        // 「标题前留白明显大于段后」，一章开始时有呼吸感，又不会把半屏吃掉。
+        // 段前留白 20/16/14/12/10/10 逐级递减 —— 参考语雀手机端 / Notion
+        // 的「标题前留白略大于段后」，章节分隔清晰，又不会把半屏吃掉。
         // leadingDistribution.even 与正文保持一致。
         StyleRule(
           const BlockSelector('header1'),
@@ -3633,7 +3633,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 24),
+              top: _headerTopSpacing(doc, node, 20),
               bottom: 8,
             ),
           },
@@ -3650,7 +3650,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 20),
+              top: _headerTopSpacing(doc, node, 16),
               bottom: 6,
             ),
           },
@@ -3667,8 +3667,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 18),
-              bottom: 4,
+              top: _headerTopSpacing(doc, node, 14),
+              bottom: 6,
             ),
           },
         ),
@@ -3687,7 +3687,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 14),
+              top: _headerTopSpacing(doc, node, 12),
               bottom: 4,
             ),
           },
@@ -3703,7 +3703,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor.withValues(alpha: 0.88),
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 12),
+              top: _headerTopSpacing(doc, node, 10),
               bottom: 4,
             ),
           },
@@ -3719,7 +3719,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: colors.secondary,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 10),
+              top: _headerTopSpacing(doc, node, 8),
               bottom: 4,
             ),
           },
@@ -4396,11 +4396,10 @@ double _headerBottomSpacing(DocumentNode? node) {
   if (blockType == header1Attribution) {
     return 8;
   }
-  if (blockType == header2Attribution) {
+  if (blockType == header2Attribution || blockType == header3Attribution) {
     return 6;
   }
-  if (blockType == header3Attribution ||
-      blockType == header4Attribution ||
+  if (blockType == header4Attribution ||
       blockType == header5Attribution ||
       blockType == header6Attribution) {
     return 4;

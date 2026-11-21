@@ -502,13 +502,16 @@ class _SplitBlockquoteParagraphCommand extends EditCommand {
   }
 }
 
-/// 正文退格并回标题：合并后按「正文」处理，而不是整行变成标题。
+/// 正文退格并回标题：两个块各自保持原样，不把正文并成标题。
 ///
 /// 内核默认 `CombineParagraphsCommand` 保留上一个节点的类型，所以
-/// `# 标题` 下面的正文一旦退格并进标题行，标题字号会吞掉整段正文
-/// （用户反馈）。主流笔记（Notion / 语雀 / Word）里标题是块级语义，
-/// 段落合并不会把正文升级成标题，这里按同一语义处理：正文非空时合并成
-/// 普通段落；正文为空（只是删掉空行）时交回内核，标题保持不动。
+/// `# 标题` 下面的正文一旦在行首退格，标题字号会吞掉整段正文
+/// （用户反馈「正文会变成标题」）。主流笔记把标题当块级语义，退格不会
+/// 跨块类型合并：这里直接吞掉这次合并请求，标题仍是标题、正文仍是正文，
+/// 光标留在正文行首。
+///
+/// 想删掉标题这一行：光标放到**标题行首**再退格，内核会把标题降级成
+/// 正文（`DeleteUpstreamAtBeginningOfParagraphCommand`），与主流一致。
 EditCommand? _paragraphIntoHeaderHandler(Editor editor, EditRequest request) {
   if (request is! CombineParagraphsRequest) {
     return null;
@@ -519,7 +522,7 @@ EditCommand? _paragraphIntoHeaderHandler(Editor editor, EditRequest request) {
   if (first is! ParagraphNode || second is! ParagraphNode) {
     return null;
   }
-  // 空的正文只是「删掉空行」，交回内核：标题保持标题。
+  // 空的正文只是「删掉空行」，交回内核：标题保持标题、空行消失。
   if (second.text.isEmpty || !_isHeaderParagraph(first)) {
     return null;
   }
@@ -527,7 +530,17 @@ EditCommand? _paragraphIntoHeaderHandler(Editor editor, EditRequest request) {
   if (secondType != null && secondType != paragraphAttribution) {
     return null;
   }
-  return _DemoteHeaderOnMergeCommand(first.id, second.id);
+  // 只拦截「光标在正文行首、退格向上合并」；明确选中两行再删除时
+  // 仍按内核语义合并。
+  final DocumentSelection? selection = editor.composer.selection;
+  if (selection == null ||
+      !selection.isCollapsed ||
+      selection.extent.nodeId != second.id ||
+      selection.extent.nodePosition is! TextNodePosition ||
+      (selection.extent.nodePosition as TextNodePosition).offset != 0) {
+    return null;
+  }
+  return const _KeepParagraphSeparateCommand();
 }
 
 /// 该段落是否是一到六级标题。
@@ -541,54 +554,18 @@ bool _isHeaderParagraph(DocumentNode node) {
       blockType == header6Attribution;
 }
 
-/// 把「正文合并进标题」落成普通段落（标题记号一并去掉）。
-class _DemoteHeaderOnMergeCommand extends EditCommand {
-  const _DemoteHeaderOnMergeCommand(this.headerNodeId, this.bodyNodeId);
-
-  /// 上一行的标题（合并后保留它的位置）。
-  final String headerNodeId;
-
-  /// 光标所在的正文段落（合并后删除）。
-  final String bodyNodeId;
-
-  @override
-  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+/// 吞掉「正文并回标题」的合并请求：文档与选区都不动。
+///
+/// 不记历史（避免撤销里出现一次什么也没做的操作）。super_editor 在
+/// 处理完 IME delta 后一定会把当前文档与选区重新下发给输入法
+/// （`document_ime_communication.dart` 的 `_sendDocumentToIme`），
+/// 所以这里什么都不做也不会和输入法状态错位。
+class _KeepParagraphSeparateCommand extends EditCommand {
+  const _KeepParagraphSeparateCommand();
 
   @override
-  void execute(EditContext context, CommandExecutor executor) {
-    final MutableDocument document = context.document;
-    final DocumentNode? header = document.getNodeById(headerNodeId);
-    final DocumentNode? body = document.getNodeById(bodyNodeId);
-    if (header is! ParagraphNode || body is! ParagraphNode) {
-      return;
-    }
+  HistoryBehavior get historyBehavior => HistoryBehavior.nonHistorical;
 
-    final int caretOffset = header.text.length;
-    final ParagraphNode merged = header.copyParagraphWith(
-      text: header.text.copyAndAppend(body.text),
-      metadata: <String, dynamic>{
-        ...header.metadata,
-        NodeMetadata.blockType: paragraphAttribution,
-      },
-    );
-
-    executor
-      ..executeCommand(DeleteNodeCommand(nodeId: body.id))
-      ..executeCommand(
-        ReplaceNodeCommand(existingNodeId: header.id, newNode: merged),
-      )
-      ..executeCommand(
-        ChangeSelectionCommand(
-          DocumentSelection.collapsed(
-            position: DocumentPosition(
-              nodeId: merged.id,
-              nodePosition: TextNodePosition(offset: caretOffset),
-            ),
-          ),
-          SelectionChangeType.deleteContent,
-          SelectionReason.userInteraction,
-        ),
-      )
-      ..executeCommand(ChangeComposingRegionCommand(null));
-  }
+  @override
+  void execute(EditContext context, CommandExecutor executor) {}
 }

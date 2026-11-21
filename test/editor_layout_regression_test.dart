@@ -201,7 +201,9 @@ void main() {
   });
 
   group('正文并回标题', () {
-    testWidgets('退格合并后保持正文，不会整行变成标题', (WidgetTester tester) async {
+    testWidgets('行首退格不会把正文并成标题，两个块都保持原样', (
+      WidgetTester tester,
+    ) async {
       final NoteRepository repository = await _createRepository(
         tester,
         'xiaoji_merge_header_',
@@ -211,7 +213,7 @@ void main() {
       );
       await _pumpFrames(tester, frames: 12);
 
-      // 光标放到正文行首，退格并进上一行的标题。
+      // 光标放到正文行首，退格试图并进上一行的标题。
       final Rect bodyRect = tester.getRect(find.text('正文', findRichText: true));
       await tester.tapAt(Offset(bodyRect.left + 1, bodyRect.center.dy));
       await _pumpFrames(tester, frames: 6);
@@ -221,14 +223,25 @@ void main() {
       final SuperEditor editor = tester.widget<SuperEditor>(
         find.byType(SuperEditor).first,
       );
-      final DocumentNode merged = editor.editor.document.getNodeAt(0)!;
-      expect(merged, isA<ParagraphNode>());
       expect(
-        merged.getMetadataValue(NodeMetadata.blockType),
-        paragraphAttribution,
-        reason: '正文并回标题后应保持正文，不能被标题字号吞掉',
+        editor.editor.document.nodeCount,
+        3,
+        reason: '标题 + 正文 + 末尾空段落，说明没有合并成一块',
       );
-      expect((merged as ParagraphNode).text.toPlainText(), '标题正文');
+      final DocumentNode header = editor.editor.document.getNodeAt(0)!;
+      final DocumentNode body = editor.editor.document.getNodeAt(1)!;
+      expect(
+        header.getMetadataValue(NodeMetadata.blockType),
+        header1Attribution,
+        reason: '标题必须还是标题，不能被降级成正文',
+      );
+      expect((header as ParagraphNode).text.toPlainText(), '标题');
+      expect(
+        body.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '正文必须保持正文，不能被标题字号吞掉',
+      );
+      expect((body as ParagraphNode).text.toPlainText(), '正文');
       expect(tester.takeException(), isNull);
 
       // 收尾：把 super_editor 点击后启动的「自动隐藏手柄」计时器跑完。
@@ -815,8 +828,8 @@ void main() {
       final Rect t1 = tester.getRect(find.text('一级标题', findRichText: true));
       final Rect t2 = tester.getRect(find.text('二级标题', findRichText: true));
       final Rect t3 = tester.getRect(find.text('三级标题', findRichText: true));
-      expect(t2.top - t1.bottom, closeTo(20, 2));
-      expect(t3.top - t2.bottom, closeTo(18, 2));
+      expect(t2.top - t1.bottom, closeTo(16, 2));
+      expect(t3.top - t2.bottom, closeTo(14, 2));
 
       // 换一份笔记时必须先卸载旧页面，否则状态复用不会重新解析正文。
       await tester.pumpWidget(const SizedBox.shrink());
