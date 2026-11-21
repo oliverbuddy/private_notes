@@ -3532,7 +3532,13 @@ class _NewEditorPageState extends State<NewEditorPage>
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.textStyle: const TextStyle(height: paragraphHeight),
+            // 空行紧挨标题时按半行高渲染：既保留空行本身（存盘不丢），
+            // 又不会让标题前后空出 30dp+（用户反复反馈的「标题间距太大」）。
+            Styles.textStyle: TextStyle(
+              height: _isEmptyParagraphBesideHeader(doc, node)
+                  ? 0.5
+                  : paragraphHeight,
+            ),
             // 空行（外部 md 导入的空段落）本身已经占一整行，再叠加 12 的
             // 段距会让「标题 / 正文之间」多出一大块空白（用户反馈）。
             Styles.padding: CascadingPadding.only(
@@ -4371,6 +4377,31 @@ bool _isEmptyParagraph(DocumentNode? node) {
       node.text.isEmpty &&
       (node.getMetadataValue(NodeMetadata.blockType) ?? paragraphAttribution) ==
           paragraphAttribution;
+}
+
+/// 该节点是否是标题段落（H1–H6）。
+bool _isHeaderNode(DocumentNode? node) {
+  final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
+  return blockType == header1Attribution ||
+      blockType == header2Attribution ||
+      blockType == header3Attribution ||
+      blockType == header4Attribution ||
+      blockType == header5Attribution ||
+      blockType == header6Attribution;
+}
+
+/// 空行是否紧挨着标题（上一块或下一块是 H1–H6）。
+///
+/// 外部 md / 旧笔记里标题前后常留一行空行，编辑器里那是真实空段落
+/// （约 26dp）。空行本身要保留（存盘不丢），但紧挨标题时按半行高渲染，
+/// 否则标题间距会被这行空行撑成 30dp+ —— 用户反复反馈「标题间距太大」，
+/// 只调标题的 padding 根本看不出来。
+bool _isEmptyParagraphBesideHeader(Document doc, DocumentNode node) {
+  if (!_isEmptyParagraph(node)) {
+    return false;
+  }
+  return _isHeaderNode(doc.getNodeBeforeById(node.id)) ||
+      _isHeaderNode(doc.getNodeAfterById(node.id));
 }
 
 /// 段落的段前留白：空行自己不需要段距，紧接空行后面的块也不再叠段距。

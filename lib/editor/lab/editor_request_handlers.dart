@@ -15,6 +15,7 @@ final List<EditRequestHandler> xiaojiRequestHandlers =
     List<EditRequestHandler>.unmodifiable(<EditRequestHandler>[
   _horizontalRuleHandler,
   _paragraphIntoHeaderHandler,
+  _caretAfterDemotionHandler,
   _codeFenceOpeningHandler,
   _codeBlockNewlineHandler,
   _blockquoteContinuationHandler,
@@ -502,46 +503,113 @@ class _SplitBlockquoteParagraphCommand extends EditCommand {
   }
 }
 
-/// 正文退格并回标题：两个块各自保持原样，不把正文并成标题。
+/// 正文退格试图并回标题：先把上一行标题降级成正文，不合并文字。
 ///
-/// 内核默认 `CombineParagraphsCommand` 保留上一个节点的类型，所以
-/// `# 标题` 下面的正文一旦在行首退格，标题字号会吞掉整段正文
-/// （用户反馈「正文会变成标题」）。主流笔记把标题当块级语义，退格不会
-/// 跨块类型合并：这里直接吞掉这次合并请求，标题仍是标题、正文仍是正文，
-/// 光标留在正文行首。
+/// 内核默认合并时保留上一个节点（标题）的类型，`# 标题` 下面的正文
+/// 一旦在行首退格，标题字号会吞掉整段正文（用户反馈「正文会变成标题」）。
+/// 这里按主流的「逐级退格」处理：
+///  1. 第一次退格：标题回退成正文（两块都在，文字不动）；
+///  2. 继续退格：两块都是正文，正常合并，光标跟着往前移动。
 ///
-/// 想删掉标题这一行：光标放到**标题行首**再退格，内核会把标题降级成
-/// 正文（`DeleteUpstreamAtBeginningOfParagraphCommand`），与主流一致。
+/// 两条链路都要接：
+///  - 手机输入法：`DeleteUpstreamAtBeginningOfNodeRequest` →
+///    内核 `DeleteUpstreamAtBeginningOfParagraphCommand`（会直接合并）；
+///  - 硬件键盘：`CombineParagraphsRequest` + 随后的一条
+///    `ChangeSelectionRequest`（把光标挪到标题末尾，需由
+///    [_caretAfterDemotionHandler] 纠回正文行首）。
 EditCommand? _paragraphIntoHeaderHandler(Editor editor, EditRequest request) {
-  if (request is! CombineParagraphsRequest) {
-    return null;
+  if (request is DeleteUpstreamAtBeginningOfNodeRequest) {
+    final DocumentNode node = request.node;
+    if (!_isBodyParagraphAtStart(editor, node)) {
+      return null;
+    }
+    final DocumentNode? previous = editor.document.getNodeBeforeById(node.id);
+    if (previous is! ParagraphNode || !_isHeaderParagraph(previous)) {
+      return null;
+    }
+    return _DemoteHeaderAboveCommand(previous.id);
   }
-  final DocumentNode? first = editor.document.getNodeById(request.firstNodeId);
-  final DocumentNode? second =
-      editor.document.getNodeById(request.secondNodeId);
-  if (first is! ParagraphNode || second is! ParagraphNode) {
-    return null;
+
+  if (request is CombineParagraphsRequest) {
+    final DocumentNode? first =
+        editor.document.getNodeById(request.firstNodeId);
+    final DocumentNode? second =
+        editor.document.getNodeById(request.secondNodeId);
+    if (first is! ParagraphNode ||
+        !_isHeaderParagraph(first) ||
+        !_isBodyParagraphAtStart(editor, second)) {
+      return null;
+    }
+    // 合并请求之后内核还会把光标挪到标题末尾；记下来，下一步纠回正文行首。
+    _pendingDemotions.add(
+      _PendingDemotion(
+        headerId: first.id,
+        bodyId: second!.id,
+        headerLength: first.text.length,
+      ),
+    );
+    return _DemoteHeaderAboveCommand(first.id);
   }
-  // 空的正文只是「删掉空行」，交回内核：标题保持标题、空行消失。
-  if (second.text.isEmpty || !_isHeaderParagraph(first)) {
-    return null;
-  }
-  final Object? secondType = second.getMetadataValue(NodeMetadata.blockType);
-  if (secondType != null && secondType != paragraphAttribution) {
-    return null;
-  }
-  // 只拦截「光标在正文行首、退格向上合并」；明确选中两行再删除时
-  // 仍按内核语义合并。
-  final DocumentSelection? selection = editor.composer.selection;
-  if (selection == null ||
-      !selection.isCollapsed ||
-      selection.extent.nodeId != second.id ||
-      selection.extent.nodePosition is! TextNodePosition ||
-      (selection.extent.nodePosition as TextNodePosition).offset != 0) {
-    return null;
-  }
-  return const _KeepParagraphSeparateCommand();
+
+  return null;
 }
+
+/// 是否是「普通正文段落、光标停在行首」——可以安全降级上方标题的状态。
+bool _isBodyParagraphAtStart(Editor editor, DocumentNode? node) {
+  if (node is! ParagraphNode || node.text.isEmpty) {
+    return false;
+  }
+  final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+  if (blockType != null && blockType != paragraphAttribution) {
+    return false;
+  }
+  final DocumentSelection? selection = editor.composer.selection;
+  return selection != null &&
+      selection.isCollapsed &&
+      selection.extent.nodeId == node.id &&
+      selection.extent.nodePosition is TextNodePosition &&
+      (selection.extent.nodePosition as TextNodePosition).offset == 0;
+}
+
+/// 硬件键盘链路里，合并之后那条「光标挪到标题末尾」的选区请求。
+///
+/// 我们已经把合并换成了「只降级标题」，所以这条选区也要改回正文行首，
+/// 否则下一次退格会删掉标题的最后一个字（实测）。
+EditCommand? _caretAfterDemotionHandler(Editor editor, EditRequest request) {
+  if (request is! ChangeSelectionRequest || _pendingDemotions.isEmpty) {
+    return null;
+  }
+  final DocumentSelection? selection = request.newSelection;
+  if (selection == null || !selection.isCollapsed) {
+    return null;
+  }
+  final _PendingDemotion pending = _pendingDemotions.last;
+  if (selection.extent.nodeId != pending.headerId) {
+    return null;
+  }
+  final NodePosition position = selection.extent.nodePosition;
+  if (position is! TextNodePosition ||
+      position.offset != pending.headerLength) {
+    return null;
+  }
+  _pendingDemotions.removeLast();
+  return _RestoreBodyCaretCommand(pending.bodyId);
+}
+
+/// 待纠正的光标位置（见 [_caretAfterDemotionHandler]）。
+class _PendingDemotion {
+  const _PendingDemotion({
+    required this.headerId,
+    required this.bodyId,
+    required this.headerLength,
+  });
+
+  final String headerId;
+  final String bodyId;
+  final int headerLength;
+}
+
+final List<_PendingDemotion> _pendingDemotions = <_PendingDemotion>[];
 
 /// 该段落是否是一到六级标题。
 bool _isHeaderParagraph(DocumentNode node) {
@@ -554,18 +622,56 @@ bool _isHeaderParagraph(DocumentNode node) {
       blockType == header6Attribution;
 }
 
-/// 吞掉「正文并回标题」的合并请求：文档与选区都不动。
-///
-/// 不记历史（避免撤销里出现一次什么也没做的操作）。super_editor 在
-/// 处理完 IME delta 后一定会把当前文档与选区重新下发给输入法
-/// （`document_ime_communication.dart` 的 `_sendDocumentToIme`），
-/// 所以这里什么都不做也不会和输入法状态错位。
-class _KeepParagraphSeparateCommand extends EditCommand {
-  const _KeepParagraphSeparateCommand();
+/// 把上一行的标题降级成普通段落，文字与选区都不动。
+class _DemoteHeaderAboveCommand extends EditCommand {
+  const _DemoteHeaderAboveCommand(this.headerNodeId);
+
+  final String headerNodeId;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final DocumentNode? header = context.document.getNodeById(headerNodeId);
+    if (header == null || !_isHeaderParagraph(header)) {
+      return;
+    }
+    executor.executeCommand(
+      ChangeParagraphBlockTypeCommand(
+        nodeId: header.id,
+        blockType: paragraphAttribution,
+      ),
+    );
+  }
+}
+
+/// 把光标放回正文行首（抵消内核「挪到标题末尾」的选区请求）。
+class _RestoreBodyCaretCommand extends EditCommand {
+  const _RestoreBodyCaretCommand(this.bodyNodeId);
+
+  final String bodyNodeId;
 
   @override
   HistoryBehavior get historyBehavior => HistoryBehavior.nonHistorical;
 
   @override
-  void execute(EditContext context, CommandExecutor executor) {}
+  void execute(EditContext context, CommandExecutor executor) {
+    final DocumentNode? body = context.document.getNodeById(bodyNodeId);
+    if (body == null) {
+      return;
+    }
+    executor.executeCommand(
+      ChangeSelectionCommand(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: body.id,
+            nodePosition: const TextNodePosition(offset: 0),
+          ),
+        ),
+        SelectionChangeType.deleteContent,
+        SelectionReason.userInteraction,
+      ),
+    );
+  }
 }

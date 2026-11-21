@@ -201,7 +201,7 @@ void main() {
   });
 
   group('正文并回标题', () {
-    testWidgets('行首退格不会把正文并成标题，两个块都保持原样', (
+    testWidgets('正文行首退格：标题先回退成正文，继续退格正常合并并移动光标', (
       WidgetTester tester,
     ) async {
       final NoteRepository repository = await _createRepository(
@@ -220,31 +220,116 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
       await _pumpFrames(tester, frames: 8);
 
-      final SuperEditor editor = tester.widget<SuperEditor>(
+      SuperEditor editor = tester.widget<SuperEditor>(
         find.byType(SuperEditor).first,
       );
+      // 第一次退格：标题回退成正文，两块都在、文字都没被吞。
+      expect(editor.editor.document.nodeCount, 3);
+      final DocumentNode demoted = editor.editor.document.getNodeAt(0)!;
       expect(
-        editor.editor.document.nodeCount,
-        3,
-        reason: '标题 + 正文 + 末尾空段落，说明没有合并成一块',
+        demoted.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '标题应先回退成普通正文',
       );
-      final DocumentNode header = editor.editor.document.getNodeAt(0)!;
+      expect((demoted as ParagraphNode).text.toPlainText(), '标题');
       final DocumentNode body = editor.editor.document.getNodeAt(1)!;
-      expect(
-        header.getMetadataValue(NodeMetadata.blockType),
-        header1Attribution,
-        reason: '标题必须还是标题，不能被降级成正文',
-      );
-      expect((header as ParagraphNode).text.toPlainText(), '标题');
       expect(
         body.getMetadataValue(NodeMetadata.blockType),
         paragraphAttribution,
-        reason: '正文必须保持正文，不能被标题字号吞掉',
+        reason: '正文不能被标题字号吞掉',
       );
       expect((body as ParagraphNode).text.toPlainText(), '正文');
+
+      // 继续退格：两块都是正文，正常合并，光标跟着移动到拼接处。
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await _pumpFrames(tester, frames: 8);
+      editor = tester.widget<SuperEditor>(find.byType(SuperEditor).first);
+      final DocumentNode merged = editor.editor.document.getNodeAt(0)!;
+      expect((merged as ParagraphNode).text.toPlainText(), '标题正文');
+      final selection = editor.editor.composer.selection;
+      expect(selection, isNotNull);
+      expect(selection!.extent.nodeId, merged.id);
+      expect(
+        (selection.extent.nodePosition as TextNodePosition).offset,
+        2,
+        reason: '光标应停在原正文行首（拼接处）',
+      );
       expect(tester.takeException(), isNull);
 
       // 收尾：把 super_editor 点击后启动的「自动隐藏手柄」计时器跑完。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+
+    testWidgets('输入法链路同样先降级标题，再退格才合并并移动光标', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_ime_merge_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('ime_merge', '# 标题\n正文')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final SuperEditor widget = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final Editor editor = widget.editor;
+      final DocumentNode header = editor.document.getNodeAt(0)!;
+      final DocumentNode body = editor.document.getNodeAt(1)!;
+
+      // 手机输入法：光标在正文行首，退格会发
+      // DeleteUpstreamAtBeginningOfNodeRequest。
+      editor.execute(<EditRequest>[
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: body.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+        DeleteUpstreamAtBeginningOfNodeRequest(body),
+      ]);
+      await _pumpFrames(tester, frames: 6);
+
+      final DocumentNode demoted = editor.document.getNodeById(header.id)!;
+      expect(
+        demoted.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '标题应先回退成正文',
+      );
+      expect((demoted as ParagraphNode).text.toPlainText(), '标题');
+      expect(
+        (editor.document.getNodeById(body.id)! as ParagraphNode)
+            .text
+            .toPlainText(),
+        '正文',
+        reason: '正文不能被标题吞掉',
+      );
+
+      // 再退一次：两块都是正文，正常合并，光标停在拼接处。
+      editor.execute(<EditRequest>[
+        DeleteUpstreamAtBeginningOfNodeRequest(
+          editor.document.getNodeById(body.id)!,
+        ),
+      ]);
+      await _pumpFrames(tester, frames: 6);
+      final ParagraphNode merged =
+          editor.document.getNodeAt(0)! as ParagraphNode;
+      expect(merged.text.toPlainText(), '标题正文');
+      final DocumentSelection? selection = editor.composer.selection;
+      expect(selection, isNotNull);
+      expect(selection!.extent.nodeId, merged.id);
+      expect(
+        (selection.extent.nodePosition as TextNodePosition).offset,
+        2,
+      );
+
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 6));
     });
@@ -847,11 +932,12 @@ void main() {
       final Rect h1 = tester.getRect(find.text('一级标题', findRichText: true));
       final Rect h2 = tester.getRect(find.text('二级标题', findRichText: true));
       final Rect h3 = tester.getRect(find.text('三级标题', findRichText: true));
-      // 旧实现：10 + 12 + 空行行盒 + 22 ≈ 58，三个标题连排像空了好几行。
-      expect(h2.top - h1.bottom, lessThan(42));
-      expect(h3.top - h2.bottom, lessThan(40));
+      // 空行紧挨标题时按半行高渲染：H1 段后 8 + 空行 8 ≈ 16，
+      // H2 段后 6 + 空行 8 ≈ 14，与没有空行时基本一致。
+      expect(h2.top - h1.bottom, closeTo(16, 2));
+      expect(h3.top - h2.bottom, closeTo(14, 2));
       // 空行仍在，不能贴死。
-      expect(h2.top - h1.bottom, greaterThan(24));
+      expect(h2.top - h1.bottom, greaterThan(12));
     });
 
     testWidgets('代码块：字号/行高/等宽与列表摘要同源', (WidgetTester tester) async {
