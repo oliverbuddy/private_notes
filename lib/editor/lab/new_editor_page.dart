@@ -2783,11 +2783,11 @@ class _NewEditorPageState extends State<NewEditorPage>
                               ),
                               // 空文档占位提示（新建小记时的 tip）。
                               // 不拦截点击：点它应该像点正文一样把光标放进来。
-                              // 空段落的段前留白为 0（空行不再叠段距），
-                              // 所以这里也贴到 0，文字行盒与光标起点完全重合。
+                              // 空笔记的第一行保留 12 的段前留白（见
+                              // [_paragraphTopSpacing]），这里与之对齐。
                               Positioned(
                                 left: gutter,
-                                top: 0,
+                                top: 12,
                                 right: gutter,
                                 child: IgnorePointer(
                                   child: ValueListenableBuilder<bool>(
@@ -3278,17 +3278,9 @@ class _NewEditorPageState extends State<NewEditorPage>
         // 分享长图用的布局入口：直接取这份渲染结果，宽度/换行/表格与详情一致。
         documentLayoutKey: _documentLayoutKey,
         // 光标/选区/手柄全部走主色，不出现系统默认蓝以外的第二主色。
-        selectionStyle: SelectionStyles(
-          // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
-          // 必然重叠；半透明色叠两层就会出现一条更深的蓝带（用户反馈）。
-          // 预先与页面底色混成不透明色，画多少层都是同一个颜色。
-          selectionColor: Color.alphaBlend(
-            colors.accent.withValues(alpha: 0.25),
-            colors.page,
-          ),
-        ),
+        selectionStyle: _selectionStylesFor(colors),
         androidHandleColor: colors.accent,
-        stylesheet: _buildStylesheet(colors, contentWidth),
+        stylesheet: _stylesheetFor(colors, contentWidth),
         // 表格里的 SelectionArea 拿到焦点时，编辑器的 FocusNode 作为祖先
         // 也会被判定为 hasFocus：默认策略会立刻把光标放到文末并弹键盘，
         // 表现为「长按选单元格 → 页面往下滚、光标跑到表格后面」。
@@ -3365,6 +3357,62 @@ class _NewEditorPageState extends State<NewEditorPage>
         ],
       ),
     );
+  }
+
+  /// 详情页样式表的缓存键与实例。
+  ///
+  /// super_editor 的 `SuperEditor.didUpdateWidget` 是「stylesheet 实例变了
+  /// 就重建整个 presenter」：页面任何一次 setState（保存时间、大纲、
+  /// 键盘留白……）都会新建一份 stylesheet，进而把整篇文档重新套样式、重新
+  /// 排版一次。长文滚动时这个 250ms/800ms 的定时器正好落在滑动中间，
+  /// 表现就是「偶尔卡一下」（用户反馈）。样式输入没变时复用同一实例，
+  /// 这些重建就只剩下轻量的 widget 对比。
+  Stylesheet? _cachedStylesheet;
+  AppColors? _cachedStylesheetColors;
+  double? _cachedStylesheetWidth;
+  double _cachedStylesheetBottomPad = -1;
+
+  Stylesheet _stylesheetFor(AppColors colors, double contentWidth) {
+    final Stylesheet? cached = _cachedStylesheet;
+    if (cached != null &&
+        identical(colors, _cachedStylesheetColors) &&
+        contentWidth == _cachedStylesheetWidth &&
+        _imeCollapseBottomPad == _cachedStylesheetBottomPad) {
+      return cached;
+    }
+    final Stylesheet stylesheet = _buildStylesheet(colors, contentWidth);
+    _cachedStylesheet = stylesheet;
+    _cachedStylesheetColors = colors;
+    _cachedStylesheetWidth = contentWidth;
+    _cachedStylesheetBottomPad = _imeCollapseBottomPad;
+    return stylesheet;
+  }
+
+  /// 选区样式缓存：理由同 [_stylesheetFor]，避免每次重建都换新实例。
+  SelectionStyles? _cachedSelectionStyles;
+  Color? _cachedSelectionAccent;
+  Color? _cachedSelectionPage;
+
+  SelectionStyles _selectionStylesFor(AppColors colors) {
+    final SelectionStyles? cached = _cachedSelectionStyles;
+    if (cached != null &&
+        _cachedSelectionAccent == colors.accent &&
+        _cachedSelectionPage == colors.page) {
+      return cached;
+    }
+    final SelectionStyles styles = SelectionStyles(
+      // super_text_layout 的选区按行绘制、上下各外扩 2px，相邻行矩形
+      // 必然重叠；半透明色叠两层就会出现一条更深的蓝带（用户反馈）。
+      // 预先与页面底色混成不透明色，画多少层都是同一个颜色。
+      selectionColor: Color.alphaBlend(
+        colors.accent.withValues(alpha: 0.25),
+        colors.page,
+      ),
+    );
+    _cachedSelectionStyles = styles;
+    _cachedSelectionAccent = colors.accent;
+    _cachedSelectionPage = colors.page;
+    return styles;
   }
 
   Stylesheet _buildStylesheet(AppColors colors, double contentWidth) {
@@ -3585,8 +3633,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 26),
-              bottom: 10,
+              top: _headerTopSpacing(doc, node, 24),
+              bottom: 8,
             ),
           },
         ),
@@ -3602,8 +3650,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 22),
-              bottom: 8,
+              top: _headerTopSpacing(doc, node, 20),
+              bottom: 6,
             ),
           },
         ),
@@ -3620,7 +3668,7 @@ class _NewEditorPageState extends State<NewEditorPage>
             ),
             Styles.padding: CascadingPadding.only(
               top: _headerTopSpacing(doc, node, 18),
-              bottom: 6,
+              bottom: 4,
             ),
           },
         ),
@@ -4330,8 +4378,13 @@ bool _isEmptyParagraph(DocumentNode? node) {
 /// 外部 md 的 `正文\n\n## 标题` 会解析成「正文 + 空段落 + 标题」，
 /// 之前空行仍按普通段落留 12，读起来像空了两行。
 double _paragraphTopSpacing(Document doc, DocumentNode node, double top) {
-  if (_isEmptyParagraph(node) ||
-      _isEmptyParagraph(doc.getNodeBeforeById(node.id))) {
+  final DocumentNode? previous = doc.getNodeBeforeById(node.id);
+  if (_isEmptyParagraph(node)) {
+    // 文档第一行就是空段落（新建空笔记）：保留段前留白，否则光标和
+    // 占位提示会贴在顶栏下沿（用户反馈「光标离顶部太近」）。
+    return previous == null ? top : 0;
+  }
+  if (_isEmptyParagraph(previous)) {
     return 0;
   }
   return top;
@@ -4341,15 +4394,13 @@ double _paragraphTopSpacing(Document doc, DocumentNode node, double top) {
 double _headerBottomSpacing(DocumentNode? node) {
   final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
   if (blockType == header1Attribution) {
-    return 10;
-  }
-  if (blockType == header2Attribution) {
     return 8;
   }
-  if (blockType == header3Attribution) {
+  if (blockType == header2Attribution) {
     return 6;
   }
-  if (blockType == header4Attribution ||
+  if (blockType == header3Attribution ||
+      blockType == header4Attribution ||
       blockType == header5Attribution ||
       blockType == header6Attribution) {
     return 4;

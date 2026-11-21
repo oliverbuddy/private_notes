@@ -61,15 +61,18 @@ AttributedText? _highlightToAttribution(AttributedText source) {
   if (!plain.contains('==')) {
     return null;
   }
-  final List<RegExpMatch> matches = _highlightPattern.allMatches(plain).toList();
+  final List<RegExpMatch> matches =
+      _highlightPattern.allMatches(plain).toList();
   if (matches.isEmpty) {
     return null;
   }
 
   final StringBuffer buffer = StringBuffer();
-  final List<({int start, int end})> highlightRanges = <({int start, int end})>[];
+  final List<({int start, int end})> highlightRanges =
+      <({int start, int end})>[];
   // 被删掉的 `==` 标记（每个标记 2 个字符），用于把旧下标映射到新文本。
-  final List<({int oldStart, int oldEnd})> removed = <({int oldStart, int oldEnd})>[];
+  final List<({int oldStart, int oldEnd})> removed =
+      <({int oldStart, int oldEnd})>[];
   var oldCursor = 0;
   var newLength = 0;
   for (final RegExpMatch match in matches) {
@@ -216,8 +219,7 @@ void _applyHighlights(MutableDocument document) {
     }
 
     // setext 标题：只能跟在普通段落行后面。
-    final RegExpMatch? setext =
-        RegExp(r'^\s{0,3}(=+|-+)\s*$').firstMatch(line);
+    final RegExpMatch? setext = RegExp(r'^\s{0,3}(=+|-+)\s*$').firstMatch(line);
     if (setext != null && out.isNotEmpty && _isPlainParagraphLine(out.last)) {
       final bool h1 = setext.group(1)!.startsWith('=');
       out[out.length - 1] = '${h1 ? '#' : '##'} ${out.last.trim()}';
@@ -635,8 +637,7 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   final ({String markdown, Map<String, List<String>> titles}) links =
       _extractLinkTitles(specials.markdown);
   // 语言标记 / 有序编号要先按源码顺序收集：解析后的文档里没有这些信息。
-  final List<String> codeLanguages =
-      _collectCodeFenceLanguages(links.markdown);
+  final List<String> codeLanguages = _collectCodeFenceLanguages(links.markdown);
   final List<int> orderedNumbers = _collectOrderedNumbers(links.markdown);
   final document = deserializeMarkdownToDocument(
     normalizeMarkdownForKernel(links.markdown),
@@ -654,6 +655,7 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   _splitMultilineTasks(document);
   _splitAttachmentLines(document);
   _splitSentinelParagraphs(document);
+  _stripStrayMarkers(document);
   _ensureTrailingParagraph(document);
   return document;
 }
@@ -895,9 +897,8 @@ String _protectBlankLines(String md) {
     final isBlank = line.trim().isEmpty;
     // 首尾空行不产生空段落（存储里末尾留一个空行很常见）。
     final hasContentBefore = out.any((String l) => l.trim().isNotEmpty);
-    final hasContentAfter = lines
-        .skip(i + 1)
-        .any((String l) => l.trim().isNotEmpty);
+    final hasContentAfter =
+        lines.skip(i + 1).any((String l) => l.trim().isNotEmpty);
     // 列表/待办行旁边的空行不替换成哨兵：那属于列表的松散结构，
     // 占位符会被解析器并进列表项文本（保存后写回私有区字符，列表摘要
     // 显示成「☒」乱码），也可能把缩进结构带歪。
@@ -984,6 +985,35 @@ void _splitSentinelParagraphs(MutableDocument document) {
   }
 }
 
+/// 兜底清理解析期残留的不可见标记。
+///
+/// 哨兵 (`\uE000`) 只用于把空行撑到解析结束，正常情况由
+/// [_splitSentinelParagraphs] 还原成空段落；但引用 / 标题 / 列表这类
+/// 非普通段落会被内核把哨兵行并进同一条文本，详情页就会在空行上显示成
+/// 一个方块乱码（用户反馈「空行出现奇怪符号」）。这里按字符移除，
+/// 行内样式随区间一起收缩，不会再漏到画面上；`\u0000` 同理（HTML 粘贴
+/// 占位符异常时可能残留）。
+void _stripStrayMarkers(MutableDocument document) {
+  const List<String> markers = <String>[_blankParagraphSentinel, '\u0000'];
+  for (final DocumentNode node in document.toList()) {
+    if (node is! TextNode) {
+      continue;
+    }
+    AttributedText text = node.text;
+    for (final String marker in markers) {
+      var index = text.toPlainText().indexOf(marker);
+      while (index >= 0) {
+        text = text.removeRegion(startOffset: index, endOffset: index + 1);
+        index = text.toPlainText().indexOf(marker);
+      }
+    }
+    if (identical(text, node.text)) {
+      continue;
+    }
+    document.replaceNodeById(node.id, node.copyTextNodeWith(text: text));
+  }
+}
+
 /// 末尾始终补一个空段落。
 ///
 /// 参考语雀：正文最底部永远留一行可点/可落光标的空白，否则最后一块是
@@ -1055,8 +1085,7 @@ void _splitAttachmentLines(MutableDocument document) {
       final link = links[j];
       if (link != null) {
         var beforeEnd = lineStart;
-        if (beforeEnd > segmentStart &&
-            plain[beforeEnd - 1] == '\n') {
+        if (beforeEnd > segmentStart && plain[beforeEnd - 1] == '\n') {
           beforeEnd--;
         }
         if (beforeEnd > segmentStart) {
@@ -1136,7 +1165,9 @@ AttributedText _textSegment(AttributedText source, int start, int end) {
   for (final span in spans) {
     final localStart = span.start - start;
     final localEnd = span.end - start;
-    if (localStart < 0 || localEnd < localStart || localStart >= result.length) {
+    if (localStart < 0 ||
+        localEnd < localStart ||
+        localStart >= result.length) {
       continue;
     }
     result.addAttribution(
@@ -1275,9 +1306,8 @@ String serializeDocumentToXiaojiMarkdown(Document document) {
         // 编号 = run 起始编号 + 层内序号 - 1（`5.` 开头不会再被写成 `1.`）。
         final ({int ordinal, int start})? number =
             orderedListItemNumber(document, node);
-        final int value = number == null
-            ? 1
-            : number.start + number.ordinal - 1;
+        final int value =
+            number == null ? 1 : number.start + number.ordinal - 1;
         final marker = '$value. ';
         markerWidths.add(marker.length);
         write('$indent$marker${_inlineMarkdown(node.text)}');
@@ -1499,10 +1529,8 @@ String _inlineMarkdown(AttributedText attributed) {
   var i = 0;
   while (i < plain.length) {
     // 链接优先：整段区间一次性输出。
-    final linkHere = spans
-        .getAllAttributionsAt(i)
-        .whereType<LinkAttribution>()
-        .firstOrNull;
+    final linkHere =
+        spans.getAllAttributionsAt(i).whereType<LinkAttribution>().firstOrNull;
     if (linkHere != null) {
       // 关闭此前打开的标记，链接结束后不再自动重开（组合罕见，简化处理）。
       for (final marker in openMarkers.reversed) {

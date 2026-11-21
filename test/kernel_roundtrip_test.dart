@@ -29,6 +29,28 @@ void main() {
     return serializeDocumentToXiaojiMarkdown(doc);
   }
 
+  test('解析残留的占位符 / 控制字符会被清掉，不会显示成乱码', () {
+    String texts(MutableDocument doc) => doc
+        .whereType<TextNode>()
+        .map((TextNode node) => node.text.toPlainText())
+        .join('|');
+
+    // 哨兵（空行占位）被内核并进引用 / 标题文本时，详情页会在空行上
+    // 显示成一个方块——解析结束必须兜底清掉。
+    final MutableDocument quote =
+        deserializeXiaojiMarkdown('> 引用\uE000\n\n> 引用2');
+    final MutableDocument header = deserializeXiaojiMarkdown('# 标题\uE000');
+    final MutableDocument control = deserializeXiaojiMarkdown('正文\u0000');
+
+    expect(texts(quote), isNot(contains('\uE000')));
+    expect(texts(header), isNot(contains('\uE000')));
+    expect(texts(control), isNot(contains('\u0000')));
+    // 正常文字不能被一起删掉。
+    expect(texts(quote), contains('引用'));
+    expect(texts(header), contains('标题'));
+    expect(texts(control), contains('正文'));
+  });
+
   test('围栏代码块的语言标记往返保留', () {
     const String body = '```dart\nvoid main() { print(1); }\n```';
     final doc = deserializeXiaojiMarkdown(body);
@@ -350,9 +372,8 @@ void main() {
     expect(out, contains('> 引用第一行'));
     expect(out, contains('> 引用第二行'));
     expect(
-      out
-          .split('\n')
-          .every((String line) => !line.contains('引用') || line.startsWith('> ')),
+      out.split('\n').every(
+          (String line) => !line.contains('引用') || line.startsWith('> ')),
       isTrue,
       reason: '引用行必须都带前缀，否则列表摘要会把后续行当普通段落',
     );

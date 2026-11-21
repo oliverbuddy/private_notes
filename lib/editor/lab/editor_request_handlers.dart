@@ -14,6 +14,7 @@ import 'xiaoji_markdown.dart';
 final List<EditRequestHandler> xiaojiRequestHandlers =
     List<EditRequestHandler>.unmodifiable(<EditRequestHandler>[
   _horizontalRuleHandler,
+  _paragraphIntoHeaderHandler,
   _codeFenceOpeningHandler,
   _codeBlockNewlineHandler,
   _blockquoteContinuationHandler,
@@ -498,5 +499,96 @@ class _SplitBlockquoteParagraphCommand extends EditCommand {
           SelectionReason.userInteraction,
         ),
       );
+  }
+}
+
+/// 正文退格并回标题：合并后按「正文」处理，而不是整行变成标题。
+///
+/// 内核默认 `CombineParagraphsCommand` 保留上一个节点的类型，所以
+/// `# 标题` 下面的正文一旦退格并进标题行，标题字号会吞掉整段正文
+/// （用户反馈）。主流笔记（Notion / 语雀 / Word）里标题是块级语义，
+/// 段落合并不会把正文升级成标题，这里按同一语义处理：正文非空时合并成
+/// 普通段落；正文为空（只是删掉空行）时交回内核，标题保持不动。
+EditCommand? _paragraphIntoHeaderHandler(Editor editor, EditRequest request) {
+  if (request is! CombineParagraphsRequest) {
+    return null;
+  }
+  final DocumentNode? first = editor.document.getNodeById(request.firstNodeId);
+  final DocumentNode? second =
+      editor.document.getNodeById(request.secondNodeId);
+  if (first is! ParagraphNode || second is! ParagraphNode) {
+    return null;
+  }
+  // 空的正文只是「删掉空行」，交回内核：标题保持标题。
+  if (second.text.isEmpty || !_isHeaderParagraph(first)) {
+    return null;
+  }
+  final Object? secondType = second.getMetadataValue(NodeMetadata.blockType);
+  if (secondType != null && secondType != paragraphAttribution) {
+    return null;
+  }
+  return _DemoteHeaderOnMergeCommand(first.id, second.id);
+}
+
+/// 该段落是否是一到六级标题。
+bool _isHeaderParagraph(DocumentNode node) {
+  final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+  return blockType == header1Attribution ||
+      blockType == header2Attribution ||
+      blockType == header3Attribution ||
+      blockType == header4Attribution ||
+      blockType == header5Attribution ||
+      blockType == header6Attribution;
+}
+
+/// 把「正文合并进标题」落成普通段落（标题记号一并去掉）。
+class _DemoteHeaderOnMergeCommand extends EditCommand {
+  const _DemoteHeaderOnMergeCommand(this.headerNodeId, this.bodyNodeId);
+
+  /// 上一行的标题（合并后保留它的位置）。
+  final String headerNodeId;
+
+  /// 光标所在的正文段落（合并后删除）。
+  final String bodyNodeId;
+
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final MutableDocument document = context.document;
+    final DocumentNode? header = document.getNodeById(headerNodeId);
+    final DocumentNode? body = document.getNodeById(bodyNodeId);
+    if (header is! ParagraphNode || body is! ParagraphNode) {
+      return;
+    }
+
+    final int caretOffset = header.text.length;
+    final ParagraphNode merged = header.copyParagraphWith(
+      text: header.text.copyAndAppend(body.text),
+      metadata: <String, dynamic>{
+        ...header.metadata,
+        NodeMetadata.blockType: paragraphAttribution,
+      },
+    );
+
+    executor
+      ..executeCommand(DeleteNodeCommand(nodeId: body.id))
+      ..executeCommand(
+        ReplaceNodeCommand(existingNodeId: header.id, newNode: merged),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: merged.id,
+              nodePosition: TextNodePosition(offset: caretOffset),
+            ),
+          ),
+          SelectionChangeType.deleteContent,
+          SelectionReason.userInteraction,
+        ),
+      )
+      ..executeCommand(ChangeComposingRegionCommand(null));
   }
 }

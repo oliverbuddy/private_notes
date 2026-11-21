@@ -200,6 +200,79 @@ void main() {
     });
   });
 
+  group('正文并回标题', () {
+    testWidgets('退格合并后保持正文，不会整行变成标题', (WidgetTester tester) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_merge_header_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('merge', '# 标题\n正文')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      // 光标放到正文行首，退格并进上一行的标题。
+      final Rect bodyRect = tester.getRect(find.text('正文', findRichText: true));
+      await tester.tapAt(Offset(bodyRect.left + 1, bodyRect.center.dy));
+      await _pumpFrames(tester, frames: 6);
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await _pumpFrames(tester, frames: 8);
+
+      final SuperEditor editor = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final DocumentNode merged = editor.editor.document.getNodeAt(0)!;
+      expect(merged, isA<ParagraphNode>());
+      expect(
+        merged.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '正文并回标题后应保持正文，不能被标题字号吞掉',
+      );
+      expect((merged as ParagraphNode).text.toPlainText(), '标题正文');
+      expect(tester.takeException(), isNull);
+
+      // 收尾：把 super_editor 点击后启动的「自动隐藏手柄」计时器跑完。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
+  group('详情页性能', () {
+    testWidgets('页面重建复用同一份样式表，不触发整篇重新排版', (WidgetTester tester) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_style_cache_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('style_cache', '正文')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Stylesheet before =
+          tester.widget<SuperEditor>(find.byType(SuperEditor).first).stylesheet;
+
+      // 输入文字后，800ms 的自动保存会 setState 刷新标题栏时间；
+      // 之前每次 setState 都会新建样式表，super_editor 因此重建 presenter
+      // 并重新排版整篇文档（长文滚动时表现为「偶尔卡一下」）。
+      final Rect rect = tester.getRect(find.text('正文', findRichText: true));
+      await tester.tapAt(Offset(rect.right - 1, rect.center.dy));
+      await _pumpFrames(tester, frames: 4);
+      tester.testTextInput.enterText('正文改');
+      await tester.pump(const Duration(milliseconds: 900));
+
+      final Stylesheet after =
+          tester.widget<SuperEditor>(find.byType(SuperEditor).first).stylesheet;
+      expect(
+        identical(before, after),
+        isTrue,
+        reason: '样式输入没变时必须复用同一实例，否则整篇文档会重新排版',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
   group('列表记号对齐', () {
     testWidgets('无序 / 有序 / 待办三类行的正文左缘一致', (WidgetTester tester) async {
       final NoteRepository repository =
@@ -742,7 +815,7 @@ void main() {
       final Rect t1 = tester.getRect(find.text('一级标题', findRichText: true));
       final Rect t2 = tester.getRect(find.text('二级标题', findRichText: true));
       final Rect t3 = tester.getRect(find.text('三级标题', findRichText: true));
-      expect(t2.top - t1.bottom, closeTo(22, 2));
+      expect(t2.top - t1.bottom, closeTo(20, 2));
       expect(t3.top - t2.bottom, closeTo(18, 2));
 
       // 换一份笔记时必须先卸载旧页面，否则状态复用不会重新解析正文。
