@@ -3532,11 +3532,11 @@ class _NewEditorPageState extends State<NewEditorPage>
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            // 空行紧挨标题时按半行高渲染：既保留空行本身（存盘不丢），
+            // 空行紧挨标题时按 1/4 行高渲染：既保留空行本身（存盘不丢），
             // 又不会让标题前后空出 30dp+（用户反复反馈的「标题间距太大」）。
             Styles.textStyle: TextStyle(
               height: _isEmptyParagraphBesideHeader(doc, node)
-                  ? 0.5
+                  ? 0.25
                   : paragraphHeight,
             ),
             // 空行（外部 md 导入的空段落）本身已经占一整行，再叠加 12 的
@@ -3624,8 +3624,9 @@ class _NewEditorPageState extends State<NewEditorPage>
           },
         ),
         // 标题六档：26/21/18/16.5/16/16，行高 1.28–1.45。
-        // 段前留白 20/16/14/12/10/10 逐级递减 —— 参考语雀手机端 / Notion
-        // 的「标题前留白略大于段后」，章节分隔清晰，又不会把半屏吃掉。
+        // 段前留白 16/12/10/8/8/8、段后统一 4 —— 对齐 Typora / Craft 这类
+        // 「标题靠字号和字重分层、不靠大空白」的主流移动端节奏；分段主要
+        // 交给用户自己敲的空行。
         // leadingDistribution.even 与正文保持一致。
         StyleRule(
           const BlockSelector('header1'),
@@ -3639,8 +3640,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 20),
-              bottom: 8,
+              top: _headerTopSpacing(doc, node, 16),
+              bottom: 4,
             ),
           },
         ),
@@ -3656,8 +3657,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 16),
-              bottom: 6,
+              top: _headerTopSpacing(doc, node, 12),
+              bottom: 4,
             ),
           },
         ),
@@ -3673,8 +3674,8 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 14),
-              bottom: 6,
+              top: _headerTopSpacing(doc, node, 10),
+              bottom: 4,
             ),
           },
         ),
@@ -3693,7 +3694,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor,
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 12),
+              top: _headerTopSpacing(doc, node, 8),
               bottom: 4,
             ),
           },
@@ -3709,7 +3710,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               color: headingColor.withValues(alpha: 0.88),
             ),
             Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 10),
+              top: _headerTopSpacing(doc, node, 8),
               bottom: 4,
             ),
           },
@@ -4424,13 +4425,10 @@ double _paragraphTopSpacing(Document doc, DocumentNode node, double top) {
 /// 标题的段后留白，与 [_buildStylesheet] 里各档 `bottom` 一一对应。
 double _headerBottomSpacing(DocumentNode? node) {
   final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
-  if (blockType == header1Attribution) {
-    return 8;
-  }
-  if (blockType == header2Attribution || blockType == header3Attribution) {
-    return 6;
-  }
-  if (blockType == header4Attribution ||
+  if (blockType == header1Attribution ||
+      blockType == header2Attribution ||
+      blockType == header3Attribution ||
+      blockType == header4Attribution ||
       blockType == header5Attribution ||
       blockType == header6Attribution) {
     return 4;
