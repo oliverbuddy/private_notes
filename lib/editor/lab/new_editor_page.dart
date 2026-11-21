@@ -3534,8 +3534,11 @@ class _NewEditorPageState extends State<NewEditorPage>
           (Document doc, DocumentNode node) => <String, dynamic>{
             // 空行紧挨标题时按 1/4 行高渲染：既保留空行本身（存盘不丢），
             // 又不会让标题前后空出 30dp+（用户反复反馈的「标题间距太大」）。
+            // 光标所在的空段落不压缩：标题后回车新建的那一行必须保持整行
+            // 高度，否则看起来「没新起一行」、光标也只剩 4dp（用户反馈）。
             Styles.textStyle: TextStyle(
-              height: _isEmptyParagraphBesideHeader(doc, node)
+              height: _isEmptyParagraphBesideHeader(doc, node) &&
+                      _composer.selection?.extent.nodeId != node.id
                   ? 0.25
                   : paragraphHeight,
             ),
@@ -4394,7 +4397,7 @@ bool _isHeaderNode(DocumentNode? node) {
 /// 空行是否紧挨着标题（上一块或下一块是 H1–H6）。
 ///
 /// 外部 md / 旧笔记里标题前后常留一行空行，编辑器里那是真实空段落
-/// （约 26dp）。空行本身要保留（存盘不丢），但紧挨标题时按半行高渲染，
+/// （约 26dp）。空行本身要保留（存盘不丢），但紧挨标题时按压缩行高渲染，
 /// 否则标题间距会被这行空行撑成 30dp+ —— 用户反复反馈「标题间距太大」，
 /// 只调标题的 padding 根本看不出来。
 bool _isEmptyParagraphBesideHeader(Document doc, DocumentNode node) {

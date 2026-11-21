@@ -302,6 +302,53 @@ void main() {
     });
   });
 
+  group('标题回车换行', () {
+    testWidgets('标题末尾回车：新起一行是正文，光标保持整行高度', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_heading_enter_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('heading_enter', '# 标题')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      // 光标放到标题末尾再回车。
+      final Rect titleRect =
+          tester.getRect(find.text('标题', findRichText: true));
+      await tester.tapAt(Offset(titleRect.right - 1, titleRect.center.dy));
+      await _pumpFrames(tester, frames: 6);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await _pumpFrames(tester, frames: 8);
+
+      final SuperEditor editor = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final DocumentNode newNode = editor.editor.document.getNodeAt(1)!;
+      expect(
+        newNode.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '标题末尾回车应新起一个正文段落，不能还是标题',
+      );
+      final DocumentSelection? selection = editor.editor.composer.selection;
+      expect(selection, isNotNull);
+      expect(selection!.extent.nodeId, newNode.id, reason: '光标落在新行');
+
+      // 新行不能被「标题旁空行」的压缩行高影响，否则只有 4dp 高。
+      final Rect caret = tester.getRect(find.byKey(xiaojiCaretKey));
+      expect(
+        caret.height,
+        greaterThan(12),
+        reason: '光标必须保持整行高度，不能缩成 4dp 细线',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
   group('详情页性能', () {
     testWidgets('页面重建复用同一份样式表，不触发整篇重新排版', (WidgetTester tester) async {
       final NoteRepository repository = await _createRepository(
