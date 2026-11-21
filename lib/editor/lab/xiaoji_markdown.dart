@@ -657,7 +657,66 @@ MutableDocument deserializeXiaojiMarkdown(String md) {
   _splitSentinelParagraphs(document);
   _stripStrayMarkers(document);
   _ensureTrailingParagraph(document);
-  return document;
+  // 撤销/重做会先把文档 reset 回「构造时的节点快照」，再逐条重放历史命令。
+  // 上面的后处理都是在构造之后 insert 的，不在那份快照里：撤销时节点 id
+  // 对不上，重放会整体失效，选区还会被留在已删除的节点上 —— 内核 Android
+  // 手势层每帧校正光标可见性时会抛空指针，页面就白屏（用户反馈「撤销无效
+  // 且白屏」）。用最终的节点列表重新构造一次，让快照与打开时看到的内容一致。
+  // 同时把「相邻行」还原成独立段落（见 [_splitLineBreaks]）。
+  final List<DocumentNode> finalized = <DocumentNode>[];
+  for (final DocumentNode node in document) {
+    if (node is ParagraphNode) {
+      finalized.addAll(_splitLineBreaks(node));
+    } else {
+      finalized.add(node);
+    }
+  }
+  return MutableDocument(nodes: finalized);
+}
+
+/// 普通段落里的换行按「换一段」拆开。
+///
+/// 保存格式是一段一行（见 [serializeDocumentToXiaojiMarkdown]），相邻两段在
+/// 文件里就是相邻两行；内核的 markdown 解析器会把相邻行并成一个带软换行的
+/// 段落。结果同一篇笔记：编辑时每行是独立段落（段间距 12），重开变成一整段
+/// （段间距全丢）。用户把标题退格降级成正文后，那一行是独立段落，间距就比
+/// 周围「被并掉的正文」大（用户反馈）。这里按行拆回独立段落，与保存格式和
+/// 编辑态保持一致。
+///
+/// 只处理顶层普通段落：引用/标题/列表/待办/代码块/表格单元格各自有语义，
+/// 不参与拆分。
+List<DocumentNode> _splitLineBreaks(ParagraphNode node) {
+  final Object? blockType = node.getMetadataValue(NodeMetadata.blockType);
+  if (blockType != null && blockType != paragraphAttribution) {
+    return <DocumentNode>[node];
+  }
+  final String plain = node.text.toPlainText();
+  if (!plain.contains('\n')) {
+    return <DocumentNode>[node];
+  }
+  final List<String> lines = plain.split('\n');
+  // 末尾的空行只是文件结尾的换行，不是用户敲出来的空段落：丢掉，
+  // 避免每次打开笔记末尾都多出一条空行。
+  while (lines.length > 1 && lines.last.isEmpty) {
+    lines.removeLast();
+  }
+  final List<DocumentNode> parts = <DocumentNode>[];
+  var offset = 0;
+  for (var i = 0; i < lines.length; i++) {
+    final String line = lines[i];
+    parts.add(
+      ParagraphNode(
+        id: i == 0 ? node.id : Editor.createNodeId(),
+        text: line.isEmpty
+            ? AttributedText()
+            : node.text.copyText(offset, offset + line.length),
+        indent: node.indent,
+        metadata: Map<String, dynamic>.from(node.metadata),
+      ),
+    );
+    offset += line.length + 1;
+  }
+  return parts;
 }
 
 /// 把表格单元格里的 `<br>` 还原成换行。

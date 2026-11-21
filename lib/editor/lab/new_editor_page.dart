@@ -1571,14 +1571,30 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 同步撤销/重做可用态。super_editor 的历史在 Editor 内部，getter
   /// 返回的是副本，所以每次编辑后按长度刷新，不直接依赖可变对象。
   void _syncHistoryButtons() {
-    final canUndo = _editor.history.isNotEmpty;
-    final canRedo = _editor.future.isNotEmpty;
+    final canUndo = _hasContentToUndo(_editor.history);
+    final canRedo = _hasContentToUndo(_editor.future);
     if (_canUndo.value != canUndo) {
       _canUndo.value = canUndo;
     }
     if (_canRedo.value != canRedo) {
       _canRedo.value = canRedo;
     }
+  }
+
+  /// 撤销栈里是否有「真正改动内容」的记录。
+  ///
+  /// 内核把光标、组词区域的变化也记成可撤销事务（`ChangeSelectionCommand`）：
+  /// 新建笔记落一次光标就占掉一条记录，按钮亮着、点下去却只挪了光标，看起来
+  /// 就像「撤销无效」。这里只认会改内容的事务，让按钮亮不亮与「点下去真有
+  /// 变化」一致。
+  static bool _hasContentToUndo(List<CommandTransaction> transactions) {
+    return transactions.any(
+      (CommandTransaction transaction) => transaction.commands.any(
+        (EditCommand command) =>
+            command is! ChangeSelectionCommand &&
+            command is! ChangeComposingRegionCommand,
+      ),
+    );
   }
 
   /// 恢复编辑态选区。底部面板（Aa / 插入）打开时编辑器会失焦、
@@ -2783,8 +2799,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                               ),
                               // 空文档占位提示（新建小记时的 tip）。
                               // 不拦截点击：点它应该像点正文一样把光标放进来。
-                              // 空笔记的第一行保留 12 的段前留白（见
-                              // [_paragraphTopSpacing]），这里与之对齐。
+                              // 正文的段前距是 12（见 [_buildStylesheet] 的
+                              // bodyGap），这里与之对齐。
                               Positioned(
                                 left: gutter,
                                 top: 12,
@@ -3428,6 +3444,16 @@ class _NewEditorPageState extends State<NewEditorPage>
     const double h3Size = 18;
     const double h4Size = 16.5;
     const double paragraphHeight = 1.6;
+    // —— 段前距（语雀式：每个块只有段前距，没有段后距）——
+    // 任意两块之间的距离 = 下一块的段前距，天然对称，不需要外边距折叠。
+    const double bodyGap = 12;
+    const double h1Gap = 24;
+    const double h2Gap = 20;
+    const double h3Gap = 16;
+    const double h4Gap = 12;
+    const double h5Gap = 12;
+    const double h6Gap = 12;
+    const double listGap = 6;
     // 深色主题下正文是 #E5E5E5，标题再亮一档：中文粗体在深底上的「厚度差」
     // 不如浅底明显，靠亮度补一层层级（Typora 深色主题同做法）。
     final bool darkMode = colors.page.computeLuminance() < 0.3;
@@ -3517,85 +3543,26 @@ class _NewEditorPageState extends State<NewEditorPage>
             };
           },
         ),
-        // 段落间距收紧（默认 24 太散，手机端要紧凑）。
-        // 12 与列表项上下 2 形成「段落明显断开、列表行内轻微呼吸」的层级，
-        // 而不是所有块都用同一个大间距（那样看起来每一行都散着）。
-        //
-        // 正文行距：只覆盖 paragraph 的 height（1.7 → 1.6），16 号字下
-        // 行盒从 27.2 收到 25.6，接近语雀/Notion 移动端的 1.6，长文
-        // 连续阅读不再「一行一行散着」。TextStyle.merge 只覆盖非空字段，
-        // 字号/字距/颜色仍从 BlockSelector.all 级联。
-        //
-        // 标题（1.3/1.35）、引用（AppQuote.height）、代码块（卡片规格）、
-        // 列表行都各自有行高来源，不受这条影响 —— 用户明确要求
-        // 「不要影响其他的行间距」。
+        // —— 行距（对齐语雀：只有一个口径）——
+        // 每个块只给「段前距」，不给段后距。任意两块之间的距离恒等于
+        // 「下一块的段前距」，因此不会出现上下不对称、也不需要外边距折叠。
+        // 空行就是一个普通段落（整行高 + 段前距），和语雀里敲出来的空行一致；
+        // 不再因为「紧挨标题」而被压缩——那会让同一篇笔记里间距忽大忽小。
         StyleRule(
           const BlockSelector('paragraph'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            // 空行紧挨标题时按 1/4 行高渲染：既保留空行本身（存盘不丢），
-            // 又不会让标题前后空出 30dp+（用户反复反馈的「标题间距太大」）。
-            // 光标所在的空段落不压缩：标题后回车新建的那一行必须保持整行
-            // 高度，否则看起来「没新起一行」、光标也只剩 4dp（用户反馈）。
-            Styles.textStyle: TextStyle(
-              height: _isEmptyParagraphBesideHeader(doc, node) &&
-                      _composer.selection?.extent.nodeId != node.id
-                  ? 0.25
-                  : paragraphHeight,
-            ),
-            // 空行（外部 md 导入的空段落）本身已经占一整行，再叠加 12 的
-            // 段距会让「标题 / 正文之间」多出一大块空白（用户反馈）。
-            Styles.padding: CascadingPadding.only(
-              top: _paragraphTopSpacing(doc, node, 12),
-            ),
+            Styles.textStyle: const TextStyle(height: paragraphHeight),
+            Styles.padding: const CascadingPadding.only(top: bodyGap),
           },
         ),
-        // 标题后的首段落不再叠段距：标题自身已有 bottom padding，
-        // 再叠 12 会出现「标题和第一句断开」的空档。这三条要排在上面的
-        // 通用段落规则之后，后命中的规则才会覆盖它。
-        StyleRule(
-          const BlockSelector('paragraph').after('header1'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('paragraph').after('header2'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('paragraph').after('header3'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('paragraph').after('header4'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('paragraph').after('header5'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('paragraph').after('header6'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
-          },
-        ),
-        // 列表项/待办：小间距，像语雀一样紧凑。
+        // 列表/待办：行内比正文紧凑（语雀约 6），块前也只用同一个 6。
         // 有序列表标记对齐已核对：OrderedListItemComponent 用行文本同款
         // styleBuilder（inherit: false）+ 右对齐 OverflowBox 渲染编号，
         // 与正文基线天然对齐，接受默认，不做 hack。
         StyleRule(
           const BlockSelector('listItem'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.symmetric(vertical: 2),
+            Styles.padding: const CascadingPadding.only(top: listGap),
             // 无序列表的圆点默认跟着正文色走，太重；淡显成三级文字色，
             // 视觉层级回到「内容在前、记号在后」（与阅读态渲染器一致）。
             Styles.dotColor: colors.tertiary,
@@ -3608,28 +3575,13 @@ class _NewEditorPageState extends State<NewEditorPage>
         StyleRule(
           const BlockSelector('task'),
           (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.symmetric(vertical: 3),
-          },
-        ),
-        // 段落后面紧跟列表/待办时补 4：段落本身没有底部段距，而列表
-        // 回到段落时又有 12 的顶部段距，不补会让「正文→列表」贴在一起，
-        // 前后不对称（语雀/Typora 都会在列表上方留一小段）。
-        StyleRule(
-          const BlockSelector('listItem').after('paragraph'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 4),
-          },
-        ),
-        StyleRule(
-          const BlockSelector('task').after('paragraph'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 4),
+            Styles.padding: const CascadingPadding.only(top: listGap),
           },
         ),
         // 标题六档：26/21/18/16.5/16/16，行高 1.28–1.45。
-        // 段前留白 16/12/10/8/8/8、段后统一 4 —— 对齐 Typora / Craft 这类
-        // 「标题靠字号和字重分层、不靠大空白」的主流移动端节奏；分段主要
-        // 交给用户自己敲的空行。
+        // 只给段前距（24/20/16/12/12/12），段后 0 —— 和正文一样由「下一块
+        // 的段前距」决定间隔，所以「标题→正文」与「正文→正文」是同一个 12。
+        // 参考语雀：标题靠字号和字重分层，不靠额外的大空白。
         // leadingDistribution.even 与正文保持一致。
         StyleRule(
           const BlockSelector('header1'),
@@ -3642,10 +3594,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 16),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h1Gap),
           },
         ),
         StyleRule(
@@ -3659,10 +3608,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 12),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h2Gap),
           },
         ),
         StyleRule(
@@ -3676,10 +3622,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 10),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h3Gap),
           },
         ),
         // H4–H6：内核默认样式表只写到 H3，不补的话这三档在详情页与正文
@@ -3696,10 +3639,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 8),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h4Gap),
           },
         ),
         StyleRule(
@@ -3712,10 +3652,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: headingColor.withValues(alpha: 0.88),
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 8),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h5Gap),
           },
         ),
         StyleRule(
@@ -3728,10 +3665,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               leadingDistribution: TextLeadingDistribution.even,
               color: colors.secondary,
             ),
-            Styles.padding: CascadingPadding.only(
-              top: _headerTopSpacing(doc, node, 8),
-              bottom: 4,
-            ),
+            Styles.padding: const CascadingPadding.only(top: h6Gap),
           },
         ),
         // 引用块：底色/圆角/竖条/内边距都由 [QuoteBlock] 画（见
@@ -3741,7 +3675,6 @@ class _NewEditorPageState extends State<NewEditorPage>
           const BlockSelector('blockquote'),
           (Document doc, DocumentNode node) {
             final bool continuesAbove = _quoteContinuesAbove(doc, node);
-            final bool continuesBelow = _quoteContinuesBelow(doc, node);
             return <String, dynamic>{
               Styles.textStyle: TextStyle(
                 fontSize: AppQuote.fontSize,
@@ -3750,11 +3683,10 @@ class _NewEditorPageState extends State<NewEditorPage>
                 leadingDistribution: TextLeadingDistribution.even,
                 color: colors.text.withValues(alpha: 0.8),
               ),
-              // 相邻引用行之间的段距归零：上下各 6 会在两块中间留一条
-              // 页面底色的缝，回车续行的两行看起来就是两个独立引用框。
+              // 相邻引用行之间的段距归零：否则两块中间会留一条页面底色的
+              // 缝，回车续行的两行看起来就是两个独立引用框。
               Styles.padding: CascadingPadding.only(
-                top: continuesAbove ? 0 : 6,
-                bottom: continuesBelow ? 0 : 6,
+                top: continuesAbove ? 0 : bodyGap,
               ),
             };
           },
@@ -3778,7 +3710,7 @@ class _NewEditorPageState extends State<NewEditorPage>
               vertical: 7,
             ),
             TableStyles.cellDecorator: _tableCellDecorator(colors),
-            Styles.padding: const CascadingPadding.symmetric(vertical: 8),
+            Styles.padding: const CascadingPadding.only(top: bodyGap),
           },
         ),
         // 代码块：等宽 + 字号/行高/内边距与列表摘要同源
@@ -3799,22 +3731,8 @@ class _NewEditorPageState extends State<NewEditorPage>
                   colors.text.withValues(alpha: CodeBlockCardStyle.textAlpha),
             ),
             // 横向页边距从 BlockSelector.all 级联（16），卡片与正文同宽；
-            // 卡片内边距在组件里给，这里只补块间呼吸。
-            Styles.padding: const CascadingPadding.symmetric(
-              vertical: CodeBlockCardStyle.outerGap,
-            ),
-          },
-        ),
-        // 代码块后面的块：不再叠加自己的顶部段距。
-        //
-        // 卡片外部已经有 6 的底部留白，这 6 就是「卡片与下一行」的全部间距；
-        // 下一块如果还保留正文默认的 12，合计 18，比列表摘要（卡片下方只有
-        // 6）明显发空（用户多轮反馈「详情代码块下面的间距偏大」）。
-        // 与列表摘要对齐：卡片之后只留卡片自己的 6。
-        StyleRule(
-          BlockSelector.all.after('code'),
-          (Document doc, DocumentNode node) => <String, dynamic>{
-            Styles.padding: const CascadingPadding.only(top: 0),
+            // 卡片内边距在组件里给，这里只给段前距（与正文同一个 12）。
+            Styles.padding: const CascadingPadding.only(top: bodyGap),
           },
         ),
         // 有序列表分层编号（1. → a. → i.），与阅读态渲染器同方案。
@@ -4373,89 +4291,6 @@ class _XiaojiAndroidControlsController
 bool _isQuoteNode(DocumentNode? node) {
   return node is ParagraphNode &&
       node.getMetadataValue(NodeMetadata.blockType) == blockquoteAttribution;
-}
-
-/// 空段落：markdown 里的「空行」在编辑器里就是一个没有文字的空段落。
-bool _isEmptyParagraph(DocumentNode? node) {
-  return node is ParagraphNode &&
-      node.text.isEmpty &&
-      (node.getMetadataValue(NodeMetadata.blockType) ?? paragraphAttribution) ==
-          paragraphAttribution;
-}
-
-/// 该节点是否是标题段落（H1–H6）。
-bool _isHeaderNode(DocumentNode? node) {
-  final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
-  return blockType == header1Attribution ||
-      blockType == header2Attribution ||
-      blockType == header3Attribution ||
-      blockType == header4Attribution ||
-      blockType == header5Attribution ||
-      blockType == header6Attribution;
-}
-
-/// 空行是否紧挨着标题（上一块或下一块是 H1–H6）。
-///
-/// 外部 md / 旧笔记里标题前后常留一行空行，编辑器里那是真实空段落
-/// （约 26dp）。空行本身要保留（存盘不丢），但紧挨标题时按压缩行高渲染，
-/// 否则标题间距会被这行空行撑成 30dp+ —— 用户反复反馈「标题间距太大」，
-/// 只调标题的 padding 根本看不出来。
-bool _isEmptyParagraphBesideHeader(Document doc, DocumentNode node) {
-  if (!_isEmptyParagraph(node)) {
-    return false;
-  }
-  return _isHeaderNode(doc.getNodeBeforeById(node.id)) ||
-      _isHeaderNode(doc.getNodeAfterById(node.id));
-}
-
-/// 段落的段前留白：空行自己不需要段距，紧接空行后面的块也不再叠段距。
-///
-/// 外部 md 的 `正文\n\n## 标题` 会解析成「正文 + 空段落 + 标题」，
-/// 之前空行仍按普通段落留 12，读起来像空了两行。
-double _paragraphTopSpacing(Document doc, DocumentNode node, double top) {
-  final DocumentNode? previous = doc.getNodeBeforeById(node.id);
-  if (_isEmptyParagraph(node)) {
-    // 文档第一行就是空段落（新建空笔记）：保留段前留白，否则光标和
-    // 占位提示会贴在顶栏下沿（用户反馈「光标离顶部太近」）。
-    return previous == null ? top : 0;
-  }
-  if (_isEmptyParagraph(previous)) {
-    return 0;
-  }
-  return top;
-}
-
-/// 标题的段后留白，与 [_buildStylesheet] 里各档 `bottom` 一一对应。
-double _headerBottomSpacing(DocumentNode? node) {
-  final Object? blockType = node?.getMetadataValue(NodeMetadata.blockType);
-  if (blockType == header1Attribution ||
-      blockType == header2Attribution ||
-      blockType == header3Attribution ||
-      blockType == header4Attribution ||
-      blockType == header5Attribution ||
-      blockType == header6Attribution) {
-    return 4;
-  }
-  return 0;
-}
-
-/// 标题的段前留白：紧跟上一条标题时按 CSS 的「外边距折叠」折算。
-///
-/// super_editor 的 `CascadingPadding` 是逐块内边距，相邻两块直接相加：
-/// H1 段后 10 + H2 段前 22 = 32dp，几个标题挨在一起时中间会空出一大块
-/// （用户反馈）。CSS 里相邻 margin 取较大值，这里等价地扣掉上一条标题
-/// 的段后留白，最终间距就等于本标题的段前值。
-double _headerTopSpacing(Document doc, DocumentNode node, double top) {
-  final DocumentNode? previous = doc.getNodeBeforeById(node.id);
-  // 空行本身已经提供一整行的间隔，标题不再叠加段前留白。
-  if (_isEmptyParagraph(previous)) {
-    return 0;
-  }
-  final double previousBottom = _headerBottomSpacing(previous);
-  if (previousBottom <= 0) {
-    return top;
-  }
-  return top > previousBottom ? top - previousBottom : 0;
 }
 
 /// 上方紧邻的是否也是引用段。

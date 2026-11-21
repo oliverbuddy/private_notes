@@ -1003,6 +1003,13 @@ class _FixedButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
+    // 深色下的 tertiary（#8E97A4）在 #1A1A1A 上有 5.8:1，和可用态的亮度
+    // 几乎一样，撤销/还原看不出「能不能点」。深色单独拉开两级：可用态更亮
+    // （0.86），不可用态压到 0.30；浅色维持原样（tertiary 在白底本就明显偏灰）。
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color iconColor = enabled
+        ? colors.text.withValues(alpha: isDark ? 0.86 : 0.72)
+        : (isDark ? colors.text.withValues(alpha: 0.30) : colors.tertiary);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(AppRadius.button),
@@ -1013,8 +1020,7 @@ class _FixedButton extends StatelessWidget {
         child: Icon(
           icon,
           size: size,
-          color:
-              enabled ? colors.text.withValues(alpha: 0.72) : colors.tertiary,
+          color: iconColor,
         ),
       ),
     );

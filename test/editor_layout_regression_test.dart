@@ -15,6 +15,7 @@ import 'package:xiaoji/editor/lab/list_style.dart';
 import 'package:xiaoji/editor/lab/mobile_table.dart';
 import 'package:xiaoji/editor/lab/new_editor_page.dart';
 import 'package:xiaoji/editor/lab/xiaoji_markdown.dart';
+import 'package:xiaoji/editor/markdown_toolbar.dart';
 import 'package:xiaoji/editor/markdown_view.dart' show CodeBlockCardStyle;
 import 'package:xiaoji/editor/note_image_share.dart';
 import 'package:xiaoji/models/note.dart';
@@ -357,6 +358,196 @@ void main() {
     });
   });
 
+  group('撤销与重做', () {
+    testWidgets('多次行首合并后连续撤销：文档回到打开时状态，且不抛异常', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_undo_merge_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(
+          repository,
+          _note('undo_merge', '# 标题\n\n正文一\n\n正文二\n\n正文三'),
+        ),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final SuperEditor widget = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final Editor editor = widget.editor;
+      List<String> snapshot() => editor.document
+          .map((DocumentNode node) =>
+              '${node.getMetadataValue(NodeMetadata.blockType)}:'
+              '${node is TextNode ? node.text.toPlainText() : node.runtimeType}')
+          .toList();
+      final List<String> opened = snapshot();
+
+      // 连续两次行首合并（与手机输入法同一条请求）。
+      void mergeAt(int index) {
+        final DocumentNode node = editor.document.getNodeAt(index)!;
+        editor.execute(<EditRequest>[
+          ChangeSelectionRequest(
+            DocumentSelection.collapsed(
+              position: DocumentPosition(
+                nodeId: node.id,
+                nodePosition: const TextNodePosition(offset: 0),
+              ),
+            ),
+            SelectionChangeType.placeCaret,
+            SelectionReason.userInteraction,
+          ),
+          DeleteUpstreamAtBeginningOfNodeRequest(node),
+        ]);
+      }
+
+      mergeAt(2);
+      await _pumpFrames(tester, frames: 4);
+      mergeAt(2);
+      await _pumpFrames(tester, frames: 4);
+      expect(snapshot(), isNot(opened), reason: '两次合并后文档应已改变');
+
+      // 撤销两次必须逐条还原成打开时的内容。此前解析后的后处理节点不在
+      // 撤销基线上，重放会失效，并把选区留在已删除的节点上 —— 内核每帧
+      // 校正光标可见性时抛空指针，页面白屏（用户反馈「撤销无效且白屏」）。
+      for (int i = 0; i < 2; i++) {
+        editor.undo();
+        await _pumpFrames(tester, frames: 4);
+      }
+      expect(snapshot(), opened, reason: '撤销要能逐条还原到打开时的文档');
+      expect(tester.takeException(), isNull, reason: '撤销后不能每帧抛异常');
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
+  group('撤销可用态', () {
+    testWidgets('空笔记只落了光标时撤销不亮，输入后亮、撤销后还原亮', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_undo_state_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('undo_state', '')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      MarkdownToolbar toolbar() =>
+          tester.widget<MarkdownToolbar>(find.byType(MarkdownToolbar));
+      final Editor editor = tester
+          .widget<SuperEditor>(find.byType(SuperEditor).first)
+          .editor;
+
+      // 新建笔记会自动落一次光标，内核把它也记成可撤销事务。没有内容改动时
+      // 按钮不能点亮：亮着却点了没变化，就是用户反馈的「撤销无效」。
+      expect(toolbar().canUndo, isFalse);
+      expect(toolbar().canRedo, isFalse);
+
+      editor.execute(<EditRequest>[
+        const InsertPlainTextAtCaretRequest('x'),
+      ]);
+      await _pumpFrames(tester, frames: 4);
+      expect(toolbar().canUndo, isTrue);
+
+      editor.undo();
+      await _pumpFrames(tester, frames: 4);
+      expect(toolbar().canUndo, isFalse);
+      expect(toolbar().canRedo, isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
+  group('工具条撤销/还原配色', () {
+    /// 直接渲染工具条按钮行，取撤销/还原两个图标（未做 alpha 合成）的颜色。
+    Future<List<Color>> historyIconColors(
+      WidgetTester tester, {
+      required Brightness brightness,
+      required bool canUndo,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: brightness == Brightness.dark
+              ? AppTheme.dark()
+              : AppTheme.light(),
+          home: Scaffold(
+            body: MarkdownToolbar(
+              onCommand: (MarkdownCommand _) {},
+              onAttachAction: (MarkdownAttachAction _) {},
+              onHideKeyboard: () {},
+              panel: MarkdownToolbarPanel.none,
+              onPanelToggle: (MarkdownToolbarPanel _) {},
+              onUndo: () {},
+              onRedo: () {},
+              canUndo: canUndo,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      return <Color>[
+        tester.widget<Icon>(find.byIcon(Icons.u_turn_left_rounded)).color!,
+        tester.widget<Icon>(find.byIcon(Icons.u_turn_right_rounded)).color!,
+      ];
+    }
+
+    /// 图标色与工具条底色合成后的实际观感亮度。
+    double onToolbarLuminance(Color color, AppColors colors) =>
+        Color.alphaBlend(color, colors.page).computeLuminance();
+
+    testWidgets('深色下可用态与置灰态要拉开差距，一眼能看出能不能点', (
+      WidgetTester tester,
+    ) async {
+      final List<Color> disabled = await historyIconColors(
+        tester,
+        brightness: Brightness.dark,
+        canUndo: false,
+      );
+      final List<Color> enabled = await historyIconColors(
+        tester,
+        brightness: Brightness.dark,
+        canUndo: true,
+      );
+
+      // 此前深色置灰用 tertiary(#8E97A4)，与可用态亮度几乎一样，
+      // 用户看不出撤销/还原是否可点。置灰必须显著暗于可用态。
+      expect(
+        onToolbarLuminance(disabled[0], AppColors.dark),
+        lessThan(onToolbarLuminance(enabled[0], AppColors.dark) * 0.5),
+        reason: '深色置灰态要明显暗于可用态',
+      );
+      expect(
+        onToolbarLuminance(enabled[0], AppColors.dark),
+        greaterThan(0.35),
+        reason: '可用态在深色底上要足够亮',
+      );
+      expect(disabled[1], disabled[0], reason: '不可用的还原按钮同为置灰色');
+    });
+
+    testWidgets('浅色维持原配色：可用态正文色、置灰态 tertiary', (
+      WidgetTester tester,
+    ) async {
+      final List<Color> disabled = await historyIconColors(
+        tester,
+        brightness: Brightness.light,
+        canUndo: false,
+      );
+      final List<Color> enabled = await historyIconColors(
+        tester,
+        brightness: Brightness.light,
+        canUndo: true,
+      );
+      expect(disabled[0], AppColors.light.tertiary);
+      expect(enabled[0], AppColors.light.text.withValues(alpha: 0.72));
+    });
+  });
+
   group('标题回车换行', () {
     testWidgets('标题末尾回车：新起一行是正文，光标保持整行高度', (
       WidgetTester tester,
@@ -397,6 +588,119 @@ void main() {
         caret.height,
         greaterThan(12),
         reason: '光标必须保持整行高度，不能缩成 4dp 细线',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
+  group('标题降级为正文', () {
+    testWidgets('退格把标题变成正文后，行高与上下间距跟普通正文一致', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_demote_',
+      );
+      // 标题行会各自成块，最后一行是正文。
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('demote', '# 一级\n## 二级\n正文一')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final SuperEditor widget = tester.widget<SuperEditor>(
+        find.byType(SuperEditor).first,
+      );
+      final Editor editor = widget.editor;
+      final DocumentNode h2Node = editor.document.getNodeAt(1)!;
+      editor.execute(<EditRequest>[
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: h2Node.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+        DeleteUpstreamAtBeginningOfNodeRequest(h2Node),
+      ]);
+      await _pumpFrames(tester, frames: 8);
+
+      final DocumentNode demoted = editor.document.getNodeAt(1)!;
+      expect(
+        demoted.getMetadataValue(NodeMetadata.blockType),
+        paragraphAttribution,
+        reason: '行首退格应把标题降级成正文',
+      );
+
+      final Rect h1 = tester.getRect(find.text('一级', findRichText: true));
+      final Rect h2 = tester.getRect(find.text('二级', findRichText: true));
+      final Rect body = tester.getRect(find.text('正文一', findRichText: true));
+
+      expect(
+        h2.height,
+        closeTo(body.height, 1),
+        reason: '降级后的行盒高度要和普通正文一致',
+      );
+      expect(
+        h2.top - h1.bottom,
+        closeTo(12, 2),
+        reason: '降级后与上方标题的间距要和正文段间距一致，不能贴住上一行',
+      );
+      expect(
+        body.top - h2.bottom,
+        closeTo(12, 2),
+        reason: '降级后与下方正文的间距同样保持正文段间距',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
+  group('段落间距往返', () {
+    test('相邻段落存盘重读后仍是独立段落，不会并成一段', () {
+      final MutableDocument document = MutableDocument(
+        nodes: <DocumentNode>[
+          ParagraphNode(id: 'p1', text: AttributedText('第一段')),
+          ParagraphNode(id: 'p2', text: AttributedText('第二段')),
+          ParagraphNode(id: 'p3', text: AttributedText('第三段')),
+        ],
+      );
+      final MutableDocument back = deserializeXiaojiMarkdown(
+        serializeDocumentToXiaojiMarkdown(document),
+      );
+      expect(
+        back.nodeCount,
+        4,
+        reason: '三段正文 + 末尾空段落',
+      );
+      expect(
+        back.map((DocumentNode node) =>
+            node is TextNode ? node.text.toPlainText() : null).toList(),
+        <String?>['第一段', '第二段', '第三段', ''],
+      );
+    });
+
+    testWidgets('重开笔记后相邻段落保留 12 的段间距', (WidgetTester tester) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_paragraph_gap_',
+      );
+      await tester.pumpWidget(
+        _buildEditor(repository, _note('paragraph_gap', '第一段\n第二段')),
+      );
+      await _pumpFrames(tester, frames: 12);
+
+      final Rect first = tester.getRect(find.text('第一段', findRichText: true));
+      final Rect second = tester.getRect(find.text('第二段', findRichText: true));
+      expect(
+        second.top - first.bottom,
+        closeTo(12, 2),
+        reason: '相邻段落要有段间距；并成一段后这里会变成 0',
       );
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -963,13 +1267,15 @@ void main() {
           reason: 'H3 至少比正文大一档，暗色主题下才分得出来');
     });
 
-    testWidgets('相邻标题按外边距折叠，空行不再叠出大空洞', (WidgetTester tester) async {
+    testWidgets('标题间距只由各自的段前距决定，空行就是一整行', (
+      WidgetTester tester,
+    ) async {
       final NoteRepository repository = await _createRepository(
         tester,
         'xiaoji_heading_gap_',
       );
 
-      // 没有空行（App 自己存盘的紧凑格式）：折叠后间距 = 下一档标题段前。
+      // 连续标题：间距 = 下一档标题的段前距（H2 20 / H3 16），不做折叠。
       await tester.pumpWidget(
         _buildEditor(
           repository,
@@ -982,13 +1288,15 @@ void main() {
       final Rect t1 = tester.getRect(find.text('一级标题', findRichText: true));
       final Rect t2 = tester.getRect(find.text('二级标题', findRichText: true));
       final Rect t3 = tester.getRect(find.text('三级标题', findRichText: true));
-      expect(t2.top - t1.bottom, closeTo(12, 2));
-      expect(t3.top - t2.bottom, closeTo(10, 2));
+      final double tightGap = t2.top - t1.bottom;
+      expect(tightGap, closeTo(20, 2));
+      expect(t3.top - t2.bottom, closeTo(16, 2));
 
       // 换一份笔记时必须先卸载旧页面，否则状态复用不会重新解析正文。
       await tester.pumpWidget(const SizedBox.shrink());
 
-      // 带空行（外部 md）：空行只占自己一行，不再叠加标题段前段后。
+      // 带空行（外部 md）：空行是普通段落，占一整行 + 段前距，
+      // 和语雀里敲出来的空行一致；不再做「紧挨标题就压扁」的特殊处理。
       await tester.pumpWidget(
         _buildEditor(
           repository,
@@ -1001,12 +1309,12 @@ void main() {
       final Rect h1 = tester.getRect(find.text('一级标题', findRichText: true));
       final Rect h2 = tester.getRect(find.text('二级标题', findRichText: true));
       final Rect h3 = tester.getRect(find.text('三级标题', findRichText: true));
-      // 空行紧挨标题时按 1/4 行高渲染：H1 段后 4 + 空行 4 = 8，
-      // H2 段后 4 + 空行 4 = 8，有/没有空行视觉上几乎一样。
-      expect(h2.top - h1.bottom, closeTo(8, 2));
-      expect(h3.top - h2.bottom, closeTo(8, 2));
-      // 空行仍在，不能贴死。
-      expect(h2.top - h1.bottom, greaterThan(5));
+      final double blankGap = h2.top - h1.bottom;
+      // 一整行空行（约 25）+ 段前距，明显大于连续标题，但也不能无限大。
+      expect(blankGap, greaterThan(tightGap + 20));
+      expect(blankGap, lessThan(75));
+      // H2/H3 字号不同，文本行盒内的留白略有差异，给一点余量。
+      expect(h3.top - h2.bottom, closeTo(blankGap, 6));
     });
 
     testWidgets('代码块：字号/行高/等宽与列表摘要同源', (WidgetTester tester) async {
@@ -1079,7 +1387,7 @@ void main() {
       );
     });
 
-    testWidgets('代码块与下一行的间距与列表摘要一致', (WidgetTester tester) async {
+    testWidgets('代码块与下一行的间距与正文段间距一致', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(360, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -1101,11 +1409,11 @@ void main() {
       final Rect next = tester.getRect(
         find.textContaining('代码后面的正文', findRichText: true),
       );
-      // 卡片底部内边距 10 + 块间距 6（下一块不再叠加段距）= 6。
-      // 列表摘要里卡片下方也只有这 6，两处肉眼一致（用户多轮反馈详情偏大）。
+      // 卡片底部内边距 10 之外，间距就是下一段正文的段前距 12
+      // （代码块本身只有段前距，没有段后距）。
       expect(
         next.top - code.bottom - CodeBlockCardStyle.paddingVertical,
-        closeTo(6, 0.5),
+        closeTo(12, 0.5),
       );
     });
 
