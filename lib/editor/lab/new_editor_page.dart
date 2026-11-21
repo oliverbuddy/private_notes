@@ -902,6 +902,11 @@ class _NewEditorPageState extends State<NewEditorPage>
       tags: _currentNote.tags,
       pinned: _currentNote.pinned,
       locked: _currentNote.locked,
+      // 锁定笔记的明文标题要跟着正文首行走：漏掉这一项时，编辑后返回
+      // 列表标题会变成「已锁定」，得重启触发补标题迁移才恢复。
+      title: _currentNote.locked
+          ? Note.deriveLockedTitle(md)
+          : _currentNote.title,
       body: md,
     );
     try {
@@ -2102,6 +2107,8 @@ class _NewEditorPageState extends State<NewEditorPage>
       tags: Note.parseTags(result),
       pinned: _currentNote.pinned,
       locked: _currentNote.locked,
+      // 锁定笔记的明文标题是 frontmatter 里的元信息，改标签时不能顺手丢。
+      title: _currentNote.title,
       body: _currentNote.body,
     );
     await widget.repository.upsert(_currentNote);

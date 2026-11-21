@@ -366,6 +366,9 @@ class NoteStore {
       id: current.id,
       // 当前是锁定笔记、或这一版本身是密文：恢复后继续保持锁定。
       locked: current.locked || restored.locked,
+      // 旧快照可能是「编辑丢标题」时期留下的：沿用当前标题，
+      // 否则恢复后列表会退回「已锁定」。
+      title: restored.title.isEmpty ? current.title : restored.title,
       body: restored.body,
     );
     await saveNote(toWrite, keepHistory: false);

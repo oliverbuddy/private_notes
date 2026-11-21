@@ -708,6 +708,99 @@ void main() {
     });
   });
 
+  group('锁定笔记标题', () {
+    const MethodChannel channel = MethodChannel('xiaoji/native');
+
+    setUp(() {
+      // 测试环境没有 Keystore：只要保证加密/解密通道能返回即可。
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall call) async {
+        if (call.method == 'sealText') {
+          return 'cipher';
+        }
+        if (call.method == 'openText') {
+          return '机密正文改';
+        }
+        return null;
+      });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    testWidgets('编辑锁定笔记后返回列表，明文标题保留并跟随首行', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_locked_title_',
+      );
+      final Note locked = Note(
+        id: '20261122-0900-lock',
+        created: DateTime(2026, 11, 22, 9),
+        updated: DateTime(2026, 11, 22, 9),
+        locked: true,
+        title: '机密正文',
+        body: '机密正文',
+      );
+      await tester.runAsync(() => repository.upsert(locked));
+
+      await tester.pumpWidget(_buildEditor(repository, locked));
+      await _pumpFrames(tester, frames: 12);
+
+      // 改首行，等 800ms 防抖保存落盘。
+      final Editor editor = tester
+          .widget<SuperEditor>(find.byType(SuperEditor).first)
+          .editor;
+      final TextNode first = editor.document.getNodeAt(0)! as TextNode;
+      editor.execute(<EditRequest>[
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: first.id,
+              nodePosition: TextNodePosition(offset: first.text.length),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+        const InsertPlainTextAtCaretRequest('改'),
+      ]);
+      await tester.pump(const Duration(milliseconds: 900));
+      // 真实文件 IO 只在 runAsync 里推进：交替让事件循环跑一段、再把
+      // 回调冲进 fake 队列，直到落盘完成。
+      for (var i = 0; i < 100; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+        if (repository.notes.single.title == '机密正文改') {
+          break;
+        }
+      }
+
+      final Note saved = repository.notes.single;
+      expect(saved.locked, isTrue);
+      expect(
+        saved.title,
+        '机密正文改',
+        reason: '保存时丢掉 title 会让列表退回「已锁定」，重启靠迁移才恢复',
+      );
+      // 磁盘上的 frontmatter 也要有明文标题，否则重启后同样丢失；
+      // 正文部分必须仍是密文。
+      final String raw =
+          File(repository.store.pathFor(saved)).readAsStringSync();
+      expect(raw, contains('title: 机密正文改'));
+      expect(raw, contains(Note.lockEnvelopePrefix));
+      expect(raw.split('---').last, isNot(contains('机密正文改')));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
   group('详情页性能', () {
     testWidgets('页面重建复用同一份样式表，不触发整篇重新排版', (WidgetTester tester) async {
       final NoteRepository repository = await _createRepository(

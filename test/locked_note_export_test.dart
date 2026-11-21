@@ -124,6 +124,38 @@ void main() {
     expect(body, '明文正文');
   });
 
+  test('恢复旧版锁定笔记时补回明文标题，列表不会退回「已锁定」', () async {
+    final Note base = Note(
+      id: '20261122-0900-lockver',
+      created: DateTime(2026, 11, 22, 9),
+      updated: DateTime(2026, 11, 22, 9),
+      locked: true,
+      body: '${Note.lockEnvelopePrefix}OLD',
+    );
+    // 旧快照没有 title（历史上编辑保存会丢标题），当前笔记有标题。
+    await store.saveNote(base);
+    final Note current = base.copyWith(
+      title: '当前标题',
+      body: '${Note.lockEnvelopePrefix}NEW',
+      updated: base.updated.add(const Duration(minutes: 5)),
+    );
+    await store.saveNote(current);
+    final version = (await store.listVersions(base.id)).single;
+    expect(await store.readVersion(version), isNot(contains('title:')));
+
+    final Note? restored = await store.restoreVersion(current, version);
+    expect(restored, isNotNull);
+    expect(
+      restored!.title,
+      '当前标题',
+      reason: '旧快照缺 title 时应沿用当前标题，不能把列表打回「已锁定」',
+    );
+    expect(
+      File(store.pathFor(current)).readAsStringSync(),
+      contains('title: 当前标题'),
+    );
+  });
+
   test('私有备份包含锁定笔记（同机可恢复），导出仍排除', () async {
     await store.saveNote(lockedNote());
 
