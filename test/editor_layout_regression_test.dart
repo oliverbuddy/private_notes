@@ -801,6 +801,83 @@ void main() {
     });
   });
 
+  group('键盘收起后的滚动', () {
+    testWidgets('收起键盘窗口内立刻滑动，不会被 600ms 计时器拽回收起位置', (
+      WidgetTester tester,
+    ) async {
+      final NoteRepository repository = await _createRepository(
+        tester,
+        'xiaoji_ime_scroll_',
+      );
+      final Note note = _note(
+        'ime_scroll',
+        List<String>.generate(
+          60,
+          (int i) => '第 $i 段正文内容，用来撑出可滚动高度。',
+        ).join('\n'),
+      );
+
+      Widget buildWithIme(double ime) {
+        final MediaQueryData base = MediaQueryData.fromView(tester.view);
+        return MaterialApp(
+          theme: AppTheme.light(),
+          home: MediaQuery(
+            data: base.copyWith(viewInsets: EdgeInsets.only(bottom: ime)),
+            child: NewEditorPage(
+              repository: repository,
+              note: note,
+              autoFocus: false,
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(buildWithIme(300));
+      await _pumpFrames(tester, frames: 12);
+
+      ScrollPosition position() {
+        return tester
+            .state<ScrollableState>(
+              find
+                  .descendant(
+                    of: find.byType(SuperEditor),
+                    matching: find.byType(Scrollable),
+                  )
+                  .first,
+            )
+            .position;
+      }
+
+      position().jumpTo(200);
+      await tester.pump();
+
+      // 键盘收起：进入保持视觉位置的窗口，锚点就是当前 200。
+      await tester.pumpWidget(buildWithIme(0));
+      await tester.pump();
+
+      // 收起过程中立刻上滑（用户接管滚动）。
+      await tester.drag(find.byType(NewEditorPage), const Offset(0, -120));
+      await tester.pump();
+      final double afterDrag = position().pixels;
+      expect(
+        afterDrag,
+        greaterThan(240),
+        reason: '拖动必须真的改变了滚动位置，否则这条用例没覆盖到场景',
+      );
+
+      // 窗口结束：修复前计时器会无条件还原到锚点（表现为回滚一下）。
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(
+        position().pixels,
+        greaterThanOrEqualTo(afterDrag - 2),
+        reason: '用户已经接管滚动，600ms 后不能再把页面拽回收起前的位置',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 6));
+    });
+  });
+
   group('详情页性能', () {
     testWidgets('页面重建复用同一份样式表，不触发整篇重新排版', (WidgetTester tester) async {
       final NoteRepository repository = await _createRepository(

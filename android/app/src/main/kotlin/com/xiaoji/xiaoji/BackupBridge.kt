@@ -17,6 +17,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
@@ -101,10 +102,21 @@ internal class BackupBridge(private val activity: Activity) {
                 fileName,
             ) ?: throw IllegalStateException("无法在所选文件夹里创建文件")
 
-            File(sourcePath).inputStream().buffered().use { input ->
-                resolver.openOutputStream(created)?.use { output ->
-                    input.copyTo(output)
-                } ?: throw IllegalStateException("无法写入所选文件夹")
+            try {
+                File(sourcePath).inputStream().buffered().use { input ->
+                    resolver.openOutputStream(created)?.use { output ->
+                        input.copyTo(output)
+                    } ?: throw IllegalStateException("无法写入所选文件夹")
+                }
+            } catch (e: Exception) {
+                // 半截备份也会参与「只保留最近 N 份」的轮换，把好备份挤掉；
+                // 写入失败必须立刻删掉它。
+                try {
+                    DocumentsContract.deleteDocument(resolver, created)
+                } catch (_: Exception) {
+                    // 删不掉时由下一轮备份继续覆盖/清理，至少不再当作有效备份。
+                }
+                throw e
             }
 
             pruneTree(tree, keepPrefix, keep, created)
@@ -135,6 +147,9 @@ internal class BackupBridge(private val activity: Activity) {
                 val name = cursor.getString(1) ?: continue
                 val modified = if (cursor.isNull(2)) 0L else cursor.getLong(2)
                 if (name.startsWith(prefix) &&
+                    // 手动「导出」的文件也可能存进同一个文件夹（xiaoji-export-*），
+                    // 不能被自动备份的轮换误删。
+                    !name.startsWith("xiaoji-export-") &&
                     (name.endsWith(".zip") || name.endsWith(".xiaoji"))
                 ) {
                     items.add(Triple(id, name, modified))
@@ -392,6 +407,17 @@ internal class BackupBridge(private val activity: Activity) {
             val zip = File(zipPath)
             if (!zip.exists()) {
                 result.error("missing_zip", "备份文件不存在", null)
+                return
+            }
+            // 先按中央目录完整解析一遍：被截断 / 半截下载的包会在这里直接
+            // 抛异常，而不是被 ZipInputStream 悄悄只解出一部分条目后继续
+            // 恢复（那样会把未出现的附件当成「备份里没有」清掉）。
+            try {
+                ZipFile(zip).use { archive ->
+                    archive.entries().asSequence().forEach { it.name }
+                }
+            } catch (e: Exception) {
+                result.error("invalid_zip", "备份文件不完整或已损坏", null)
                 return
             }
             val dest = File(destDir)

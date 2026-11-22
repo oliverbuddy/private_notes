@@ -624,6 +624,13 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// dragDetails，`goBallistic` 之类的程序性滚动没有。
   bool _userDraggingScroll = false;
 
+  /// 本次键盘收起窗口内，用户是否已经自己滑动过。
+  ///
+  /// 一旦用户接管，这次收起的「还原到锚点」就必须整体作废：否则 600ms
+  /// 计时器到点仍会把页面拽回锚点，正好撞上用户刚滑出去的那一下，
+  /// 表现为「收起键盘后立刻滑动会回滚一下」。
+  bool _userScrolledDuringImeCollapse = false;
+
   /// 键盘收起后为「保住视觉位置」而临时补的底部留白。
   ///
   /// 关键场景：笔记内容不足一屏（如三段文字 + 两张图）。键盘弹起时视口
@@ -663,6 +670,9 @@ class _NewEditorPageState extends State<NewEditorPage>
   void _beginImeCollapse({required double previousIme}) {
     if (!_imeCollapsing) {
       _imeCollapsing = true;
+      // 只在「新一次收起」时清零；收起动画期间每帧都会进来，
+      // 不能把用户中途的滑动标记反复冲掉。
+      _userScrolledDuringImeCollapse = false;
       _cancelCaretFollow();
     }
     final ScrollPosition? position =
@@ -684,7 +694,10 @@ class _NewEditorPageState extends State<NewEditorPage>
     // 期间用户主动滑动优先（见监听里的 isScrollingNotifier 判断）。
     // 等布局按新视口结算完，算出「还差多少可滚动范围」再补留白。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_imeCollapsing || !mounted || !_editorScroll.hasClients) {
+      if (!_imeCollapsing ||
+          _userScrolledDuringImeCollapse ||
+          !mounted ||
+          !_editorScroll.hasClients) {
         return;
       }
       final double? anchor = _imeCollapseAnchorPixels;
@@ -809,7 +822,11 @@ class _NewEditorPageState extends State<NewEditorPage>
   /// 目标会按当前可滚动范围夹一下（内容变短时避免还原到越界值）。
   void _restoreScrollAfterImeCollapse() {
     final double? anchor = _imeCollapseAnchorPixels;
-    if (_disposed || !mounted || anchor == null) {
+    // 用户已经自己滑动过：不再把页面拽回收起前的锚点。
+    if (_disposed ||
+        !mounted ||
+        anchor == null ||
+        _userScrolledDuringImeCollapse) {
       return;
     }
     if (!_editorScroll.hasClients) {
@@ -3282,6 +3299,9 @@ class _NewEditorPageState extends State<NewEditorPage>
       onNotification: (ScrollNotification notification) {
         if (notification is ScrollStartNotification) {
           _userDraggingScroll = notification.dragDetails != null;
+          if (_userDraggingScroll && _imeCollapsing) {
+            _userScrolledDuringImeCollapse = true;
+          }
         } else if (notification is ScrollEndNotification) {
           _userDraggingScroll = false;
         }

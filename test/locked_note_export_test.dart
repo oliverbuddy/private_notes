@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -73,6 +74,39 @@ void main() {
     await file.parent.create(recursive: true);
     await file.writeAsBytes(<int>[1, 2, 3]);
   }
+
+  test('恢复明文备份不会把本地仍锁定的笔记解锁', () async {
+    await store.saveNote(lockedNote());
+
+    // 一份「导出锁定笔记（明文）」形态的同 id 备份。
+    final Note plain = Note(
+      id: lockedNote().id,
+      created: lockedNote().created,
+      updated: lockedNote().updated,
+      body: '备份明文内容',
+    );
+    final List<int> bytes = utf8.encode(plain.encode());
+    final archive = Archive()
+      ..addFile(ArchiveFile('${plain.id}.md', bytes.length, bytes));
+    final zip = Uint8List.fromList(ZipEncoder().encode(archive));
+
+    final (restored, skipped) = await store.restoreFromZip(zip);
+    expect(restored, 1);
+    expect(skipped, 0);
+
+    final String raw = File(store.pathFor(lockedNote())).readAsStringSync();
+    expect(
+      raw,
+      contains('locked: true'),
+      reason: '本地仍在锁定的笔记，不能被一份明文备份悄悄解锁',
+    );
+    expect(raw, contains(Note.lockEnvelopePrefix));
+    expect(
+      raw.split('---').last,
+      isNot(contains('备份明文内容')),
+      reason: '恢复后仍要以密文落盘',
+    );
+  });
 
   test('锁定笔记落盘为密文信封，明文不落盘', () async {
     await store.saveNote(lockedNote());

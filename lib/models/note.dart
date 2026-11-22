@@ -144,7 +144,10 @@ class Note {
 
     final headerId = fields['id']?.trim();
     final id = (headerId != null && headerId.isNotEmpty) ? headerId : fallbackId;
-    if (id == null || id.isEmpty) {
+    // id 会直接拼进文件路径（`notes/<年>/<月>/<id>.md`、`assets/<id>/`）。
+    // 恢复备份、导入外部 Markdown 时 frontmatter 来自不可信文件，含路径
+    // 分隔符或 `..` 的 id 可能写到笔记目录之外，整条笔记必须拒绝。
+    if (id == null || !_isSafeId(id)) {
       return null;
     }
 
@@ -164,6 +167,20 @@ class Note {
       title: (fields['title'] ?? '').trim(),
       body: body,
     );
+  }
+
+  /// id 是否可以安全地作为路径片段。
+  ///
+  /// 正常 id 由 [generateId] 生成（`20261102-1000-a1b2`）；外部 Markdown
+  /// 没有 id 时回退用文件名，所以这里不限定字符集，只拦路径危险值。
+  static bool _isSafeId(String id) {
+    if (id == '.' || id == '..') {
+      return false;
+    }
+    return !id.contains('/') &&
+        !id.contains('\\') &&
+        !id.contains('\u0000') &&
+        !id.contains('..');
   }
 
   /// 从正文首行生成锁定笔记的明文标题。

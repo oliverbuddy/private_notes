@@ -89,6 +89,53 @@ void main() {
     // 这里验证正常路径不受影响；越界防护逻辑在 restoreFromZip 内联。
   });
 
+  test('zip 内绝对路径条目不会写出临时目录', () async {
+    final String escaped = '${tempDir.path}/xiaoji_zip_slip.md';
+    final List<int> bytes = utf8.encode(
+      Note(
+        id: '20261102-1000-slip',
+        created: DateTime(2026, 11, 2, 10),
+        updated: DateTime(2026, 11, 2, 10),
+        body: '越界',
+      ).encode(),
+    );
+    final archive = Archive()
+      ..addFile(ArchiveFile(escaped, bytes.length, bytes));
+    final zip = Uint8List.fromList(ZipEncoder().encode(archive));
+
+    final (restored, _) = await store.restoreFromZip(zip);
+    expect(restored, 0);
+    expect(
+      File(escaped).existsSync(),
+      isFalse,
+      reason: '绝对路径条目不能借解压写到临时目录之外',
+    );
+  });
+
+  test('frontmatter 的 id 带路径穿越时整条拒绝，不写到笔记目录外', () async {
+    // 恢复包来自外部文件（用户可选任意 zip），frontmatter 视为不可信输入。
+    const String evil = '---\n'
+        'id: ../../escaped\n'
+        'created: 2026-11-02T10:00:00\n'
+        'updated: 2026-11-02T10:00:00\n'
+        '---\n\n'
+        '越界写入';
+    final List<int> bytes = utf8.encode(evil);
+    final archive = Archive()
+      ..addFile(ArchiveFile('evil.md', bytes.length, bytes));
+    final zip = Uint8List.fromList(ZipEncoder().encode(archive));
+
+    final (restored, skipped) = await store.restoreFromZip(zip);
+    expect(restored, 0, reason: '危险 id 的笔记必须整条丢弃');
+    expect(skipped, 1);
+    expect(
+      File('${store.notesDir.path}/escaped.md').existsSync(),
+      isFalse,
+      reason: '不能借 ../ 把文件写到 notes 目录之外',
+    );
+    expect(await store.loadNotes(), isEmpty);
+  });
+
   test('恢复时跳过 trash/ 里的 .md，已删除笔记不会复活', () async {
     final deleted = Note(
       id: '20261102-1000-gone',

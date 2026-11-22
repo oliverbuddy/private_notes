@@ -1234,8 +1234,10 @@ class NoteStore {
           continue;
         }
         final String name = entry.name.replaceAll('\\', '/');
-        if (name.contains('..')) {
-          continue; // 路径越界防护
+        // 路径越界防护：`..` 与绝对路径都会让 p.join 跑到临时目录之外
+        // （`p.join('/tmp/x', '/etc/a')` 直接得到 `/etc/a`）。
+        if (name.isEmpty || p.isAbsolute(name) || name.contains('..')) {
+          continue;
         }
         final File target = File(p.join(temp.path, name));
         await target.parent.create(recursive: true);
@@ -1279,6 +1281,9 @@ class NoteStore {
     var skipped = 0;
     final Set<String> restoredIds = <String>{};
     final Map<String, File> pendingAssets = <String, File>{};
+    // 本地仍处于锁定的笔记：备份里如果是明文（例如「导出锁定笔记」的包），
+    // 恢复时不能把锁悄悄去掉。先一次性扫出锁定 id，避免逐条全盘搜索。
+    final Set<String> localLockedIds = await _collectLockedIds();
 
     await for (final entity
         in directory.list(recursive: true, followLinks: false)) {
@@ -1301,13 +1306,21 @@ class NoteStore {
       }
       try {
         final raw = await entity.readAsString();
-        final note = Note.decode(
+        Note? note = Note.decode(
           raw,
           fallbackId: p.basenameWithoutExtension(name),
         );
         if (note == null) {
           skipped += 1;
           continue;
+        }
+        if (!note.locked && localLockedIds.contains(note.id)) {
+          note = note.copyWith(
+            locked: true,
+            title: note.title.isNotEmpty
+                ? note.title
+                : Note.deriveLockedTitle(note.body),
+          );
         }
         await saveNote(note, keepHistory: false);
         restoredIds.add(note.id);
@@ -1317,30 +1330,109 @@ class NoteStore {
       }
     }
 
-    // 只替换「本次恢复了正文」的笔记附件；正文没恢复成功时保守合并，
-    // 宁可留下旧图，也不把用户本地的附件清掉。
-    final Set<String> replaced = <String>{};
+    // 先把附件全部复制成功，再清理备份里没有的旧文件。
+    //
+    // 旧实现是「先删目录再写」：复制到一半失败（磁盘满、文件被占用）
+    // 本地图片就已经没了。现在任何一步失败，旧文件都还在。
+    final Map<String, Set<String>> restoredAssetPaths = <String, Set<String>>{};
     for (final MapEntry<String, File> entry in pendingAssets.entries) {
       final relative = entry.key.substring('assets/'.length);
-      final noteId = relative.split('/').first;
-      if (noteId.isEmpty) {
+      final List<String> segments = relative.split('/');
+      final noteId = segments.first;
+      if (noteId.isEmpty ||
+          noteId == '.' ||
+          noteId == '..' ||
+          segments.length < 2) {
         continue;
-      }
-      if (restoredIds.contains(noteId) && replaced.add(noteId)) {
-        await _deleteDirectoryQuietly(assetDirectoryOf(noteId));
       }
       final target = File(p.join(assetsDir.path, relative));
       await target.parent.create(recursive: true);
       await entry.value.copy(target.path);
-    }
-    // 备份里该笔记一张附件都没有：也要清空，否则本地旧图永远留着。
-    for (final String noteId in restoredIds) {
-      if (replaced.contains(noteId)) {
-        continue;
+      if (restoredIds.contains(noteId)) {
+        restoredAssetPaths
+            .putIfAbsent(noteId, () => <String>{})
+            .add(segments.skip(1).join('/'));
       }
-      await _deleteDirectoryQuietly(assetDirectoryOf(noteId));
+    }
+    // 正文恢复成功的笔记：删掉这次备份里没有的旧附件（备份里一张都没有
+    // 时集合为空，等同于清空目录）。
+    for (final String noteId in restoredIds) {
+      await _pruneAssetDirectory(
+        assetDirectoryOf(noteId),
+        restoredAssetPaths[noteId] ?? const <String>{},
+      );
     }
     return (restored, skipped);
+  }
+
+  /// 恢复后清理附件目录里「这次备份里没有」的文件。
+  ///
+  /// 调用时新附件已经全部复制成功，这里只做删除；列目录失败就整体放弃，
+  /// 宁可留下旧图也不误删。
+  Future<void> _pruneAssetDirectory(
+    Directory directory,
+    Set<String> keep,
+  ) async {
+    if (!await directory.exists()) {
+      return;
+    }
+    if (keep.isEmpty) {
+      await _deleteDirectoryQuietly(directory);
+      return;
+    }
+    final List<File> stale = <File>[];
+    try {
+      await for (final entity
+          in directory.list(recursive: true, followLinks: false)) {
+        if (entity is! File) {
+          continue;
+        }
+        final String relative =
+            p.relative(entity.path, from: directory.path).replaceAll('\\', '/');
+        if (!keep.contains(relative)) {
+          stale.add(entity);
+        }
+      }
+    } catch (_) {
+      return;
+    }
+    for (final File file in stale) {
+      try {
+        await file.delete();
+      } catch (_) {
+        // 单个文件删不掉（被占用）留到下次恢复或清理时再处理。
+      }
+    }
+  }
+
+  /// 当前磁盘上处于锁定状态的笔记 id。
+  Future<Set<String>> _collectLockedIds() async {
+    final Set<String> ids = <String>{};
+    if (!await notesDir.exists()) {
+      return ids;
+    }
+    try {
+      await for (final entity
+          in notesDir.list(recursive: true, followLinks: false)) {
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.md')) {
+          continue;
+        }
+        try {
+          final Note? note = Note.decode(
+            await entity.readAsString(),
+            fallbackId: p.basenameWithoutExtension(entity.path),
+          );
+          if (note != null && note.locked) {
+            ids.add(note.id);
+          }
+        } catch (_) {
+          // 单条坏文件不影响其余笔记的锁定判定。
+        }
+      }
+    } catch (_) {
+      // 目录读不全时保守返回已读到的部分。
+    }
+    return ids;
   }
 
   Future<void> _deleteDirectoryQuietly(Directory directory) async {

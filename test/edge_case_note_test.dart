@@ -315,4 +315,26 @@ void main() {
       expect(Note.deriveLockedTitle('长' * 80).length, 61, reason: '60 字 + 省略号');
     });
   });
+
+  group('安全：id 作为路径片段', () {
+    test('带路径分隔符或 .. 的 id 整条拒绝', () {
+      for (final String id in <String>[
+        '../../evil',
+        'a/b',
+        'a\\b',
+        '..',
+        '.',
+      ]) {
+        final note = Note.decode('---\nid: $id\n---\n\n正文');
+        expect(note, isNull, reason: 'id「$id」不能用来拼文件路径');
+      }
+    });
+
+    test('普通文件名（含中文与点号）仍可解析', () {
+      final note = Note.decode('---\nid: 2026.11.22-note\n---\n\n正文');
+      expect(note?.id, '2026.11.22-note');
+      final chinese = Note.decode('---\nid: 手工改过的名字\n---\n\n正文');
+      expect(chinese?.id, '手工改过的名字');
+    });
+  });
 }
